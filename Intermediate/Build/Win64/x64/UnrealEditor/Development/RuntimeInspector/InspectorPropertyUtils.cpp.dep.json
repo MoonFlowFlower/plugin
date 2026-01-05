@@ -1,0 +1,14 @@
+{
+    "Version": "1.2",
+    "Data": {
+        "Source": "d:\\project\\game\\ue\\pluginmaker\\plugins\\runtimeinspector\\source\\runtimeinspector\\private\\inspectorpropertyutils.cpp",
+        "ProvidedModule": "",
+        "PCH": "d:\\project\\game\\ue\\pluginmaker\\intermediate\\build\\win64\\x64\\pluginmakereditor\\development\\unrealed\\sharedpch.unrealed.project.valapi.cpp20.h.pch",
+        "Includes": [
+            "d:\\project\\game\\ue\\pluginmaker\\plugins\\runtimeinspector\\intermediate\\build\\win64\\x64\\unrealeditor\\development\\runtimeinspector\\definitions.runtimeinspector.h",
+            "d:\\project\\game\\ue\\pluginmaker\\plugins\\runtimeinspector\\source\\runtimeinspector\\public\\inspectorpropertyutils.h"
+        ],
+        "ImportedModules": [],
+        "ImportedHeaderUnits": []
+    }
+}

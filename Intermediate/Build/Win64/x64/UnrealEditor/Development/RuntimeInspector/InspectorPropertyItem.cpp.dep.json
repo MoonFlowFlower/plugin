@@ -1,0 +1,29 @@
+{
+    "Version": "1.2",
+    "Data": {
+        "Source": "d:\\project\\game\\ue\\pluginmaker\\plugins\\runtimeinspector\\source\\runtimeinspector\\private\\inspectorpropertyitem.cpp",
+        "ProvidedModule": "",
+        "PCH": "d:\\project\\game\\ue\\pluginmaker\\intermediate\\build\\win64\\x64\\pluginmakereditor\\development\\unrealed\\sharedpch.unrealed.project.valapi.cpp20.h.pch",
+        "Includes": [
+            "d:\\project\\game\\ue\\pluginmaker\\plugins\\runtimeinspector\\intermediate\\build\\win64\\x64\\unrealeditor\\development\\runtimeinspector\\definitions.runtimeinspector.h",
+            "d:\\project\\game\\ue\\pluginmaker\\plugins\\runtimeinspector\\source\\runtimeinspector\\public\\inspectorpropertyitem.h",
+            "d:\\project\\game\\ue\\pluginmaker\\plugins\\runtimeinspector\\source\\runtimeinspector\\public\\inspectortypes.h",
+            "d:\\project\\game\\ue\\pluginmaker\\plugins\\runtimeinspector\\intermediate\\build\\win64\\unrealeditor\\inc\\runtimeinspector\\uht\\inspectortypes.generated.h",
+            "d:\\project\\game\\ue\\pluginmaker\\plugins\\runtimeinspector\\intermediate\\build\\win64\\unrealeditor\\inc\\runtimeinspector\\uht\\inspectorpropertyitem.generated.h",
+            "d:\\project\\game\\ue\\pluginmaker\\plugins\\runtimeinspector\\source\\runtimeinspector\\public\\inspectorpropertyutils.h",
+            "d:\\project\\game\\ue\\pluginmaker\\plugins\\runtimeinspector\\source\\runtimeinspector\\public\\inspectorworldsubsystem.h",
+            "d:\\project\\game\\ue\\pluginmaker\\plugins\\runtimeinspector\\source\\runtimeinspector\\public\\inspectordefines.h",
+            "d:\\project\\game\\ue\\pluginmaker\\plugins\\runtimeinspector\\source\\runtimeinspector\\public\\inspectorgroupitem.h",
+            "d:\\project\\game\\ue\\pluginmaker\\plugins\\runtimeinspector\\intermediate\\build\\win64\\unrealeditor\\inc\\runtimeinspector\\uht\\inspectorgroupitem.generated.h",
+            "d:\\project\\game\\ue\\pluginmaker\\plugins\\runtimeinspector\\source\\runtimeinspector\\public\\inspectormaterialparamitem.h",
+            "d:\\project\\game\\ue\\pluginmaker\\plugins\\runtimeinspector\\intermediate\\build\\win64\\unrealeditor\\inc\\runtimeinspector\\uht\\inspectormaterialparamitem.generated.h",
+            "d:\\project\\game\\ue\\pluginmaker\\plugins\\runtimeinspector\\intermediate\\build\\win64\\unrealeditor\\inc\\runtimeinspector\\uht\\inspectorworldsubsystem.generated.h",
+            "d:\\software\\unreal\\ue_5.5\\engine\\source\\runtime\\engine\\classes\\components\\lightcomponent.h",
+            "d:\\software\\unreal\\ue_5.5\\engine\\source\\runtime\\engine\\classes\\components\\lightcomponentbase.h",
+            "d:\\software\\unreal\\ue_5.5\\engine\\intermediate\\build\\win64\\unrealeditor\\inc\\engine\\uht\\lightcomponentbase.generated.h",
+            "d:\\software\\unreal\\ue_5.5\\engine\\intermediate\\build\\win64\\unrealeditor\\inc\\engine\\uht\\lightcomponent.generated.h"
+        ],
+        "ImportedModules": [],
+        "ImportedHeaderUnits": []
+    }
+}

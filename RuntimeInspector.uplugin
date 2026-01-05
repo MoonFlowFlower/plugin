@@ -1,0 +1,24 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "0.1.0",
+	"FriendlyName": "RuntimeInspector",
+	"Description": "In-game runtime actor/property inspector.",
+	"Category": "Other",
+	"CreatedBy": "Moonlight",
+	"CreatedByURL": "",
+	"DocsURL": "",
+	"MarketplaceURL": "",
+	"SupportURL": "",
+	"CanContainContent": true,
+	"IsBetaVersion": true,
+	"IsExperimentalVersion": false,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "RuntimeInspector",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	]
+}
