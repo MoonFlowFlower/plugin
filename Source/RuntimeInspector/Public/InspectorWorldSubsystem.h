@@ -173,6 +173,20 @@ public:
     UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Favorites")
     void ToggleFavoriteForItem(UInspectorPropertyItem* Item);
 
+    // ===== Snapshot (Modified / Export / Import) =====
+    UFUNCTION(BlueprintPure, Category = "RuntimeInspector|Snapshot")
+    int32 GetModifiedCount() const { return ModifiedValueByKey.Num(); }
+
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Snapshot")
+    void ClearModified();
+
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Snapshot")
+    bool ExportSnapshot(bool bOnlyModified, FString& OutFilePath, FString& OutError);
+
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Snapshot")
+    bool ImportSnapshot(const FString& InFilePath, FString& OutError);
+
+
 
 private:
     void TryBindInputs();
@@ -270,6 +284,21 @@ private:
 
         // 给 GetPropertyItemsForSelected 用：把当前 OutItems 里能 pin 的挑出来
         void InsertPinnedGroupIfNeeded(TArray<UObject*>& OutItems);
+
+        // ===== Snapshot state (Only Modified / Export / Import) =====
+        UPROPERTY(Transient)
+        TMap<FString, FString> BaselineValueByKey;
+
+        UPROPERTY(Transient)
+        TMap<FString, FString> ModifiedValueByKey;
+
+        FString GetSnapshotsDir() const;
+        FString MakePropertySnapshotKey(UObject* TargetObject, FName PropertyName) const;
+        FString MakeMaterialSnapshotKey(UPrimitiveComponent* Comp, int32 SlotIndex, EInspectorMatParamType Type, FName ParamName) const;
+
+        void TrackModifiedForKey(const FString& Key, const FString& OldText, const FString& NewText);
+        void UpdateModifiedStateFromCurrentValue(UObject* TargetObject, FName PropertyName);
+        void UpdateModifiedStateFromCurrentMaterial(UPrimitiveComponent* Comp, int32 SlotIndex, EInspectorChangeType ChangeType, FName ParamName);
 
 
 

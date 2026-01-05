@@ -11,6 +11,7 @@
 #include "Blueprint/UserWidget.h"
 
 #include "Engine/World.h"
+#include "EngineUtils.h"
 
 #include "Kismet/GameplayStatics.h"
 
@@ -934,6 +935,44 @@ void UInspectorWorldSubsystem::RecordChange(const FInspectorChange& Change)
 #if !UE_BUILD_SHIPPING
     if (bApplyingHistory) return;
 
+    // Track modified state (Only Modified/Snapshot)
+    switch (Change.ChangeType)
+    {
+    case EInspectorChangeType::Property:
+    {
+        const FString Key = MakePropertySnapshotKey(Change.Target.Get(), Change.PropertyName);
+        if (!Key.IsEmpty())
+        {
+            TrackModifiedForKey(Key, Change.OldValueText, Change.NewValueText);
+        }
+        break;
+    }
+    case EInspectorChangeType::MaterialScalar:
+    {
+        UPrimitiveComponent* Comp = Change.TargetComponent.Get();
+        const FString Key = MakeMaterialSnapshotKey(Comp, Change.MaterialIndex, EInspectorMatParamType::Scalar, Change.ParamName);
+        if (!Key.IsEmpty())
+        {
+            TrackModifiedForKey(Key, FString::SanitizeFloat(Change.OldScalar), FString::SanitizeFloat(Change.NewScalar));
+        }
+        break;
+    }
+    case EInspectorChangeType::MaterialVector:
+    {
+        UPrimitiveComponent* Comp = Change.TargetComponent.Get();
+        const FString Key = MakeMaterialSnapshotKey(Comp, Change.MaterialIndex, EInspectorMatParamType::Vector, Change.ParamName);
+        if (!Key.IsEmpty())
+        {
+            const FString OldText = FString::Printf(TEXT("%.3f,%.3f,%.3f,%.3f"), Change.OldVector.R, Change.OldVector.G, Change.OldVector.B, Change.OldVector.A);
+            const FString NewText = FString::Printf(TEXT("%.3f,%.3f,%.3f,%.3f"), Change.NewVector.R, Change.NewVector.G, Change.NewVector.B, Change.NewVector.A);
+            TrackModifiedForKey(Key, OldText, NewText);
+        }
+        break;
+    }
+    default:
+        break;
+    }
+
     UndoStack.Add(Change);
     RedoStack.Reset();
 
@@ -1002,6 +1041,16 @@ bool UInspectorWorldSubsystem::Undo()
     if (bOK)
     {
         RedoStack.Add(Change);
+
+        // Keep "Only Modified" state in sync after Undo
+        if (Change.ChangeType == EInspectorChangeType::Property)
+        {
+            UpdateModifiedStateFromCurrentValue(Change.Target.Get(), Change.PropertyName);
+        }
+        else if (Change.ChangeType == EInspectorChangeType::MaterialScalar || Change.ChangeType == EInspectorChangeType::MaterialVector)
+        {
+            UpdateModifiedStateFromCurrentMaterial(Change.TargetComponent.Get(), Change.MaterialIndex, Change.ChangeType, Change.ParamName);
+        }
         RefreshPanel(EInspectorRefreshReason::UndoRedo);
     }
     return bOK;
@@ -1072,6 +1121,26 @@ bool UInspectorWorldSubsystem::Redo()
     if (bOK)
     {
         UndoStack.Add(Change);
+
+        // Keep "Only Modified" state in sync after Redo
+        if (Change.ChangeType == EInspectorChangeType::Property)
+        {
+            UpdateModifiedStateFromCurrentValue(Change.Target.Get(), Change.PropertyName);
+        }
+        else if (Change.ChangeType == EInspectorChangeType::MaterialScalar || Change.ChangeType == EInspectorChangeType::MaterialVector)
+        {
+            UpdateModifiedStateFromCurrentMaterial(Change.TargetComponent.Get(), Change.MaterialIndex, Change.ChangeType, Change.ParamName);
+        }
+
+        // Keep "Only Modified" state in sync after Redo
+        if (Change.ChangeType == EInspectorChangeType::Property)
+        {
+            UpdateModifiedStateFromCurrentValue(Change.Target.Get(), Change.PropertyName);
+        }
+        else if (Change.ChangeType == EInspectorChangeType::MaterialScalar || Change.ChangeType == EInspectorChangeType::MaterialVector)
+        {
+            UpdateModifiedStateFromCurrentMaterial(Change.TargetComponent.Get(), Change.MaterialIndex, Change.ChangeType, Change.ParamName);
+        }
         RefreshPanel(EInspectorRefreshReason::UndoRedo);
     }
     return bOK;
@@ -1879,5 +1948,627 @@ void UInspectorWorldSubsystem::ToggleFavoriteForAnyItem(UObject* Item)
     }
 
     
+#endif
+}
+
+// =======================
+// Snapshot / Only-Modified (v0.2)
+// =======================
+
+void UInspectorWorldSubsystem::ClearModified()
+{
+#if !UE_BUILD_SHIPPING
+    BaselineValueByKey.Reset();
+    ModifiedValueByKey.Reset();
+#endif
+}
+
+FString UInspectorWorldSubsystem::GetSnapshotsDir() const
+{
+    return FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("RuntimeInspector"), TEXT("Snapshots"));
+}
+
+FString UInspectorWorldSubsystem::MakePropertySnapshotKey(UObject* TargetObject, FName PropertyName) const
+{
+#if !UE_BUILD_SHIPPING
+    if (!TargetObject || PropertyName.IsNone()) return FString();
+
+    FString ActorPath;
+    FString CompPath;
+
+    if (AActor* A = Cast<AActor>(TargetObject))
+    {
+        ActorPath = A->GetPathName();
+    }
+    else if (UActorComponent* C = Cast<UActorComponent>(TargetObject))
+    {
+        CompPath = C->GetPathName();
+        if (AActor* Owner = C->GetOwner())
+        {
+            ActorPath = Owner->GetPathName();
+        }
+    }
+    else
+    {
+        // Fallback: treat it as "component"-like object
+        CompPath = TargetObject->GetPathName();
+    }
+
+    const FString ClassPath = TargetObject->GetClass() ? TargetObject->GetClass()->GetPathName() : TEXT("");
+
+    // P|ActorPath|CompPath|ClassPath|PropName
+    return FString::Printf(TEXT("P|%s|%s|%s|%s"),
+        *ActorPath,
+        *CompPath,
+        *ClassPath,
+        *PropertyName.ToString());
+#else
+    return FString();
+#endif
+}
+
+FString UInspectorWorldSubsystem::MakeMaterialSnapshotKey(UPrimitiveComponent* Comp, int32 SlotIndex, EInspectorMatParamType Type, FName ParamName) const
+{
+#if !UE_BUILD_SHIPPING
+    if (!Comp || SlotIndex == INDEX_NONE || ParamName.IsNone()) return FString();
+
+    AActor* Owner = Comp->GetOwner();
+    const FString ActorPath = Owner ? Owner->GetPathName() : TEXT("");
+    const FString CompPath = Comp->GetPathName();
+
+    // M|ActorPath|CompPath|Slot|TypeInt|ParamName
+    return FString::Printf(TEXT("M|%s|%s|%d|%d|%s"),
+        *ActorPath,
+        *CompPath,
+        SlotIndex,
+        (int32)Type,
+        *ParamName.ToString());
+#else
+    return FString();
+#endif
+}
+
+void UInspectorWorldSubsystem::TrackModifiedForKey(const FString& Key, const FString& OldText, const FString& NewText)
+{
+#if !UE_BUILD_SHIPPING
+    if (Key.IsEmpty()) return;
+
+    if (!BaselineValueByKey.Contains(Key))
+    {
+        BaselineValueByKey.Add(Key, OldText);
+    }
+
+    const FString& Baseline = BaselineValueByKey[Key];
+
+    if (NewText == Baseline)
+    {
+        ModifiedValueByKey.Remove(Key);
+    }
+    else
+    {
+        ModifiedValueByKey.Add(Key, NewText);
+    }
+#endif
+}
+
+void UInspectorWorldSubsystem::UpdateModifiedStateFromCurrentValue(UObject* TargetObject, FName PropertyName)
+{
+#if !UE_BUILD_SHIPPING
+    if (!TargetObject || PropertyName.IsNone()) return;
+
+    const FString Key = MakePropertySnapshotKey(TargetObject, PropertyName);
+    if (Key.IsEmpty()) return;
+
+    FString Current;
+    if (!InspectorPropertyUtils::GetValueAsText(TargetObject, PropertyName, Current))
+    {
+        return;
+    }
+
+    if (!BaselineValueByKey.Contains(Key))
+    {
+        BaselineValueByKey.Add(Key, Current);
+        ModifiedValueByKey.Remove(Key);
+        return;
+    }
+
+    const FString& Baseline = BaselineValueByKey[Key];
+    if (Current == Baseline)
+    {
+        ModifiedValueByKey.Remove(Key);
+    }
+    else
+    {
+        ModifiedValueByKey.Add(Key, Current);
+    }
+#endif
+}
+
+static FString RI_GetMaterialParamValueText(UPrimitiveComponent* Comp, int32 SlotIndex, EInspectorChangeType ChangeType, FName ParamName)
+{
+    if (!Comp || SlotIndex == INDEX_NONE || ParamName.IsNone()) return TEXT("");
+
+    UMaterialInterface* Mat = Comp->GetMaterial(SlotIndex);
+    if (!Mat) return TEXT("");
+
+    if (UMaterialInstanceDynamic* MID = Cast<UMaterialInstanceDynamic>(Mat))
+    {
+        if (ChangeType == EInspectorChangeType::MaterialScalar)
+        {
+            const float V = MID->K2_GetScalarParameterValue(ParamName);
+            return FString::SanitizeFloat(V);
+        }
+        else
+        {
+            const FLinearColor C = MID->K2_GetVectorParameterValue(ParamName);
+            return FString::Printf(TEXT("%.3f,%.3f,%.3f,%.3f"), C.R, C.G, C.B, C.A);
+        }
+    }
+
+    const FMaterialParameterInfo Info(ParamName);
+    if (ChangeType == EInspectorChangeType::MaterialScalar)
+    {
+        float V = 0.f;
+        if (Mat->GetScalarParameterValue(Info, V))
+        {
+            return FString::SanitizeFloat(V);
+        }
+        return TEXT("");
+    }
+    else
+    {
+        FLinearColor C;
+        if (Mat->GetVectorParameterValue(Info, C))
+        {
+            return FString::Printf(TEXT("%.3f,%.3f,%.3f,%.3f"), C.R, C.G, C.B, C.A);
+        }
+        return TEXT("");
+    }
+}
+
+void UInspectorWorldSubsystem::UpdateModifiedStateFromCurrentMaterial(UPrimitiveComponent* Comp, int32 SlotIndex, EInspectorChangeType ChangeType, FName ParamName)
+{
+#if !UE_BUILD_SHIPPING
+    if (!Comp || SlotIndex == INDEX_NONE || ParamName.IsNone()) return;
+
+    const EInspectorMatParamType Type = (ChangeType == EInspectorChangeType::MaterialScalar)
+        ? EInspectorMatParamType::Scalar
+        : EInspectorMatParamType::Vector;
+
+    const FString Key = MakeMaterialSnapshotKey(Comp, SlotIndex, Type, ParamName);
+    if (Key.IsEmpty()) return;
+
+    const FString Current = RI_GetMaterialParamValueText(Comp, SlotIndex, ChangeType, ParamName);
+
+    if (!BaselineValueByKey.Contains(Key))
+    {
+        BaselineValueByKey.Add(Key, Current);
+        ModifiedValueByKey.Remove(Key);
+        return;
+    }
+
+    const FString& Baseline = BaselineValueByKey[Key];
+    if (Current == Baseline)
+    {
+        ModifiedValueByKey.Remove(Key);
+    }
+    else
+    {
+        ModifiedValueByKey.Add(Key, Current);
+    }
+#endif
+}
+
+bool UInspectorWorldSubsystem::ExportSnapshot(bool bOnlyModified, FString& OutFilePath, FString& OutError)
+{
+#if !UE_BUILD_SHIPPING
+    OutError.Reset();
+    OutFilePath.Reset();
+
+    AActor* ActorPtr = SelectedActor.Get();
+    if (!ActorPtr)
+    {
+        OutError = TEXT("No selected actor");
+        return false;
+    }
+
+    TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
+    Root->SetNumberField(TEXT("schemaVersion"), 1);
+    Root->SetStringField(TEXT("createdAtUtc"), FDateTime::UtcNow().ToIso8601());
+
+    if (UWorld* World = GetWorld())
+    {
+        Root->SetStringField(TEXT("map"), World->GetMapName());
+    }
+
+    Root->SetStringField(TEXT("selectedActorPath"), ActorPtr->GetPathName());
+
+    TArray<TSharedPtr<FJsonValue>> Entries;
+
+    auto AddPropertyEntry = [&](const FString& ActorPath, const FString& CompPath, const FString& ClassPath, const FString& PropName, const FString& ValueText)
+    {
+        TSharedPtr<FJsonObject> E = MakeShared<FJsonObject>();
+        E->SetStringField(TEXT("kind"), TEXT("property"));
+        E->SetStringField(TEXT("actorPath"), ActorPath);
+        E->SetStringField(TEXT("componentPath"), CompPath);
+        E->SetStringField(TEXT("class"), ClassPath);
+        E->SetStringField(TEXT("property"), PropName);
+        E->SetStringField(TEXT("value"), ValueText);
+        Entries.Add(MakeShared<FJsonValueObject>(E));
+    };
+
+    auto AddMaterialEntry = [&](const FString& ActorPath, const FString& CompPath, int32 SlotIndex, EInspectorMatParamType Type, const FString& ParamName, const FString& ValueText)
+    {
+        TSharedPtr<FJsonObject> E = MakeShared<FJsonObject>();
+        E->SetStringField(TEXT("kind"), (Type == EInspectorMatParamType::Scalar) ? TEXT("materialScalar") : TEXT("materialVector"));
+        E->SetStringField(TEXT("actorPath"), ActorPath);
+        E->SetStringField(TEXT("componentPath"), CompPath);
+        E->SetNumberField(TEXT("slot"), SlotIndex);
+        E->SetNumberField(TEXT("paramType"), (int32)Type);
+        E->SetStringField(TEXT("param"), ParamName);
+        E->SetStringField(TEXT("value"), ValueText);
+        Entries.Add(MakeShared<FJsonValueObject>(E));
+    };
+
+    if (bOnlyModified)
+    {
+        // Only export keys in ModifiedValueByKey
+        for (const TPair<FString, FString>& KV : ModifiedValueByKey)
+        {
+            const FString& Key = KV.Key;
+            const FString& Val = KV.Value;
+
+            if (Key.StartsWith(TEXT("P|")))
+            {
+                TArray<FString> Parts;
+                Key.ParseIntoArray(Parts, TEXT("|"), false);
+                // P|ActorPath|CompPath|ClassPath|PropName
+                if (Parts.Num() >= 5)
+                {
+                    AddPropertyEntry(Parts[1], Parts[2], Parts[3], Parts[4], Val);
+                }
+            }
+            else if (Key.StartsWith(TEXT("M|")))
+            {
+                TArray<FString> Parts;
+                Key.ParseIntoArray(Parts, TEXT("|"), false);
+                // M|ActorPath|CompPath|Slot|TypeInt|ParamName
+                if (Parts.Num() >= 6)
+                {
+                    const int32 SlotIndex = FCString::Atoi(*Parts[3]);
+                    const int32 TypeInt = FCString::Atoi(*Parts[4]);
+                    const EInspectorMatParamType Type = (EInspectorMatParamType)TypeInt;
+                    AddMaterialEntry(Parts[1], Parts[2], SlotIndex, Type, Parts[5], Val);
+                }
+            }
+        }
+    }
+    else
+    {
+        // Export Actor + whitelisted components (matching what the inspector can display by default).
+        auto ExportObjectProps = [&](UObject* Obj, const TSet<FName>* Whitelist)
+        {
+            if (!Obj) return;
+            UClass* Cls = Obj->GetClass();
+            if (!Cls) return;
+
+            const FString ActorPath = ActorPtr->GetPathName();
+            const FString CompPath = Obj->IsA(AActor::StaticClass()) ? TEXT("") : Obj->GetPathName();
+            const FString ClassPath = Cls->GetPathName();
+
+            for (TFieldIterator<FProperty> It(Cls, EFieldIteratorFlags::IncludeSuper); It; ++It)
+            {
+                FProperty* Prop = *It;
+                if (!Prop) continue;
+                if (Prop->HasAnyPropertyFlags(CPF_Deprecated)) continue;
+
+                const bool bVisible = Prop->HasAnyPropertyFlags(CPF_Edit) || Prop->HasAnyPropertyFlags(CPF_BlueprintVisible);
+                if (!bVisible) continue;
+
+                if (!IsSupportedByInspector(Prop)) continue;
+                if (Whitelist && !Whitelist->Contains(Prop->GetFName())) continue;
+
+                FString ValText;
+                if (!InspectorPropertyUtils::GetValueAsText(Obj, Prop->GetFName(), ValText))
+                {
+                    continue;
+                }
+                AddPropertyEntry(ActorPath, CompPath, ClassPath, Prop->GetName(), ValText);
+            }
+        };
+
+        ExportObjectProps(ActorPtr, nullptr);
+
+        TArray<UActorComponent*> Components;
+        ActorPtr->GetComponents(Components);
+
+        for (UActorComponent* Comp : Components)
+        {
+            if (!IsWhitelistedComponent(Comp)) continue;
+
+            const TSet<FName>* WL = GetWhitelistForWhitelistedComponent(Comp);
+            ExportObjectProps(Comp, WL);
+        }
+
+        // If user is in MaterialOnly view, also export that slot parameters.
+        if (PropertyViewMode == ERIPropertyViewMode::MaterialOnly)
+        {
+            UMeshComponent* MC = ViewMeshComp.Get();
+            if (MC && ViewMaterialSlot != INDEX_NONE)
+            {
+                UMaterialInterface* Mat = MC->GetMaterial(ViewMaterialSlot);
+                if (Mat)
+                {
+                    const FString APath = ActorPtr->GetPathName();
+                    const FString CPath = MC->GetPathName();
+
+                    TArray<FMaterialParameterInfo> Infos;
+                    TArray<FGuid> Ids;
+
+                    Infos.Reset(); Ids.Reset();
+                    Mat->GetAllScalarParameterInfo(Infos, Ids);
+                    for (const FMaterialParameterInfo& Info : Infos)
+                    {
+                        const FString V = RI_GetMaterialParamValueText(Cast<UPrimitiveComponent>(MC), ViewMaterialSlot, EInspectorChangeType::MaterialScalar, Info.Name);
+                        AddMaterialEntry(APath, CPath, ViewMaterialSlot, EInspectorMatParamType::Scalar, Info.Name.ToString(), V);
+                    }
+
+                    Infos.Reset(); Ids.Reset();
+                    Mat->GetAllVectorParameterInfo(Infos, Ids);
+                    for (const FMaterialParameterInfo& Info : Infos)
+                    {
+                        const FString V = RI_GetMaterialParamValueText(Cast<UPrimitiveComponent>(MC), ViewMaterialSlot, EInspectorChangeType::MaterialVector, Info.Name);
+                        AddMaterialEntry(APath, CPath, ViewMaterialSlot, EInspectorMatParamType::Vector, Info.Name.ToString(), V);
+                    }
+                }
+            }
+        }
+    }
+
+    Root->SetArrayField(TEXT("entries"), Entries);
+
+    FString OutJson;
+    const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&OutJson);
+    if (!FJsonSerializer::Serialize(Root.ToSharedRef(), Writer))
+    {
+        OutError = TEXT("JSON serialize failed");
+        return false;
+    }
+
+    const FString Dir = GetSnapshotsDir();
+    IFileManager::Get().MakeDirectory(*Dir, true);
+
+    const FString Timestamp = FDateTime::UtcNow().ToString(TEXT("%Y%m%d_%H%M%S"));
+    const FString FileName = FString::Printf(TEXT("Snapshot_%s_%s.json"), *ActorPtr->GetName(), *Timestamp);
+    OutFilePath = FPaths::Combine(Dir, FileName);
+
+    if (!FFileHelper::SaveStringToFile(OutJson, *OutFilePath))
+    {
+        OutError = TEXT("Save failed");
+        OutFilePath.Reset();
+        return false;
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("[RI] Snapshot exported: %s (entries=%d, onlyModified=%d)"), *OutFilePath, Entries.Num(), bOnlyModified ? 1 : 0);
+    return true;
+#else
+    OutError = TEXT("Not available in Shipping");
+    return false;
+#endif
+}
+
+bool UInspectorWorldSubsystem::ImportSnapshot(const FString& InFilePath, FString& OutError)
+{
+#if !UE_BUILD_SHIPPING
+    OutError.Reset();
+
+    FString Content;
+    if (!FFileHelper::LoadFileToString(Content, *InFilePath))
+    {
+        OutError = TEXT("Failed to read file");
+        return false;
+    }
+
+    TSharedPtr<FJsonObject> Root;
+    const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Content);
+    if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+    {
+        OutError = TEXT("Invalid JSON");
+        return false;
+    }
+
+    const TArray<TSharedPtr<FJsonValue>>* Entries = nullptr;
+    if (!Root->TryGetArrayField(TEXT("entries"), Entries) || !Entries)
+    {
+        OutError = TEXT("Missing entries[]");
+        return false;
+    }
+
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        OutError = TEXT("World invalid");
+        return false;
+    }
+
+    auto ResolveActor = [&](const FString& ActorPath) -> AActor*
+    {
+        if (ActorPath.IsEmpty()) return nullptr;
+
+        for (TActorIterator<AActor> It(World); It; ++It)
+        {
+            if (It->GetPathName() == ActorPath)
+            {
+                return *It;
+            }
+        }
+
+        FString FallbackName = ActorPath;
+        int32 Dot = INDEX_NONE;
+        if (ActorPath.FindLastChar(TEXT('.'), Dot))
+        {
+            FallbackName = ActorPath.Mid(Dot + 1);
+        }
+
+        for (TActorIterator<AActor> It(World); It; ++It)
+        {
+            if (It->GetName() == FallbackName)
+            {
+                return *It;
+            }
+        }
+        return nullptr;
+    };
+
+    auto ResolveComponent = [&](AActor* Owner, const FString& ComponentPath) -> UActorComponent*
+    {
+        if (!Owner || ComponentPath.IsEmpty()) return nullptr;
+
+        TArray<UActorComponent*> Comps;
+        Owner->GetComponents(Comps);
+
+        for (UActorComponent* C : Comps)
+        {
+            if (C && C->GetPathName() == ComponentPath)
+            {
+                return C;
+            }
+        }
+
+        FString FallbackName = ComponentPath;
+        int32 Dot = INDEX_NONE;
+        if (ComponentPath.FindLastChar(TEXT('.'), Dot))
+        {
+            FallbackName = ComponentPath.Mid(Dot + 1);
+        }
+
+        for (UActorComponent* C : Comps)
+        {
+            if (C && C->GetName() == FallbackName)
+            {
+                return C;
+            }
+        }
+        return nullptr;
+    };
+
+    // We treat the current state as baseline for keys we touch in this import.
+    // (That makes "Only Modified" show exactly what this snapshot changed.)
+
+    bool bAllOK = true;
+    FString CombinedErrors;
+
+    const bool bPrevApplying = bApplyingHistory;
+    bApplyingHistory = true;
+
+    for (const TSharedPtr<FJsonValue>& V : *Entries)
+    {
+        const TSharedPtr<FJsonObject> E = V.IsValid() ? V->AsObject() : nullptr;
+        if (!E.IsValid()) continue;
+
+        const FString Kind = E->GetStringField(TEXT("kind"));
+        const FString ActorPath = E->GetStringField(TEXT("actorPath"));
+        const FString CompPath = E->GetStringField(TEXT("componentPath"));
+
+        AActor* TargetActor = ResolveActor(ActorPath);
+        if (!TargetActor)
+        {
+            bAllOK = false;
+            CombinedErrors += FString::Printf(TEXT("\nActor not found: %s"), *ActorPath);
+            continue;
+        }
+
+        if (Kind == TEXT("property"))
+        {
+            const FString PropNameStr = E->GetStringField(TEXT("property"));
+            const FString ValueText = E->GetStringField(TEXT("value"));
+
+            UObject* TargetObj = TargetActor;
+            if (!CompPath.IsEmpty())
+            {
+                if (UActorComponent* C = ResolveComponent(TargetActor, CompPath))
+                {
+                    TargetObj = C;
+                }
+                else
+                {
+                    bAllOK = false;
+                    CombinedErrors += FString::Printf(TEXT("\nComponent not found: %s"), *CompPath);
+                    continue;
+                }
+            }
+
+            UInspectorPropertyItem* Temp = NewObject<UInspectorPropertyItem>(this);
+            Temp->Init(TargetObj, FName(*PropNameStr));
+
+            const FString OldText = Temp->GetValueText();
+            FString Err;
+            if (!Temp->ApplyFromText(ValueText, Err))
+            {
+                bAllOK = false;
+                CombinedErrors += FString::Printf(TEXT("\nApply failed: %s.%s (%s)"), *GetNameSafe(TargetObj), *PropNameStr, *Err);
+                continue;
+            }
+
+            const FString NewText = Temp->GetValueText();
+            const FString Key = MakePropertySnapshotKey(TargetObj, FName(*PropNameStr));
+            TrackModifiedForKey(Key, OldText, NewText);
+        }
+        else if (Kind == TEXT("materialScalar") || Kind == TEXT("materialVector"))
+        {
+            const int32 SlotIndex = (int32)E->GetNumberField(TEXT("slot"));
+            const FString ParamNameStr = E->GetStringField(TEXT("param"));
+            const FString ValueText = E->GetStringField(TEXT("value"));
+
+            if (CompPath.IsEmpty())
+            {
+                bAllOK = false;
+                CombinedErrors += FString::Printf(TEXT("\nMaterial entry missing componentPath (actor=%s)"), *ActorPath);
+                continue;
+            }
+
+            UActorComponent* C = ResolveComponent(TargetActor, CompPath);
+            UMeshComponent* MC = C ? Cast<UMeshComponent>(C) : nullptr;
+            if (!MC)
+            {
+                bAllOK = false;
+                CombinedErrors += FString::Printf(TEXT("\nMeshComponent not found: %s"), *CompPath);
+                continue;
+            }
+
+            const EInspectorMatParamType Type = (Kind == TEXT("materialScalar")) ? EInspectorMatParamType::Scalar : EInspectorMatParamType::Vector;
+
+            UInspectorMaterialParamItem* Temp = NewObject<UInspectorMaterialParamItem>(this);
+            Temp->Init(MC, SlotIndex, FName(*ParamNameStr), Type);
+
+            const FString OldText = Temp->GetValueText();
+            FString Err;
+            if (!Temp->ApplyFromText(ValueText, Err))
+            {
+                bAllOK = false;
+                CombinedErrors += FString::Printf(TEXT("\nApply failed: %s slot=%d %s (%s)"), *GetNameSafe(MC), SlotIndex, *ParamNameStr, *Err);
+                continue;
+            }
+
+            const FString NewText = Temp->GetValueText();
+            const FString Key = MakeMaterialSnapshotKey(Cast<UPrimitiveComponent>(MC), SlotIndex, Type, FName(*ParamNameStr));
+            TrackModifiedForKey(Key, OldText, NewText);
+        }
+    }
+
+    bApplyingHistory = bPrevApplying;
+
+    RefreshPanel(EInspectorRefreshReason::ValuesChanged);
+
+    if (!bAllOK)
+    {
+        OutError = CombinedErrors.TrimStartAndEnd();
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("[RI] Snapshot imported: %s (ok=%d)"), *InFilePath, bAllOK ? 1 : 0);
+    return bAllOK;
+#else
+    OutError = TEXT("Not available in Shipping");
+    return false;
 #endif
 }
