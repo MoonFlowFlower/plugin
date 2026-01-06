@@ -5,8 +5,13 @@
 #include "InspectorDefines.h"
 #include "InspectorPropertyItem.h"
 #include "InspectorMaterialParamItem.h"
+#include "InspectorSnapshotItem.h"
 
 
+#include "HAL/PlatformFilemanager.h"
+#include "HAL/PlatformApplicationMisc.h"
+
+#include "Dom/JsonObject.h"
 
 #include "Blueprint/UserWidget.h"
 
@@ -35,6 +40,7 @@
 
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+
 #include "Serialization/JsonWriter.h"
 #include "Serialization/JsonSerializer.h"
 
@@ -2571,4 +2577,195 @@ bool UInspectorWorldSubsystem::ImportSnapshot(const FString& InFilePath, FString
     OutError = TEXT("Not available in Shipping");
     return false;
 #endif
+}
+
+
+static FString RI_ExtractActorShortNameFromPath(const FString& ActorPath)
+{
+    // ActorPath 形如：
+    // /Game/...:PersistentLevel.BP_TestVarsActor_C_UAID_...
+    int32 DotIdx = INDEX_NONE;
+    if (ActorPath.FindLastChar(TEXT('.'), DotIdx))
+    {
+        FString Tail = ActorPath.Mid(DotIdx + 1); // BP_TestVarsActor_C_UAID_...
+        // 去掉 _C_... 之后的部分，尽量友好
+        int32 CIdx = INDEX_NONE;
+        if (Tail.FindChar(TEXT('_'), CIdx))
+        {
+            // 先尝试截到 _C
+            int32 CPos = Tail.Find(TEXT("_C"));
+            if (CPos != INDEX_NONE)
+            {
+                return Tail.Left(CPos); // BP_TestVarsActor
+            }
+        }
+        return Tail;
+    }
+    return ActorPath;
+}
+
+static int64 RI_ParseIsoUtcToUnixSeconds(const FString& IsoUtc)
+{
+    // "2026-01-05T22:08:26.576Z"
+    FDateTime DT;
+    if (FDateTime::ParseIso8601(*IsoUtc, DT))
+    {
+        return DT.ToUnixTimestamp();
+    }
+    return 0;
+}
+
+bool UInspectorWorldSubsystem::ReadSnapshotHeader(
+    const FString& FullPath,
+    FString& OutCreatedAtUtc,
+    FString& OutMap,
+    FString& OutSelectedActorPath,
+    int32& OutEntryCount) const
+{
+    FString JsonText;
+    if (!FFileHelper::LoadFileToString(JsonText, *FullPath))
+    {
+        return false;
+    }
+
+    TSharedPtr<FJsonObject> Root;
+    const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonText);
+    if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+    {
+        return false;
+    }
+
+    OutCreatedAtUtc = Root->GetStringField(TEXT("createdAtUtc"));
+    OutMap = Root->GetStringField(TEXT("map"));
+    OutSelectedActorPath = Root->GetStringField(TEXT("selectedActorPath"));
+
+    OutEntryCount = 0;
+    const TArray<TSharedPtr<FJsonValue>>* EntriesPtr = nullptr;
+    if (Root->TryGetArrayField(TEXT("entries"), EntriesPtr) && EntriesPtr)
+    {
+        OutEntryCount = EntriesPtr->Num();
+    }
+
+    return true;
+}
+
+void UInspectorWorldSubsystem::GetSnapshotList(TArray<UObject*>& OutItems) const
+{
+    OutItems.Reset();
+
+    const FString Dir = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("RuntimeInspector"), TEXT("Snapshots"));
+    IPlatformFile& PF = FPlatformFileManager::Get().GetPlatformFile();
+    if (!PF.DirectoryExists(*Dir))
+    {
+        return;
+    }
+
+    TArray<FString> Files;
+    PF.FindFilesRecursively(Files, *Dir, TEXT(".json"));
+
+    TArray<UInspectorSnapshotItem*> Temp;
+
+    for (const FString& FullPath : Files)
+    {
+        FString CreatedAtUtc, MapName, SelectedActorPath;
+        int32 EntryCount = 0;
+        if (!ReadSnapshotHeader(FullPath, CreatedAtUtc, MapName, SelectedActorPath, EntryCount))
+        {
+            continue;
+        }
+
+        UInspectorSnapshotItem* Item = NewObject<UInspectorSnapshotItem>(const_cast<UInspectorWorldSubsystem*>(this));
+        Item->FullPath = FullPath;
+        Item->FileName = FPaths::GetCleanFilename(FullPath);
+        Item->CreatedAtUtc = CreatedAtUtc;
+        Item->MapName = MapName;
+        Item->SelectedActorPath = SelectedActorPath;
+        Item->EntryCount = EntryCount;
+        Item->ActorShortName = RI_ExtractActorShortNameFromPath(SelectedActorPath);
+        Item->CreatedAtUnixSeconds = RI_ParseIsoUtcToUnixSeconds(CreatedAtUtc);
+
+        Temp.Add(Item);
+    }
+
+    // 最新的排前面
+    Temp.Sort([](const UInspectorSnapshotItem& A, const UInspectorSnapshotItem& B)
+        {
+            return A.CreatedAtUnixSeconds > B.CreatedAtUnixSeconds;
+        });
+
+    for (UInspectorSnapshotItem* It : Temp)
+    {
+        OutItems.Add(It);
+    }
+}
+
+FString UInspectorWorldSubsystem::GetSnapshotDirectory() const
+{
+    return FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("RuntimeInspector"), TEXT("Snapshots"));
+}
+
+static bool RI_IsUnderDir(const FString& FilePath, const FString& DirPath)
+{
+    FString NormFile = FPaths::ConvertRelativePathToFull(FilePath);
+    FString NormDir = FPaths::ConvertRelativePathToFull(DirPath);
+
+    FPaths::NormalizeFilename(NormFile);
+    FPaths::NormalizeFilename(NormDir);
+
+    // 保证目录末尾有 /
+    if (!NormDir.EndsWith(TEXT("/")))
+    {
+        NormDir += TEXT("/");
+    }
+
+    return NormFile.StartsWith(NormDir, ESearchCase::IgnoreCase);
+}
+
+void UInspectorWorldSubsystem::CopySnapshotPathToClipboard(const FString& FullPath)
+{
+    // 允许复制任何字符串（即使不是合法路径），但你的 UI 传的一般是完整路径
+    FPlatformApplicationMisc::ClipboardCopy(*FullPath);
+}
+
+bool UInspectorWorldSubsystem::DeleteSnapshotFile(const FString& FullPath, FString& OutError) const
+{
+    OutError.Reset();
+
+    if (FullPath.IsEmpty())
+    {
+        OutError = TEXT("Empty path.");
+        return false;
+    }
+
+    const FString SnapDir = GetSnapshotDirectory();
+
+    // 安全：只允许删除 Snapshots 目录下的文件，避免误删用户任意路径
+    if (!RI_IsUnderDir(FullPath, SnapDir))
+    {
+        OutError = FString::Printf(TEXT("Refuse to delete file outside snapshot dir: %s"), *SnapDir);
+        return false;
+    }
+
+    // 只允许删 .json（你当前就是 json）
+    if (!FullPath.EndsWith(TEXT(".json"), ESearchCase::IgnoreCase))
+    {
+        OutError = TEXT("Only .json files can be deleted.");
+        return false;
+    }
+
+    IPlatformFile& PF = FPlatformFileManager::Get().GetPlatformFile();
+
+    if (!PF.FileExists(*FullPath))
+    {
+        OutError = TEXT("File not found.");
+        return false;
+    }
+
+    if (!PF.DeleteFile(*FullPath))
+    {
+        OutError = TEXT("Delete failed (platform file returned false).");
+        return false;
+    }
+
+    return true;
 }

@@ -35,16 +35,17 @@ public class RuntimeInspector : ModuleRules
 				"SlateCore",
 				"Json", 
 				"JsonUtilities",
-                "InputCore"
-            }
-			);
+                "InputCore"        
+			}
+		);
 			
 		
 		PrivateDependencyModuleNames.AddRange(
 			new string[]
 			{
-			}
-			);
+                "ApplicationCore"
+            }
+		);
 		
 		
 		DynamicallyLoadedModuleNames.AddRange(

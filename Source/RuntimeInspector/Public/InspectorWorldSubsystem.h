@@ -340,6 +340,21 @@ private:
     private:
         FString LastPinnedSignature;
 
+    public:
+        UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Snapshot")
+        void GetSnapshotList(TArray<UObject*>& OutItems) const;
+
+        UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Snapshot")
+        bool ReadSnapshotHeader(const FString& FullPath, FString& OutCreatedAtUtc, FString& OutMap, FString& OutSelectedActorPath, int32& OutEntryCount) const;
+
+        UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Snapshot")
+        void CopySnapshotPathToClipboard(const FString& FullPath);
+
+        UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Snapshot")
+        bool DeleteSnapshotFile(const FString& FullPath, FString& OutError) const;
+
+        UFUNCTION(BlueprintPure, Category = "RuntimeInspector|Snapshot")
+        FString GetSnapshotDirectory() const;
 };
 
 
