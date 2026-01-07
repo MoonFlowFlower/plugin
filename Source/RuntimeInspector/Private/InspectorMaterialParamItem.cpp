@@ -6,6 +6,7 @@
 #include "Materials/MaterialInterface.h"
 #include "Materials/MaterialInstanceDynamic.h"
 
+
 static bool TryParseFloat(const FString& S, float& Out)
 {
     return LexTryParseString(Out, *S.TrimStartAndEnd());
@@ -104,6 +105,12 @@ bool UInspectorMaterialParamItem::ApplyFromText(const FString& NewText, FString&
     if (!Sub)
     {
         OutError = TEXT("Subsystem invalid (Outer is not UInspectorWorldSubsystem)");
+        return false;
+    }
+
+    if (!Sub->IsRIEnabled())
+    {
+        OutError = Sub->GetRIDisabledReason();
         return false;
     }
 

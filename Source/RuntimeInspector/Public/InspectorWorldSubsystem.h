@@ -94,6 +94,13 @@ class RUNTIMEINSPECTOR_API UInspectorWorldSubsystem : public UTickableWorldSubsy
     GENERATED_BODY()
 
 public:
+
+    UFUNCTION(BlueprintPure, Category = "RuntimeInspector|Security")
+    bool IsRIEnabled() const;
+
+    UFUNCTION(BlueprintPure, Category = "RuntimeInspector|Security")
+    FString GetRIDisabledReason() const;
+
     // UWorldSubsystem
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;

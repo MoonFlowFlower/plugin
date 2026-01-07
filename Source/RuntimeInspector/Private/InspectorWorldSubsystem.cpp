@@ -9,6 +9,7 @@
 
 
 #include "HAL/PlatformFilemanager.h"
+#include "HAL/IConsoleManager.h"
 #include "HAL/PlatformApplicationMisc.h"
 
 #include "Dom/JsonObject.h"
@@ -50,6 +51,34 @@
 // - Search mode: show matched supported props even if not in whitelist.
 // =======================
 
+
+static TAutoConsoleVariable<int32> CVarRIEnable(
+    TEXT("ri.Enable"),
+#if UE_BUILD_SHIPPING
+    0,
+#else
+    1,
+#endif
+    TEXT("Enable RuntimeInspector. 0=disabled, 1=enabled"),
+    ECVF_Default
+);
+bool UInspectorWorldSubsystem::IsRIEnabled() const
+{
+#if UE_BUILD_SHIPPING
+    return false;
+#else
+    return CVarRIEnable.GetValueOnGameThread() != 0;
+#endif
+}
+
+FString UInspectorWorldSubsystem::GetRIDisabledReason() const
+{
+#if UE_BUILD_SHIPPING
+    return TEXT("Not available in Shipping");
+#else
+    return TEXT("Disabled (ri.Enable=0)");
+#endif
+}
 static const TSet<FName>& GetStaticMeshComponentWhitelist()
 {
     static TSet<FName> Set;
@@ -132,6 +161,83 @@ static const TSet<FName>* GetWhitelistForWhitelistedComponent(const UActorCompon
     return nullptr;
 }
 
+
+
+static FString RI_ExtractTailAfterLastDot(const FString& PathLike)
+{
+    int32 Dot = INDEX_NONE;
+    if (PathLike.FindLastChar(TEXT('.'), Dot))
+    {
+        return PathLike.Mid(Dot + 1);
+    }
+    return PathLike;
+}
+
+// 从 Actor 实例名里提取 baseName：
+// BP_TestVarsActor_C_UAID_xxx -> BP_TestVarsActor
+// BP_TestVarsActor_C_0        -> BP_TestVarsActor
+static FString RI_ExtractActorBaseName(const FString& ActorInstanceName)
+{
+    FString N = ActorInstanceName;
+
+    // 常见：..._C_UAID_... 或 ..._C_0
+    int32 CPos = N.Find(TEXT("_C"));
+    if (CPos != INDEX_NONE)
+    {
+        return N.Left(CPos);
+    }
+
+    // 兜底：取第一个 '_' 前
+    int32 Under = INDEX_NONE;
+    if (N.FindChar(TEXT('_'), Under))
+    {
+        return N.Left(Under);
+    }
+
+    return N;
+}
+
+// 从 snapshot 里的 class 字符串提取 “类短名”：
+// "/RuntimeInspector/Test/BP_TestVarsActor.BP_TestVarsActor_C" -> "BP_TestVarsActor_C"
+static FString RI_ExtractShortClassName(const FString& ClassPath)
+{
+    FString Tail = RI_ExtractTailAfterLastDot(ClassPath);
+
+    // 有些路径可能是 /Script/.. 这种，取最后一个 '/' 后
+    int32 Slash = INDEX_NONE;
+    if (Tail.FindLastChar(TEXT('/'), Slash))
+    {
+        Tail = Tail.Mid(Slash + 1);
+    }
+    return Tail;
+}
+
+static bool RI_ClassMatches(AActor* Actor, const FString& SnapshotClassPathOrName)
+{
+    if (!Actor || SnapshotClassPathOrName.IsEmpty()) return false;
+
+    // 1) 完整路径名直接比（最稳，如果你导出存的是 GetClass()->GetPathName()）
+    const FString RuntimeClassPath = Actor->GetClass()->GetPathName();
+    if (RuntimeClassPath == SnapshotClassPathOrName)
+    {
+        return true;
+    }
+
+    // 2) 用短名比：BP_TestVarsActor_C
+    const FString WantShort = RI_ExtractShortClassName(SnapshotClassPathOrName);
+    if (Actor->GetClass()->GetName() == WantShort)
+    {
+        return true;
+    }
+
+    // 3) 兜底：有些 snapshot 存的是 "/Pkg/..BP_xxx_C"，runtime path 不同，但都包含 short
+    if (RuntimeClassPath.Contains(WantShort))
+    {
+        return true;
+    }
+
+    return false;
+}
 
 #if RUNTIME_INSPECTOR_ENABLED
 static const TCHAR* DefaultPanelPath = TEXT("/RuntimeInspector/UI/WBP_InspectorPanel.WBP_InspectorPanel_C");
@@ -2168,6 +2274,13 @@ void UInspectorWorldSubsystem::UpdateModifiedStateFromCurrentMaterial(UPrimitive
 bool UInspectorWorldSubsystem::ExportSnapshot(bool bOnlyModified, FString& OutFilePath, FString& OutError)
 {
 #if !UE_BUILD_SHIPPING
+
+    if (!IsRIEnabled())
+    {
+        OutError = TEXT("RuntimeInspector disabled (ri.Enable=0)");
+        return false;
+    }
+
     OutError.Reset();
     OutFilePath.Reset();
 
@@ -2179,7 +2292,11 @@ bool UInspectorWorldSubsystem::ExportSnapshot(bool bOnlyModified, FString& OutFi
     }
 
     TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
-    Root->SetNumberField(TEXT("schemaVersion"), 1);
+    const FString SelectedActorPath = ActorPtr->GetPathName();
+    const FString SelectedActorClass = ActorPtr->GetClass()->GetPathName();
+    const FString SelectedActorBaseName = RI_ExtractActorBaseName(ActorPtr->GetName());
+
+    Root->SetNumberField(TEXT("schemaVersion"), 2);
     Root->SetStringField(TEXT("createdAtUtc"), FDateTime::UtcNow().ToIso8601());
 
     if (UWorld* World = GetWorld())
@@ -2187,34 +2304,65 @@ bool UInspectorWorldSubsystem::ExportSnapshot(bool bOnlyModified, FString& OutFi
         Root->SetStringField(TEXT("map"), World->GetMapName());
     }
 
-    Root->SetStringField(TEXT("selectedActorPath"), ActorPtr->GetPathName());
+    Root->SetStringField(TEXT("selectedActorPath"), SelectedActorPath);
+
+    // v2 关键字段（用于抗 UAID 导入）
+    Root->SetStringField(TEXT("selectedActorClass"), SelectedActorClass);
+    Root->SetStringField(TEXT("selectedActorBaseName"), SelectedActorBaseName);
+
 
     TArray<TSharedPtr<FJsonValue>> Entries;
 
-    auto AddPropertyEntry = [&](const FString& ActorPath, const FString& CompPath, const FString& ClassPath, const FString& PropName, const FString& ValueText)
-    {
-        TSharedPtr<FJsonObject> E = MakeShared<FJsonObject>();
-        E->SetStringField(TEXT("kind"), TEXT("property"));
-        E->SetStringField(TEXT("actorPath"), ActorPath);
-        E->SetStringField(TEXT("componentPath"), CompPath);
-        E->SetStringField(TEXT("class"), ClassPath);
-        E->SetStringField(TEXT("property"), PropName);
-        E->SetStringField(TEXT("value"), ValueText);
-        Entries.Add(MakeShared<FJsonValueObject>(E));
-    };
+    auto AddPropertyEntry = [&](const FString& ActorPath,
+        const FString& CompPath,
+        const FString& ObjClassPath,
+        const FString& ActorClassPath,
+        const FString& ActorBaseName,
+        const FString& PropName,
+        const FString& ValueText)
+        {
+            TSharedPtr<FJsonObject> E = MakeShared<FJsonObject>();
+            E->SetStringField(TEXT("kind"), TEXT("property"));
+            E->SetStringField(TEXT("actorPath"), ActorPath);
+            E->SetStringField(TEXT("componentPath"), CompPath);
 
-    auto AddMaterialEntry = [&](const FString& ActorPath, const FString& CompPath, int32 SlotIndex, EInspectorMatParamType Type, const FString& ParamName, const FString& ValueText)
-    {
-        TSharedPtr<FJsonObject> E = MakeShared<FJsonObject>();
-        E->SetStringField(TEXT("kind"), (Type == EInspectorMatParamType::Scalar) ? TEXT("materialScalar") : TEXT("materialVector"));
-        E->SetStringField(TEXT("actorPath"), ActorPath);
-        E->SetStringField(TEXT("componentPath"), CompPath);
-        E->SetNumberField(TEXT("slot"), SlotIndex);
-        E->SetNumberField(TEXT("paramType"), (int32)Type);
-        E->SetStringField(TEXT("param"), ParamName);
-        E->SetStringField(TEXT("value"), ValueText);
-        Entries.Add(MakeShared<FJsonValueObject>(E));
-    };
+            // 保留旧字段：对象 class（Actor 或 Component 的 class）
+            E->SetStringField(TEXT("class"), ObjClassPath);
+
+            // v2 新字段：用于导入定位 Actor
+            E->SetStringField(TEXT("actorClass"), ActorClassPath);
+            E->SetStringField(TEXT("actorBaseName"), ActorBaseName);
+
+            E->SetStringField(TEXT("property"), PropName);
+            E->SetStringField(TEXT("value"), ValueText);
+            Entries.Add(MakeShared<FJsonValueObject>(E));
+        };
+
+    auto AddMaterialEntry = [&](const FString& ActorPath,
+        const FString& CompPath,
+        const FString& ActorClassPath,
+        const FString& ActorBaseName,
+        int32 SlotIndex,
+        EInspectorMatParamType Type,
+        const FString& ParamName,
+        const FString& ValueText)
+        {
+            TSharedPtr<FJsonObject> E = MakeShared<FJsonObject>();
+            E->SetStringField(TEXT("kind"), (Type == EInspectorMatParamType::Scalar) ? TEXT("materialScalar") : TEXT("materialVector"));
+            E->SetStringField(TEXT("actorPath"), ActorPath);
+            E->SetStringField(TEXT("componentPath"), CompPath);
+
+            // v2 新字段：用于导入定位 Actor
+            E->SetStringField(TEXT("actorClass"), ActorClassPath);
+            E->SetStringField(TEXT("actorBaseName"), ActorBaseName);
+
+            E->SetNumberField(TEXT("slot"), SlotIndex);
+            E->SetNumberField(TEXT("paramType"), (int32)Type);
+            E->SetStringField(TEXT("param"), ParamName);
+            E->SetStringField(TEXT("value"), ValueText);
+            Entries.Add(MakeShared<FJsonValueObject>(E));
+        };
+
 
     if (bOnlyModified)
     {
@@ -2231,7 +2379,10 @@ bool UInspectorWorldSubsystem::ExportSnapshot(bool bOnlyModified, FString& OutFi
                 // P|ActorPath|CompPath|ClassPath|PropName
                 if (Parts.Num() >= 5)
                 {
-                    AddPropertyEntry(Parts[1], Parts[2], Parts[3], Parts[4], Val);
+                    const FString ActorPath = Parts[1];
+                    const FString ActorBase = RI_ExtractActorBaseName(RI_ExtractTailAfterLastDot(ActorPath));
+                    AddPropertyEntry(Parts[1], Parts[2], Parts[3], SelectedActorClass, ActorBase, Parts[4], Val);
+
                 }
             }
             else if (Key.StartsWith(TEXT("M|")))
@@ -2241,10 +2392,16 @@ bool UInspectorWorldSubsystem::ExportSnapshot(bool bOnlyModified, FString& OutFi
                 // M|ActorPath|CompPath|Slot|TypeInt|ParamName
                 if (Parts.Num() >= 6)
                 {
+                 
+                    const FString ActorPath = Parts[1];
+                    const FString ActorBase = RI_ExtractActorBaseName(RI_ExtractTailAfterLastDot(ActorPath));
+
                     const int32 SlotIndex = FCString::Atoi(*Parts[3]);
                     const int32 TypeInt = FCString::Atoi(*Parts[4]);
                     const EInspectorMatParamType Type = (EInspectorMatParamType)TypeInt;
-                    AddMaterialEntry(Parts[1], Parts[2], SlotIndex, Type, Parts[5], Val);
+
+                    AddMaterialEntry(Parts[1], Parts[2], SelectedActorClass, ActorBase, SlotIndex, Type, Parts[5], Val);
+
                 }
             }
         }
@@ -2258,9 +2415,13 @@ bool UInspectorWorldSubsystem::ExportSnapshot(bool bOnlyModified, FString& OutFi
             UClass* Cls = Obj->GetClass();
             if (!Cls) return;
 
-            const FString ActorPath = ActorPtr->GetPathName();
+            /*const FString ActorPath = ActorPtr->GetPathName();
             const FString CompPath = Obj->IsA(AActor::StaticClass()) ? TEXT("") : Obj->GetPathName();
-            const FString ClassPath = Cls->GetPathName();
+            const FString ClassPath = Cls->GetPathName();*/
+
+            const FString ActorPath = SelectedActorPath;
+            const FString CompPath = Obj->IsA(AActor::StaticClass()) ? TEXT("") : Obj->GetPathName();
+            const FString ObjClassPath = Cls->GetPathName();
 
             for (TFieldIterator<FProperty> It(Cls, EFieldIteratorFlags::IncludeSuper); It; ++It)
             {
@@ -2279,7 +2440,7 @@ bool UInspectorWorldSubsystem::ExportSnapshot(bool bOnlyModified, FString& OutFi
                 {
                     continue;
                 }
-                AddPropertyEntry(ActorPath, CompPath, ClassPath, Prop->GetName(), ValText);
+                AddPropertyEntry(ActorPath, CompPath, ObjClassPath, SelectedActorClass, SelectedActorBaseName, Prop->GetName(), ValText);
             }
         };
 
@@ -2316,7 +2477,7 @@ bool UInspectorWorldSubsystem::ExportSnapshot(bool bOnlyModified, FString& OutFi
                     for (const FMaterialParameterInfo& Info : Infos)
                     {
                         const FString V = RI_GetMaterialParamValueText(Cast<UPrimitiveComponent>(MC), ViewMaterialSlot, EInspectorChangeType::MaterialScalar, Info.Name);
-                        AddMaterialEntry(APath, CPath, ViewMaterialSlot, EInspectorMatParamType::Scalar, Info.Name.ToString(), V);
+                        AddMaterialEntry(APath, CPath, SelectedActorClass, SelectedActorBaseName, ViewMaterialSlot, EInspectorMatParamType::Scalar, Info.Name.ToString(), V);
                     }
 
                     Infos.Reset(); Ids.Reset();
@@ -2324,7 +2485,7 @@ bool UInspectorWorldSubsystem::ExportSnapshot(bool bOnlyModified, FString& OutFi
                     for (const FMaterialParameterInfo& Info : Infos)
                     {
                         const FString V = RI_GetMaterialParamValueText(Cast<UPrimitiveComponent>(MC), ViewMaterialSlot, EInspectorChangeType::MaterialVector, Info.Name);
-                        AddMaterialEntry(APath, CPath, ViewMaterialSlot, EInspectorMatParamType::Vector, Info.Name.ToString(), V);
+                        AddMaterialEntry(APath, CPath, SelectedActorClass, SelectedActorBaseName, ViewMaterialSlot, EInspectorMatParamType::Vector, Info.Name.ToString(), V);
                     }
                 }
             }
@@ -2345,7 +2506,8 @@ bool UInspectorWorldSubsystem::ExportSnapshot(bool bOnlyModified, FString& OutFi
     IFileManager::Get().MakeDirectory(*Dir, true);
 
     const FString Timestamp = FDateTime::UtcNow().ToString(TEXT("%Y%m%d_%H%M%S"));
-    const FString FileName = FString::Printf(TEXT("Snapshot_%s_%s.json"), *ActorPtr->GetName(), *Timestamp);
+    const FString SafeActorName = SelectedActorBaseName; // 不带 UAID
+    const FString FileName = FString::Printf(TEXT("Snapshot_%s_%s.json"), *SafeActorName, *Timestamp);
     OutFilePath = FPaths::Combine(Dir, FileName);
 
     if (!FFileHelper::SaveStringToFile(OutJson, *OutFilePath))
@@ -2366,6 +2528,13 @@ bool UInspectorWorldSubsystem::ExportSnapshot(bool bOnlyModified, FString& OutFi
 bool UInspectorWorldSubsystem::ImportSnapshot(const FString& InFilePath, FString& OutError)
 {
 #if !UE_BUILD_SHIPPING
+
+    if (!IsRIEnabled())
+    {
+        OutError = TEXT("RuntimeInspector disabled (ri.Enable=0)");
+        return false;
+    }
+
     OutError.Reset();
 
     FString Content;
@@ -2397,32 +2566,73 @@ bool UInspectorWorldSubsystem::ImportSnapshot(const FString& InFilePath, FString
         return false;
     }
 
-    auto ResolveActor = [&](const FString& ActorPath) -> AActor*
+    const int32 SchemaVersion = Root->HasField(TEXT("schemaVersion")) ? (int32)Root->GetNumberField(TEXT("schemaVersion")) : 1;
+
+    auto ResolveActor = [&](const FString& ActorPath, const FString& ActorClass, const FString& ActorBaseName) -> AActor*
     {
-        if (ActorPath.IsEmpty()) return nullptr;
-
-        for (TActorIterator<AActor> It(World); It; ++It)
+        if (ActorPath.IsEmpty() && ActorBaseName.IsEmpty())
         {
-            if (It->GetPathName() == ActorPath)
+            return nullptr;
+        }
+
+        // 1) 精确 path
+        if (!ActorPath.IsEmpty())
+        {
+            for (TActorIterator<AActor> It(World); It; ++It)
             {
-                return *It;
+                if (It->GetPathName() == ActorPath)
+                {
+                    return *It;
+                }
             }
         }
 
-        FString FallbackName = ActorPath;
-        int32 Dot = INDEX_NONE;
-        if (ActorPath.FindLastChar(TEXT('.'), Dot))
+        // 2) v2：class + baseName（抗 UAID）
+        if (!ActorBaseName.IsEmpty())
         {
-            FallbackName = ActorPath.Mid(Dot + 1);
-        }
+            AActor* Best = nullptr;
 
-        for (TActorIterator<AActor> It(World); It; ++It)
-        {
-            if (It->GetName() == FallbackName)
+            for (TActorIterator<AActor> It(World); It; ++It)
             {
-                return *It;
+                AActor* A = *It;
+                if (!A) continue;
+
+                const FString ThisBase = RI_ExtractActorBaseName(A->GetName());
+                if (ThisBase != ActorBaseName)
+                {
+                    continue;
+                }
+
+                // 如果有 class，就要求 class match；没有 class 也允许
+                if (!ActorClass.IsEmpty() && !RI_ClassMatches(A, ActorClass))
+                {
+                    continue;
+                }
+
+                Best = A;
+                break;
+            }
+
+            if (Best)
+            {
+                return Best;
             }
         }
+
+        // 3) 兜底：你原来的 FallbackName（path 最后段）
+        if (!ActorPath.IsEmpty())
+        {
+            FString FallbackName = RI_ExtractTailAfterLastDot(ActorPath);
+
+            for (TActorIterator<AActor> It(World); It; ++It)
+            {
+                if (It->GetName() == FallbackName)
+                {
+                    return *It;
+                }
+            }
+        }
+
         return nullptr;
     };
 
@@ -2472,17 +2682,52 @@ bool UInspectorWorldSubsystem::ImportSnapshot(const FString& InFilePath, FString
         const TSharedPtr<FJsonObject> E = V.IsValid() ? V->AsObject() : nullptr;
         if (!E.IsValid()) continue;
 
+        /*const FString Kind = E->GetStringField(TEXT("kind"));
+        const FString ActorPath = E->GetStringField(TEXT("actorPath"));
+        const FString CompPath = E->GetStringField(TEXT("componentPath"));
+
+        AActor* TargetActor = ResolveActor(ActorPath);*/
+
         const FString Kind = E->GetStringField(TEXT("kind"));
         const FString ActorPath = E->GetStringField(TEXT("actorPath"));
         const FString CompPath = E->GetStringField(TEXT("componentPath"));
 
-        AActor* TargetActor = ResolveActor(ActorPath);
+        // v2 新字段（兼容 v1：没有就从旧字段推）
+        FString ActorClass;
+        FString ActorBaseName;
+
+        if (SchemaVersion >= 2)
+        {
+            E->TryGetStringField(TEXT("actorClass"), ActorClass);
+            E->TryGetStringField(TEXT("actorBaseName"), ActorBaseName);
+        }
+
+        // v1 兼容：用 entry 的 "class" + actorPath 尾巴推 baseName
+        if (ActorClass.IsEmpty())
+        {
+            if (SchemaVersion >= 2)
+            {
+                E->TryGetStringField(TEXT("actorClass"), ActorClass);
+            }
+            //E->TryGetStringField(TEXT("class"), ActorClass);
+        }
+        if (ActorBaseName.IsEmpty())
+        {
+            const FString FallbackInstName = RI_ExtractTailAfterLastDot(ActorPath);
+            ActorBaseName = RI_ExtractActorBaseName(FallbackInstName);
+        }
+
+        AActor* TargetActor = ResolveActor(ActorPath, ActorClass, ActorBaseName);
         if (!TargetActor)
         {
             bAllOK = false;
-            CombinedErrors += FString::Printf(TEXT("\nActor not found: %s"), *ActorPath);
+            CombinedErrors += FString::Printf(
+                TEXT("\nActor not found: path=%s base=%s class=%s"),
+                *ActorPath, *ActorBaseName, *ActorClass
+            );
             continue;
         }
+      
 
         if (Kind == TEXT("property"))
         {
@@ -2730,6 +2975,12 @@ void UInspectorWorldSubsystem::CopySnapshotPathToClipboard(const FString& FullPa
 bool UInspectorWorldSubsystem::DeleteSnapshotFile(const FString& FullPath, FString& OutError) const
 {
     OutError.Reset();
+
+    if (!IsRIEnabled())
+    {
+        OutError = TEXT("RuntimeInspector disabled (ri.Enable=0)");
+        return false;
+    }
 
     if (FullPath.IsEmpty())
     {
