@@ -58,6 +58,15 @@ enum class EInspectorRefreshReason : uint8
     TargetInvalid UMETA(DisplayName = "Target Invalid"),      // Actor ʧЧ
 };
 
+UENUM(BlueprintType)
+enum class ERIToastType : uint8
+{
+    Info,
+    Success,
+    Warning,
+    Error
+};
+
 
 USTRUCT()
 struct FInspectorChange
@@ -87,11 +96,20 @@ struct FInspectorChange
 };
 
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FRIOnToast, ERIToastType, Type, const FString&, Message, float, Duration);
 
 UCLASS()
 class RUNTIMEINSPECTOR_API UInspectorWorldSubsystem : public UTickableWorldSubsystem
 {
     GENERATED_BODY()
+
+	// Toast ֪ͨ
+public:
+    UPROPERTY(BlueprintAssignable, Category = "RuntimeInspector|Toast")
+    FRIOnToast OnToast;
+
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Toast")
+    void PushToast(ERIToastType Type, const FString& Message, float Duration = 1.5f);
 
 public:
 
@@ -358,7 +376,7 @@ private:
         void CopySnapshotPathToClipboard(const FString& FullPath);
 
         UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Snapshot")
-        bool DeleteSnapshotFile(const FString& FullPath, FString& OutError) const;
+        bool DeleteSnapshotFile(const FString& FullPath, FString& OutError);
 
         UFUNCTION(BlueprintPure, Category = "RuntimeInspector|Snapshot")
         FString GetSnapshotDirectory() const;

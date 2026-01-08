@@ -161,7 +161,14 @@ static const TSet<FName>* GetWhitelistForWhitelistedComponent(const UActorCompon
     return nullptr;
 }
 
-
+void UInspectorWorldSubsystem::PushToast(ERIToastType Type, const FString& Message, float Duration)
+{
+#if !UE_BUILD_SHIPPING
+    // 也可以在这里统一写 UE_LOG，方便排查
+	UE_LOG(LogTemp, Log, TEXT("RI Toast: [%d] %s"), (int32)Type, *Message);
+    OnToast.Broadcast(Type, Message, Duration);
+#endif
+}
 
 static FString RI_ExtractTailAfterLastDot(const FString& PathLike)
 {
@@ -2514,13 +2521,15 @@ bool UInspectorWorldSubsystem::ExportSnapshot(bool bOnlyModified, FString& OutFi
     {
         OutError = TEXT("Save failed");
         OutFilePath.Reset();
+        PushToast(ERIToastType::Error, OutError, 3.0f);
         return false;
     }
-
+    PushToast(ERIToastType::Success, FString::Printf(TEXT("Exported (%d changes)"), Entries.Num()), 1.5f);
     UE_LOG(LogTemp, Log, TEXT("[RI] Snapshot exported: %s (entries=%d, onlyModified=%d)"), *OutFilePath, Entries.Num(), bOnlyModified ? 1 : 0);
     return true;
 #else
     OutError = TEXT("Not available in Shipping");
+    PushToast(ERIToastType::Error, OutError, 3.0f);
     return false;
 #endif
 }
@@ -2814,8 +2823,12 @@ bool UInspectorWorldSubsystem::ImportSnapshot(const FString& InFilePath, FString
     if (!bAllOK)
     {
         OutError = CombinedErrors.TrimStartAndEnd();
+        PushToast(ERIToastType::Warning, TEXT("Imported with errors (see log)"), 3.0f);
     }
-
+    else {
+        PushToast(ERIToastType::Success, TEXT("Imported"), 1.5f);
+    }
+    
     UE_LOG(LogTemp, Log, TEXT("[RI] Snapshot imported: %s (ok=%d)"), *InFilePath, bAllOK ? 1 : 0);
     return bAllOK;
 #else
@@ -2968,11 +2981,21 @@ static bool RI_IsUnderDir(const FString& FilePath, const FString& DirPath)
 
 void UInspectorWorldSubsystem::CopySnapshotPathToClipboard(const FString& FullPath)
 {
-    // 允许复制任何字符串（即使不是合法路径），但你的 UI 传的一般是完整路径
-    FPlatformApplicationMisc::ClipboardCopy(*FullPath);
+    
+
+    if (FullPath.IsEmpty())
+    {
+        PushToast(ERIToastType::Warning, TEXT("Empty path"), 2.0f);
+    }
+    else
+    {
+        // 允许复制任何字符串（即使不是合法路径），但你的 UI 传的一般是完整路径
+        FPlatformApplicationMisc::ClipboardCopy(*FullPath);
+        PushToast(ERIToastType::Info, TEXT("Copied"), 1.0f);
+    }
 }
 
-bool UInspectorWorldSubsystem::DeleteSnapshotFile(const FString& FullPath, FString& OutError) const
+bool UInspectorWorldSubsystem::DeleteSnapshotFile(const FString& FullPath, FString& OutError) 
 {
     OutError.Reset();
 
@@ -3017,6 +3040,6 @@ bool UInspectorWorldSubsystem::DeleteSnapshotFile(const FString& FullPath, FStri
         OutError = TEXT("Delete failed (platform file returned false).");
         return false;
     }
-
+    PushToast(ERIToastType::Success, FString::Printf(TEXT("Deleted")), 1.2f);
     return true;
 }
