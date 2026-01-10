@@ -27,6 +27,23 @@ namespace InspectorPropertyUtils
         return true;
     }
 
+    bool CanSetFromText(UObject* Obj, const FProperty* Prop)
+    {
+        if (!Prop) return false;
+
+        // 必须可编辑
+        if (!Prop->HasAnyPropertyFlags(CPF_Edit)) return false;
+
+        //// 不能是只读
+        //if (Prop->HasAnyPropertyFlags(CPF_EditConst)) return false;
+
+        //// 不能禁止实例编辑
+        //if (Prop->HasAnyPropertyFlags(CPF_DisableEditOnInstance)) return false;
+
+        return true;
+    }
+
+
     static bool IsSupportedReadableProperty(const FProperty* Prop)
     {
         if (!Prop) return false;

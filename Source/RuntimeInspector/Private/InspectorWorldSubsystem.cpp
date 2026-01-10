@@ -2326,25 +2326,33 @@ bool UInspectorWorldSubsystem::ExportSnapshot(bool bOnlyModified, FString& OutFi
         const FString& ActorClassPath,
         const FString& ActorBaseName,
         const FString& PropName,
-        const FString& ValueText)
+        const FString& ValueText,
+        bool bHasValueInt=false,
+        int64 ValueInt=0)
         {
             TSharedPtr<FJsonObject> E = MakeShared<FJsonObject>();
             E->SetStringField(TEXT("kind"), TEXT("property"));
             E->SetStringField(TEXT("actorPath"), ActorPath);
             E->SetStringField(TEXT("componentPath"), CompPath);
 
-            // 保留旧字段：对象 class（Actor 或 Component 的 class）
+            // 旧字段：对象 class（Actor 或 Component）
             E->SetStringField(TEXT("class"), ObjClassPath);
 
-            // v2 新字段：用于导入定位 Actor
+            // v2：用于定位 actor
             E->SetStringField(TEXT("actorClass"), ActorClassPath);
             E->SetStringField(TEXT("actorBaseName"), ActorBaseName);
 
             E->SetStringField(TEXT("property"), PropName);
             E->SetStringField(TEXT("value"), ValueText);
+
+            // ✅ 新增：Enum/ByteEnum 等，用整数更稳
+            if (bHasValueInt)
+            {
+                E->SetNumberField(TEXT("valueInt"), (double)ValueInt);
+            }
+
             Entries.Add(MakeShared<FJsonValueObject>(E));
         };
-
     auto AddMaterialEntry = [&](const FString& ActorPath,
         const FString& CompPath,
         const FString& ActorClassPath,
@@ -2388,6 +2396,7 @@ bool UInspectorWorldSubsystem::ExportSnapshot(bool bOnlyModified, FString& OutFi
                 {
                     const FString ActorPath = Parts[1];
                     const FString ActorBase = RI_ExtractActorBaseName(RI_ExtractTailAfterLastDot(ActorPath));
+
                     AddPropertyEntry(Parts[1], Parts[2], Parts[3], SelectedActorClass, ActorBase, Parts[4], Val);
 
                 }
@@ -2442,12 +2451,47 @@ bool UInspectorWorldSubsystem::ExportSnapshot(bool bOnlyModified, FString& OutFi
                 if (!IsSupportedByInspector(Prop)) continue;
                 if (Whitelist && !Whitelist->Contains(Prop->GetFName())) continue;
 
+               
+
                 FString ValText;
                 if (!InspectorPropertyUtils::GetValueAsText(Obj, Prop->GetFName(), ValText))
                 {
                     continue;
                 }
-                AddPropertyEntry(ActorPath, CompPath, ObjClassPath, SelectedActorClass, SelectedActorBaseName, Prop->GetName(), ValText);
+
+                bool bHasValueInt = false;
+                int64 ValueInt = 0;
+
+                // 1) FEnumProperty（强类型 enum class / enum）
+                if (const FEnumProperty* EnumProp = CastField<FEnumProperty>(Prop))
+                {
+                    if (const FNumericProperty* Under = EnumProp->GetUnderlyingProperty())
+                    {
+                        const void* ValuePtr = Prop->ContainerPtrToValuePtr<void>(Obj);
+                        ValueInt = Under->GetSignedIntPropertyValue(ValuePtr);
+                        bHasValueInt = true;
+                    }
+                }
+                // 2) Byte + Enum（UE 很多 enum 是这种）
+                else if (const FByteProperty* ByteProp = CastField<FByteProperty>(Prop))
+                {
+                    if (ByteProp->Enum)
+                    {
+                        ValueInt = (int64)ByteProp->GetPropertyValue_InContainer(Obj);
+                        bHasValueInt = true;
+                    }
+                }
+
+                if (!InspectorPropertyUtils::CanSetFromText(Obj, Prop)) 
+                {
+                    continue;
+                }
+
+                AddPropertyEntry(ActorPath, CompPath, ObjClassPath, SelectedActorClass, SelectedActorBaseName,
+                    Prop->GetName(), ValText,
+                    bHasValueInt, ValueInt);
+
+                //AddPropertyEntry(ActorPath, CompPath, ObjClassPath, SelectedActorClass, SelectedActorBaseName, Prop->GetName(), ValText);
             }
         };
 
@@ -2533,7 +2577,50 @@ bool UInspectorWorldSubsystem::ExportSnapshot(bool bOnlyModified, FString& OutFi
     return false;
 #endif
 }
+static bool RI_SetEnumPropertyFromInt(UObject* TargetObj, const FName PropName, int64 ValueInt, FString& OutError)
+{
+    OutError.Reset();
+    if (!TargetObj)
+    {
+        OutError = TEXT("TargetObj null");
+        return false;
+    }
 
+    FProperty* Prop = TargetObj->GetClass()->FindPropertyByName(PropName);
+    if (!Prop)
+    {
+        OutError = TEXT("Property not found");
+        return false;
+    }
+
+    void* ValuePtr = Prop->ContainerPtrToValuePtr<void>(TargetObj);
+
+    // 1) FEnumProperty
+    if (FEnumProperty* EnumProp = CastField<FEnumProperty>(Prop))
+    {
+        FNumericProperty* Under = EnumProp->GetUnderlyingProperty();
+        if (!Under)
+        {
+            OutError = TEXT("Enum underlying property missing");
+            return false;
+        }
+        Under->SetIntPropertyValue(ValuePtr, ValueInt);
+        return true;
+    }
+
+    // 2) Byte + Enum
+    if (FByteProperty* ByteProp = CastField<FByteProperty>(Prop))
+    {
+        if (ByteProp->Enum)
+        {
+            ByteProp->SetPropertyValue(ValuePtr, (uint8)ValueInt);
+            return true;
+        }
+    }
+
+    OutError = TEXT("Not an enum property");
+    return false;
+}
 bool UInspectorWorldSubsystem::ImportSnapshot(const FString& InFilePath, FString& OutError)
 {
 #if !UE_BUILD_SHIPPING
@@ -2545,6 +2632,12 @@ bool UInspectorWorldSubsystem::ImportSnapshot(const FString& InFilePath, FString
     }
 
     OutError.Reset();
+
+    int32 AppliedCount = 0;
+    int32 SkippedCount = 0;
+    int32 HardFailCount = 0;
+    FString CombinedWarnings;
+    FString CombinedHardErrors;
 
     FString Content;
     if (!FFileHelper::LoadFileToString(Content, *InFilePath))
@@ -2736,7 +2829,22 @@ bool UInspectorWorldSubsystem::ImportSnapshot(const FString& InFilePath, FString
             );
             continue;
         }
-      
+        // --- Remap componentPath prefix if actor was resolved by fallback (UAID changed) ---
+        auto RemapComponentPath = [&](const FString& InCompPath, const FString& OldActorPath, AActor* NewActor) -> FString
+            {
+                if (InCompPath.IsEmpty() || OldActorPath.IsEmpty() || !NewActor) return InCompPath;
+
+                // 只有在 "旧ActorPath..." 这种情况下才做替换
+                if (InCompPath.StartsWith(OldActorPath, ESearchCase::CaseSensitive))
+                {
+                    const FString NewActorPath = NewActor->GetPathName();
+                    return NewActorPath + InCompPath.Mid(OldActorPath.Len());
+                }
+                return InCompPath;
+            };
+
+        const FString EffectiveCompPath = RemapComponentPath(CompPath, ActorPath, TargetActor);
+
 
         if (Kind == TEXT("property"))
         {
@@ -2744,16 +2852,16 @@ bool UInspectorWorldSubsystem::ImportSnapshot(const FString& InFilePath, FString
             const FString ValueText = E->GetStringField(TEXT("value"));
 
             UObject* TargetObj = TargetActor;
-            if (!CompPath.IsEmpty())
+            if (!EffectiveCompPath.IsEmpty())
             {
-                if (UActorComponent* C = ResolveComponent(TargetActor, CompPath))
+                if (UActorComponent* C = ResolveComponent(TargetActor, EffectiveCompPath))
                 {
                     TargetObj = C;
                 }
                 else
                 {
                     bAllOK = false;
-                    CombinedErrors += FString::Printf(TEXT("\nComponent not found: %s"), *CompPath);
+                    CombinedErrors += FString::Printf(TEXT("\nComponent not found: %s"), *EffectiveCompPath);
                     continue;
                 }
             }
@@ -2761,13 +2869,55 @@ bool UInspectorWorldSubsystem::ImportSnapshot(const FString& InFilePath, FString
             UInspectorPropertyItem* Temp = NewObject<UInspectorPropertyItem>(this);
             Temp->Init(TargetObj, FName(*PropNameStr));
 
+  
             const FString OldText = Temp->GetValueText();
+
+            double ValueIntD = 0.0;
+            const bool bHasValueInt = E->TryGetNumberField(TEXT("valueInt"), ValueIntD);
+            const int64 ValueInt = (int64)ValueIntD;
+
             FString Err;
-            if (!Temp->ApplyFromText(ValueText, Err))
+
+            // ✅ 优先：如果有 valueInt，就尝试写 enum
+            bool bApplied = false;
+            if (bHasValueInt)
             {
-                bAllOK = false;
-                CombinedErrors += FString::Printf(TEXT("\nApply failed: %s.%s (%s)"), *GetNameSafe(TargetObj), *PropNameStr, *Err);
-                continue;
+                if (RI_SetEnumPropertyFromInt(TargetObj, FName(*PropNameStr), ValueInt, Err))
+                {
+                    bApplied = true;
+                }
+                else
+                {
+                    // 如果不是 enum，或者写失败，就继续走文本（Err 会被覆盖）
+                    Err.Reset();
+                }
+            }
+
+            if (!bApplied)
+            {
+                if (!Temp->ApplyFromText(ValueText, Err))
+                {
+                    // ✅ 软错误：不可写/不支持 -> 跳过但不算失败
+                    if (Err.Contains(TEXT("not editable"), ESearchCase::IgnoreCase) ||
+                        Err.Contains(TEXT("not supported"), ESearchCase::IgnoreCase))
+                    {
+                        SkippedCount++;
+                        CombinedWarnings += FString::Printf(
+                            TEXT("\nSkipped: obj=%s prop=%s val=%s (%s)"),
+                            *GetNameSafe(TargetObj), *PropNameStr, *ValueText, *Err);
+                        continue;
+                    }
+
+                    // ✅ 硬错误：解析失败/其它真正异常 -> 记为失败
+                    HardFailCount++;
+                    CombinedHardErrors += FString::Printf(
+                        TEXT("\nApply failed: obj=%s prop=%s val=%s (%s)"),
+                        *GetNameSafe(TargetObj), *PropNameStr, *ValueText, *Err);
+                    continue;
+                }
+
+                // 成功
+                AppliedCount++;
             }
 
             const FString NewText = Temp->GetValueText();
@@ -2780,19 +2930,19 @@ bool UInspectorWorldSubsystem::ImportSnapshot(const FString& InFilePath, FString
             const FString ParamNameStr = E->GetStringField(TEXT("param"));
             const FString ValueText = E->GetStringField(TEXT("value"));
 
-            if (CompPath.IsEmpty())
+            if (EffectiveCompPath.IsEmpty())
             {
                 bAllOK = false;
                 CombinedErrors += FString::Printf(TEXT("\nMaterial entry missing componentPath (actor=%s)"), *ActorPath);
                 continue;
             }
 
-            UActorComponent* C = ResolveComponent(TargetActor, CompPath);
+            UActorComponent* C = ResolveComponent(TargetActor, EffectiveCompPath);
             UMeshComponent* MC = C ? Cast<UMeshComponent>(C) : nullptr;
             if (!MC)
             {
                 bAllOK = false;
-                CombinedErrors += FString::Printf(TEXT("\nMeshComponent not found: %s"), *CompPath);
+                CombinedErrors += FString::Printf(TEXT("\nMeshComponent not found: %s"), *EffectiveCompPath);
                 continue;
             }
 
@@ -2803,13 +2953,38 @@ bool UInspectorWorldSubsystem::ImportSnapshot(const FString& InFilePath, FString
 
             const FString OldText = Temp->GetValueText();
             FString Err;
+            //if (!Temp->ApplyFromText(ValueText, Err))
+            //{
+            //    bAllOK = false;
+            //    CombinedErrors += FString::Printf(
+            //        TEXT("\nApply failed: kind=%s comp=%s slot=%d param=%s val=%s (%s)"),
+            //        *Kind, *GetNameSafe(MC), SlotIndex, *ParamNameStr, *ValueText, *Err);
+            //    //CombinedErrors += FString::Printf(TEXT("\nApply failed: %s slot=%d %s (%s)"), *GetNameSafe(MC), SlotIndex, *ParamNameStr, *Err);
+            //    continue;
+            //}
             if (!Temp->ApplyFromText(ValueText, Err))
             {
-                bAllOK = false;
-                CombinedErrors += FString::Printf(TEXT("\nApply failed: %s slot=%d %s (%s)"), *GetNameSafe(MC), SlotIndex, *ParamNameStr, *Err);
+                // ✅ 软错误：不可写/不支持 -> 跳过但不算失败
+                if (Err.Contains(TEXT("not editable"), ESearchCase::IgnoreCase) ||
+                    Err.Contains(TEXT("not supported"), ESearchCase::IgnoreCase))
+                {
+                    SkippedCount++;
+                    CombinedWarnings += FString::Printf(
+                        TEXT("\nSkipped: obj=%s prop=%s val=%s (%s)"),
+                        *GetNameSafe(MC), *ParamNameStr, *ValueText, *Err);
+                    continue;
+                }
+
+                // ✅ 硬错误：解析失败/其它真正异常 -> 记为失败
+                HardFailCount++;
+                CombinedHardErrors += FString::Printf(
+                    TEXT("\nApply failed: obj=%s prop=%s val=%s (%s)"),
+                    *GetNameSafe(MC), *ParamNameStr, *ValueText, *Err);
                 continue;
             }
 
+            // 成功
+            AppliedCount++;
             const FString NewText = Temp->GetValueText();
             const FString Key = MakeMaterialSnapshotKey(Cast<UPrimitiveComponent>(MC), SlotIndex, Type, FName(*ParamNameStr));
             TrackModifiedForKey(Key, OldText, NewText);
@@ -2820,17 +2995,47 @@ bool UInspectorWorldSubsystem::ImportSnapshot(const FString& InFilePath, FString
 
     RefreshPanel(EInspectorRefreshReason::ValuesChanged);
 
-    if (!bAllOK)
+
+    const bool bOK = (HardFailCount == 0);
+
+    if (bAllOK)
     {
-        OutError = CombinedErrors.TrimStartAndEnd();
-        PushToast(ERIToastType::Warning, TEXT("Imported with errors (see log)"), 3.0f);
+        if (SkippedCount > 0)
+        {
+            OutError = CombinedWarnings.TrimStartAndEnd();
+            PushToast(ERIToastType::Warning,
+                FString::Printf(TEXT("Imported (%d applied, %d skipped — see log)"), AppliedCount, SkippedCount),
+                3.0f);
+            UE_LOG(LogTemp, Warning, TEXT("[RI] Import warnings:\n%s"), *OutError);
+        }
+        else
+        {
+            PushToast(ERIToastType::Success,
+                FString::Printf(TEXT("Imported (%d applied)"), AppliedCount),
+                1.5f);
+        }
     }
-    else {
-        PushToast(ERIToastType::Success, TEXT("Imported"), 1.5f);
+    else
+    {
+        OutError = (CombinedHardErrors + TEXT("\n") + CombinedWarnings).TrimStartAndEnd();
+        PushToast(ERIToastType::Error, TEXT("Import failed (see log)"), 3.5f);
+        UE_LOG(LogTemp, Warning, TEXT("[RI] Import errors:\n%s"), *OutError);
     }
-    
-    UE_LOG(LogTemp, Log, TEXT("[RI] Snapshot imported: %s (ok=%d)"), *InFilePath, bAllOK ? 1 : 0);
+
     return bAllOK;
+
+    //if (!bAllOK)
+    //{
+    //    OutError = CombinedErrors.TrimStartAndEnd();
+    //    PushToast(ERIToastType::Warning, TEXT("Imported with errors (see log)"), 3.0f);
+    //    UE_LOG(LogTemp, Warning, TEXT("[RI] Import errors:\n%s"), *OutError);   // ✅新增
+    //}
+    //else {
+    //    PushToast(ERIToastType::Success, TEXT("Imported"), 1.5f);
+    //}
+    //
+    //UE_LOG(LogTemp, Log, TEXT("[RI] Snapshot imported: %s (ok=%d)"), *InFilePath, bAllOK ? 1 : 0);
+    //return bAllOK;
 #else
     OutError = TEXT("Not available in Shipping");
     return false;
