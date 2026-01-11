@@ -468,7 +468,7 @@ void UInspectorWorldSubsystem::SetSelectedActor(AActor* NewActor)
 
     // 切换选中对象：清理 ItemPool，避免旧 Items 残留
     ClearItemPool();
-
+    ClearModified();
     RefreshPanel(EInspectorRefreshReason::StructureChanged);
 #endif
 }
@@ -3247,4 +3247,413 @@ bool UInspectorWorldSubsystem::DeleteSnapshotFile(const FString& FullPath, FStri
     }
     PushToast(ERIToastType::Success, FString::Printf(TEXT("Deleted")), 1.2f);
     return true;
+}
+
+bool UInspectorWorldSubsystem::IsPropertyItemModified(const UInspectorPropertyItem* Item) const
+{
+#if !UE_BUILD_SHIPPING
+    if (!Item) return false;
+    UObject* Obj = Item->GetTargetObject();
+    const FName PropName = Item->GetPropertyFName();
+    const FString Key = MakePropertySnapshotKey(Obj, PropName);
+    return !Key.IsEmpty() && ModifiedValueByKey.Contains(Key);
+#else
+    return false;
+#endif
+}
+
+bool UInspectorWorldSubsystem::IsMaterialItemModified(const UInspectorMaterialParamItem* Item) const
+{
+#if !UE_BUILD_SHIPPING
+    if (!Item) return false;
+
+    UMeshComponent* MeshComp = Item->GetMeshComponent(); // 你如果没暴露 Getter，就在 MaterialParamItem 里加 BlueprintPure/C++ Getter
+    if (!MeshComp) return false;
+
+    UPrimitiveComponent* Prim = Cast<UPrimitiveComponent>(MeshComp);
+    if (!Prim) return false;
+
+    const FString Key = MakeMaterialSnapshotKey(
+        Prim,
+        Item->GetSlotIndex(),
+        Item->GetParamType(),
+        Item->GetParamName()
+    );
+
+    return !Key.IsEmpty() && ModifiedValueByKey.Contains(Key);
+#else
+    return false;
+#endif
+}
+
+void UInspectorWorldSubsystem::GetPropertyItemsForSelectedEx(const FString& SearchText, bool bOnlyModified, TArray<UObject*>& OutItems)
+{
+#if !UE_BUILD_SHIPPING
+    if (!bOnlyModified)
+    {
+        GetPropertyItemsForSelected(SearchText, OutItems);
+        return;
+    }
+
+    OutItems.Reset();
+
+    AActor* ActorPtr = SelectedActor.Get();
+    if (!ActorPtr) return;
+
+    const bool bSearchMode = !SearchText.IsEmpty();
+
+    auto FilterOnlyModified = [&](TArray<UObject*>& Items)
+        {
+            Items.RemoveAll([&](UObject* Obj)
+                {
+                    if (UInspectorPropertyItem* P = Cast<UInspectorPropertyItem>(Obj))
+                    {
+                        return !IsPropertyItemModified(P);
+                    }
+                    if (UInspectorMaterialParamItem* M = Cast<UInspectorMaterialParamItem>(Obj))
+                    {
+                        return !IsMaterialItemModified(M);
+                    }
+                    return false; // GroupItem 不在这里删（组的删留由外层决定）
+                });
+        };
+
+    // ----- MaterialOnly：右侧显示当前选中的 Material Slot 参数 -----
+    if (PropertyViewMode == ERIPropertyViewMode::MaterialOnly)
+    {
+        UMeshComponent* MC = ViewMeshComp.Get();
+        if (!MC || ViewMaterialSlot == INDEX_NONE)
+        {
+            return;
+        }
+
+        UStaticMeshComponent* SMC = Cast<UStaticMeshComponent>(MC);
+        if (!SMC) return;
+
+        UMaterialInterface* Mat = SMC->GetMaterial(ViewMaterialSlot);
+        if (!Mat) return;
+
+        TArray<UObject*> TempItems;
+
+        TArray<FMaterialParameterInfo> Infos;
+        TArray<FGuid> Ids;
+
+        // Scalar
+        Infos.Reset(); Ids.Reset();
+        Mat->GetAllScalarParameterInfo(Infos, Ids);
+        for (const FMaterialParameterInfo& Info : Infos)
+        {
+            UInspectorMaterialParamItem* Item = GetOrCreateMaterialItem(SMC, ViewMaterialSlot, Info.Name, EInspectorMatParamType::Scalar);
+
+            if (!bOnlyModified || IsMaterialItemModified(Item))
+            {
+                TempItems.Add(Item);
+            }
+        }
+
+        // Vector
+        Infos.Reset(); Ids.Reset();
+        Mat->GetAllVectorParameterInfo(Infos, Ids);
+        for (const FMaterialParameterInfo& Info : Infos)
+        {
+            UInspectorMaterialParamItem* Item = GetOrCreateMaterialItem(SMC, ViewMaterialSlot, Info.Name, EInspectorMatParamType::Vector);
+
+            if (!bOnlyModified || IsMaterialItemModified(Item))
+            {
+                TempItems.Add(Item);
+            }
+        }
+
+        // OnlyModify 且没有任何 modified 参数 → 列表保持空（这是正确的）
+        if (bOnlyModified && TempItems.Num() == 0)
+        {
+            return;
+        }
+
+        // 标题组（可选，但体验更好）
+        UInspectorGroupItem* MatOnlyGroup = GetOrCreateGroupItem(TEXT("VIEW_MATERIAL_ONLY"));
+        MatOnlyGroup->Kind = EInspectorGroupKind::Component;
+        MatOnlyGroup->DisplayName = TEXT("Material Parameters");
+        MatOnlyGroup->StableKey = TEXT("VIEW_MATERIAL_ONLY");
+        MatOnlyGroup->bExpanded = true;
+
+        OutItems.Add(MatOnlyGroup);
+        OutItems.Append(TempItems);
+
+        return; // ✅ 必须 return，阻止走 Actor/Components 分支
+    }
+    // ===== 1) Actor 组 =====
+    {
+        TArray<UObject*> ActorProps;
+        AppendPropertiesForObject(ActorPtr, SearchText, ActorProps, TEXT(""), bSearchMode);
+        FilterOnlyModified(ActorProps);
+
+        if (ActorProps.Num() > 0)
+        {
+            UInspectorGroupItem* ActorGroup = GetOrCreateGroupItem(TEXT("ROOT_ACTOR"));
+            ActorGroup->Kind = EInspectorGroupKind::RootActor;
+            ActorGroup->DisplayName = TEXT("Actor");
+            ActorGroup->StableKey = TEXT("ROOT_ACTOR");
+            ActorGroup->bExpanded = bSearchMode ? true : GetGroupExpanded(ActorGroup->StableKey, true);
+
+            OutItems.Add(ActorGroup);
+            if (ActorGroup->bExpanded)
+            {
+                OutItems.Append(ActorProps);
+            }
+        }
+    }
+
+    // ===== 2) Components 根组 + 每个组件组 =====
+    {
+        TArray<UActorComponent*> Components;
+        ActorPtr->GetComponents(Components);
+
+        // 先构建每个组件的 “是否有 modified 属性”
+        struct FCompBlock { UInspectorGroupItem* Group = nullptr; TArray<UObject*> Props; };
+        TArray<FCompBlock> Blocks;
+
+        for (UActorComponent* Comp : Components)
+        {
+            if (!IsWhitelistedComponent(Comp)) continue;
+
+            TArray<UObject*> Props;
+            AppendPropertiesForObject(Comp, SearchText, Props, Comp->GetName(), bSearchMode);
+            FilterOnlyModified(Props);
+
+            if (Props.Num() == 0) continue; // 这个组件没有 modified，直接跳过
+
+            const FString CompKey = MakeComponentKey(ActorPtr, Comp);
+            UInspectorGroupItem* CompGroup = GetOrCreateGroupItem(CompKey);
+            CompGroup->Kind = EInspectorGroupKind::Component;
+            CompGroup->TargetObject = Comp;
+            CompGroup->DisplayName = FString::Printf(TEXT("%s (%s)"), *Comp->GetName(), *Comp->GetClass()->GetName());
+            CompGroup->StableKey = CompKey;
+            CompGroup->bExpanded = bSearchMode ? true : GetGroupExpanded(CompKey, false);
+
+            FCompBlock B;
+            B.Group = CompGroup;
+            B.Props = MoveTemp(Props);
+            Blocks.Add(MoveTemp(B));
+        }
+
+        if (Blocks.Num() == 0)
+        {
+            return; // components 没有任何 modified
+        }
+
+        UInspectorGroupItem* CompRoot = GetOrCreateGroupItem(TEXT("ROOT_COMPONENTS"));
+        CompRoot->Kind = EInspectorGroupKind::RootComponents;
+        CompRoot->DisplayName = TEXT("Components");
+        CompRoot->StableKey = TEXT("ROOT_COMPONENTS");
+        CompRoot->bExpanded = bSearchMode ? true : GetGroupExpanded(CompRoot->StableKey, true);
+
+        OutItems.Add(CompRoot);
+        if (!CompRoot->bExpanded) return;
+
+        for (FCompBlock& B : Blocks)
+        {
+            OutItems.Add(B.Group);
+            if (B.Group->bExpanded)
+            {
+                OutItems.Append(B.Props);
+            }
+        }
+    }
+#endif
+}
+
+bool UInspectorWorldSubsystem::RevertModifiedForSelection(int32& OutRevertedCount, int32& OutFailedCount, FString& OutError)
+{
+#if !UE_BUILD_SHIPPING
+    OutRevertedCount = 0;
+    OutFailedCount = 0;
+    OutError.Reset();
+
+    AActor* ActorPtr = SelectedActor.Get();
+    if (!ActorPtr)
+    {
+        OutError = TEXT("No selected actor");
+        return false;
+    }
+
+    const FString SelectedActorPath = ActorPtr->GetPathName();
+
+    // 先拷贝 keys（遍历过程中 ModifiedValueByKey 会被移除）
+    TArray<FString> Keys;
+    ModifiedValueByKey.GetKeys(Keys);
+
+    // 用于 ResolveComponent（复用你 import 那套也行，这里给一个轻量版）
+    auto ResolveComponent = [&](AActor* Owner, const FString& ComponentPath) -> UActorComponent*
+        {
+            if (!Owner || ComponentPath.IsEmpty()) return nullptr;
+
+            TArray<UActorComponent*> Comps;
+            Owner->GetComponents(Comps);
+
+            for (UActorComponent* C : Comps)
+            {
+                if (C && C->GetPathName() == ComponentPath)
+                {
+                    return C;
+                }
+            }
+
+            // fallback by name
+            FString Tail = ComponentPath;
+            int32 Dot = INDEX_NONE;
+            if (ComponentPath.FindLastChar(TEXT('.'), Dot))
+            {
+                Tail = ComponentPath.Mid(Dot + 1);
+            }
+
+            for (UActorComponent* C : Comps)
+            {
+                if (C && C->GetName() == Tail)
+                {
+                    return C;
+                }
+            }
+            return nullptr;
+        };
+
+    FString CombinedErr;
+
+    for (const FString& Key : Keys)
+    {
+        // 只处理当前选中的 actor
+        if (Key.StartsWith(TEXT("P|")))
+        {
+            TArray<FString> Parts;
+            Key.ParseIntoArray(Parts, TEXT("|"), false);
+            // P|ActorPath|CompPath|ClassPath|PropName
+            if (Parts.Num() < 5) continue;
+
+            const FString& ActorPath = Parts[1];
+            const FString& CompPath = Parts[2];
+            const FString& PropName = Parts[4];
+
+            if (ActorPath != SelectedActorPath) continue;
+
+            const FString* BaselinePtr = BaselineValueByKey.Find(Key);
+            if (!BaselinePtr) continue;
+
+            UObject* TargetObj = ActorPtr;
+            if (!CompPath.IsEmpty())
+            {
+                if (UActorComponent* C = ResolveComponent(ActorPtr, CompPath))
+                {
+                    TargetObj = C;
+                }
+                else
+                {
+                    OutFailedCount++;
+                    CombinedErr += FString::Printf(TEXT("\nComponent not found: %s"), *CompPath);
+                    continue;
+                }
+            }
+
+            UInspectorPropertyItem* Temp = NewObject<UInspectorPropertyItem>(this);
+            Temp->Init(TargetObj, FName(*PropName));
+
+            FString Err;
+            if (Temp->ApplyFromText(*BaselinePtr, Err))
+            {
+                OutRevertedCount++;
+            }
+            else
+            {
+                OutFailedCount++;
+                CombinedErr += FString::Printf(TEXT("\nRevert failed: %s.%s (%s)"),
+                    *GetNameSafe(TargetObj), *PropName, *Err);
+            }
+        }
+        else if (Key.StartsWith(TEXT("M|")))
+        {
+            TArray<FString> Parts;
+            Key.ParseIntoArray(Parts, TEXT("|"), false);
+            // M|ActorPath|CompPath|Slot|TypeInt|ParamName
+            if (Parts.Num() < 6) continue;
+
+            const FString& ActorPath = Parts[1];
+            const FString& CompPath = Parts[2];
+            const int32 SlotIndex = FCString::Atoi(*Parts[3]);
+            const EInspectorMatParamType Type = (EInspectorMatParamType)FCString::Atoi(*Parts[4]);
+            const FString& ParamName = Parts[5];
+
+            if (ActorPath != SelectedActorPath) continue;
+
+            const FString* BaselinePtr = BaselineValueByKey.Find(Key);
+            if (!BaselinePtr) continue;
+
+            UActorComponent* C = ResolveComponent(ActorPtr, CompPath);
+            UMeshComponent* MC = C ? Cast<UMeshComponent>(C) : nullptr;
+            if (!MC)
+            {
+                OutFailedCount++;
+                CombinedErr += FString::Printf(TEXT("\nMeshComponent not found: %s"), *CompPath);
+                continue;
+            }
+
+            UInspectorMaterialParamItem* Temp = NewObject<UInspectorMaterialParamItem>(this);
+            Temp->Init(MC, SlotIndex, FName(*ParamName), Type);
+
+            FString Err;
+            if (Temp->ApplyFromText(*BaselinePtr, Err))
+            {
+                OutRevertedCount++;
+            }
+            else
+            {
+                OutFailedCount++;
+                CombinedErr += FString::Printf(TEXT("\nRevert failed: %s slot=%d %s (%s)"),
+                    *GetNameSafe(MC), SlotIndex, *ParamName, *Err);
+            }
+        }
+    }
+
+    // 统一刷新一次（避免每条都刷）
+    RefreshPanel(EInspectorRefreshReason::ValuesChanged);
+
+    if (!CombinedErr.IsEmpty())
+    {
+        OutError = CombinedErr.TrimStartAndEnd();
+    }
+
+    // Toast（如果你有 PushToast）
+    if (OutFailedCount == 0)
+    {
+        PushToast(ERIToastType::Success, FString::Printf(TEXT("Reset %d changes"), OutRevertedCount), 1.5f);
+    }
+    else
+    {
+        PushToast(ERIToastType::Warning, FString::Printf(TEXT("Reset %d, failed %d (see log)"), OutRevertedCount, OutFailedCount), 3.0f);
+    }
+
+    return OutRevertedCount > 0 && OutFailedCount == 0;
+
+#else
+    OutError = TEXT("Not available in Shipping");
+    return false;
+#endif
+}
+bool UInspectorWorldSubsystem::IsItemModified(UObject* Item) const
+{
+#if !UE_BUILD_SHIPPING
+    if (!Item) return false;
+
+    if (const UInspectorPropertyItem* P = Cast<UInspectorPropertyItem>(Item))
+    {
+        return IsPropertyItemModified(P);
+    }
+    if (const UInspectorMaterialParamItem* M = Cast<UInspectorMaterialParamItem>(Item))
+    {
+        return IsMaterialItemModified(M);
+    }
+
+    // GroupItem / 其它：不算“modified item”
+    return false;
+#else
+    return false;
+#endif
 }

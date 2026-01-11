@@ -102,6 +102,13 @@ UCLASS()
 class RUNTIMEINSPECTOR_API UInspectorWorldSubsystem : public UTickableWorldSubsystem
 {
     GENERATED_BODY()
+	//Modified 相关
+public:
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Modified")
+    bool RevertModifiedForSelection(int32& OutRevertedCount, int32& OutFailedCount, FString& OutError);
+
+    UFUNCTION(BlueprintPure, Category = "RuntimeInspector|Snapshot")
+    bool IsItemModified(UObject* Item) const;
 
 	// Toast 通知
 public:
@@ -211,6 +218,14 @@ public:
     UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Snapshot")
     bool ImportSnapshot(const FString& InFilePath, FString& OutError);
 
+    UFUNCTION(BlueprintPure, Category = "RuntimeInspector|Snapshot")
+    bool IsPropertyItemModified(const UInspectorPropertyItem* Item) const;
+
+    UFUNCTION(BlueprintPure, Category = "RuntimeInspector|Snapshot")
+    bool IsMaterialItemModified(const UInspectorMaterialParamItem* Item) const;
+
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector")
+    void GetPropertyItemsForSelectedEx(const FString& SearchText, bool bOnlyModified, TArray<UObject*>& OutItems);
 
 
 private:
