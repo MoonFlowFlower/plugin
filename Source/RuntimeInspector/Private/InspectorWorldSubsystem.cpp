@@ -466,6 +466,13 @@ void UInspectorWorldSubsystem::SetSelectedActor(AActor* NewActor)
     SelectedActor = NewActor;
     BindToSelectedActor(NewActor);
 
+#if !UE_BUILD_SHIPPING
+    // Selection changed: exit MaterialOnly view to avoid stale component/slot pointers.
+    PropertyViewMode = ERIPropertyViewMode::Full;
+    ViewMeshComp = nullptr;
+    ViewMaterialSlot = INDEX_NONE;
+#endif
+
     // 切换选中对象：清理 ItemPool，避免旧 Items 残留
     ClearItemPool();
     ClearModified();
@@ -2082,6 +2089,11 @@ void UInspectorWorldSubsystem::ClearModified()
 #endif
 }
 
+void UInspectorWorldSubsystem::ClearLastImportReport()
+{
+    LastImportReport = FRIImportReport();
+}
+
 FString UInspectorWorldSubsystem::GetSnapshotsDir() const
 {
     return FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("RuntimeInspector"), TEXT("Snapshots"));
@@ -2625,10 +2637,21 @@ bool UInspectorWorldSubsystem::ImportSnapshot(const FString& InFilePath, FString
 {
 #if !UE_BUILD_SHIPPING
 
+    // Reset cached report
+    LastImportReport = FRIImportReport();
+
+    auto SetEarlyFail = [&](const FString& Msg) -> bool
+    {
+        OutError = Msg;
+        LastImportReport.bSuccess = false;
+        LastImportReport.Summary = Msg;
+        LastImportReport.Details = Msg;
+        return false;
+    };
+
     if (!IsRIEnabled())
     {
-        OutError = TEXT("RuntimeInspector disabled (ri.Enable=0)");
-        return false;
+        return SetEarlyFail(TEXT("RuntimeInspector disabled (ri.Enable=0)"));
     }
 
     OutError.Reset();
@@ -2642,30 +2665,26 @@ bool UInspectorWorldSubsystem::ImportSnapshot(const FString& InFilePath, FString
     FString Content;
     if (!FFileHelper::LoadFileToString(Content, *InFilePath))
     {
-        OutError = TEXT("Failed to read file");
-        return false;
+        return SetEarlyFail(TEXT("Failed to read file"));
     }
 
     TSharedPtr<FJsonObject> Root;
     const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Content);
     if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
     {
-        OutError = TEXT("Invalid JSON");
-        return false;
+        return SetEarlyFail(TEXT("Invalid JSON"));
     }
 
     const TArray<TSharedPtr<FJsonValue>>* Entries = nullptr;
     if (!Root->TryGetArrayField(TEXT("entries"), Entries) || !Entries)
     {
-        OutError = TEXT("Missing entries[]");
-        return false;
+        return SetEarlyFail(TEXT("Missing entries[]"));
     }
 
     UWorld* World = GetWorld();
     if (!World)
     {
-        OutError = TEXT("World invalid");
-        return false;
+        return SetEarlyFail(TEXT("World invalid"));
     }
 
     const int32 SchemaVersion = Root->HasField(TEXT("schemaVersion")) ? (int32)Root->GetNumberField(TEXT("schemaVersion")) : 1;
@@ -2774,7 +2793,8 @@ bool UInspectorWorldSubsystem::ImportSnapshot(const FString& InFilePath, FString
     // (That makes "Only Modified" show exactly what this snapshot changed.)
 
     bool bAllOK = true;
-    FString CombinedErrors;
+    int32 MissingCount = 0;
+    FString CombinedMissingErrors;
 
     const bool bPrevApplying = bApplyingHistory;
     bApplyingHistory = true;
@@ -2823,7 +2843,8 @@ bool UInspectorWorldSubsystem::ImportSnapshot(const FString& InFilePath, FString
         if (!TargetActor)
         {
             bAllOK = false;
-            CombinedErrors += FString::Printf(
+            MissingCount++;
+            CombinedMissingErrors += FString::Printf(
                 TEXT("\nActor not found: path=%s base=%s class=%s"),
                 *ActorPath, *ActorBaseName, *ActorClass
             );
@@ -2861,7 +2882,8 @@ bool UInspectorWorldSubsystem::ImportSnapshot(const FString& InFilePath, FString
                 else
                 {
                     bAllOK = false;
-                    CombinedErrors += FString::Printf(TEXT("\nComponent not found: %s"), *EffectiveCompPath);
+                    MissingCount++;
+                    CombinedMissingErrors += FString::Printf(TEXT("\nComponent not found: %s"), *EffectiveCompPath);
                     continue;
                 }
             }
@@ -2933,7 +2955,8 @@ bool UInspectorWorldSubsystem::ImportSnapshot(const FString& InFilePath, FString
             if (EffectiveCompPath.IsEmpty())
             {
                 bAllOK = false;
-                CombinedErrors += FString::Printf(TEXT("\nMaterial entry missing componentPath (actor=%s)"), *ActorPath);
+                MissingCount++;
+                CombinedMissingErrors += FString::Printf(TEXT("\nMaterial entry missing componentPath (actor=%s)"), *ActorPath);
                 continue;
             }
 
@@ -2942,7 +2965,8 @@ bool UInspectorWorldSubsystem::ImportSnapshot(const FString& InFilePath, FString
             if (!MC)
             {
                 bAllOK = false;
-                CombinedErrors += FString::Printf(TEXT("\nMeshComponent not found: %s"), *EffectiveCompPath);
+                MissingCount++;
+                CombinedMissingErrors += FString::Printf(TEXT("\nMeshComponent not found: %s"), *EffectiveCompPath);
                 continue;
             }
 
@@ -2956,10 +2980,10 @@ bool UInspectorWorldSubsystem::ImportSnapshot(const FString& InFilePath, FString
             //if (!Temp->ApplyFromText(ValueText, Err))
             //{
             //    bAllOK = false;
-            //    CombinedErrors += FString::Printf(
+            //    CombinedMissingErrors += FString::Printf(
             //        TEXT("\nApply failed: kind=%s comp=%s slot=%d param=%s val=%s (%s)"),
             //        *Kind, *GetNameSafe(MC), SlotIndex, *ParamNameStr, *ValueText, *Err);
-            //    //CombinedErrors += FString::Printf(TEXT("\nApply failed: %s slot=%d %s (%s)"), *GetNameSafe(MC), SlotIndex, *ParamNameStr, *Err);
+            //    //CombinedMissingErrors += FString::Printf(TEXT("\nApply failed: %s slot=%d %s (%s)"), *GetNameSafe(MC), SlotIndex, *ParamNameStr, *Err);
             //    continue;
             //}
             if (!Temp->ApplyFromText(ValueText, Err))
@@ -2995,36 +3019,67 @@ bool UInspectorWorldSubsystem::ImportSnapshot(const FString& InFilePath, FString
 
     RefreshPanel(EInspectorRefreshReason::ValuesChanged);
 
+    const bool bHasMissing = (!bAllOK) || (MissingCount > 0);
+    const bool bHasHardFail = (HardFailCount > 0);
+    const bool bAllOKFinal = (!bHasMissing && !bHasHardFail);
 
-    const bool bOK = (HardFailCount == 0);
+    auto SplitLines = [](const FString& In, TArray<FString>& Out)
+    {
+        Out.Reset();
+        FString Trimmed = In.TrimStartAndEnd();
+        if (!Trimmed.IsEmpty())
+        {
+            Trimmed.ParseIntoArrayLines(Out, true);
+            for (FString& S : Out)
+            {
+                S = S.TrimStartAndEnd();
+            }
+        }
+    };
 
-    if (bAllOK)
+    // Cache report for UI (Blueprint)
+    LastImportReport.bSuccess = bAllOKFinal;
+    LastImportReport.AppliedCount = AppliedCount;
+    LastImportReport.SkippedCount = SkippedCount;
+    LastImportReport.MissingCount = MissingCount;
+    LastImportReport.HardFailCount = HardFailCount;
+    SplitLines(CombinedMissingErrors, LastImportReport.MissingErrors);
+    SplitLines(CombinedHardErrors, LastImportReport.HardErrors);
+    SplitLines(CombinedWarnings, LastImportReport.Warnings);
+
+    if (bAllOKFinal)
     {
         if (SkippedCount > 0)
         {
             OutError = CombinedWarnings.TrimStartAndEnd();
+            LastImportReport.Summary = FString::Printf(TEXT("Imported with warnings: applied=%d skipped=%d"), AppliedCount, SkippedCount);
+            LastImportReport.Details = OutError;
             PushToast(ERIToastType::Warning,
                 FString::Printf(TEXT("Imported (%d applied, %d skipped — see log)"), AppliedCount, SkippedCount),
                 3.0f);
-            UE_LOG(LogTemp, Warning, TEXT("[RI] Import warnings:\n%s"), *OutError);
+            UE_LOG(LogTemp, Warning, TEXT("[RI] Import warnings: applied=%d skipped=%d\n%s"), AppliedCount, SkippedCount, *OutError);
         }
         else
         {
+            LastImportReport.Summary = FString::Printf(TEXT("Imported: applied=%d"), AppliedCount);
+            LastImportReport.Details.Reset();
             PushToast(ERIToastType::Success,
                 FString::Printf(TEXT("Imported (%d applied)"), AppliedCount),
                 1.5f);
+            UE_LOG(LogTemp, Log, TEXT("[RI] Import ok: applied=%d"), AppliedCount);
         }
     }
     else
     {
-        OutError = (CombinedHardErrors + TEXT("\n") + CombinedWarnings).TrimStartAndEnd();
+        OutError = (CombinedMissingErrors + TEXT("\n") + CombinedHardErrors + TEXT("\n") + CombinedWarnings).TrimStartAndEnd();
+        LastImportReport.Summary = FString::Printf(TEXT("Import failed: missing=%d hardFail=%d skipped=%d applied=%d"), MissingCount, HardFailCount, SkippedCount, AppliedCount);
+        LastImportReport.Details = OutError;
         PushToast(ERIToastType::Error, TEXT("Import failed (see log)"), 3.5f);
-        UE_LOG(LogTemp, Warning, TEXT("[RI] Import errors:\n%s"), *OutError);
+        UE_LOG(LogTemp, Warning, TEXT("[RI] Import failed: missing=%d hardFail=%d skipped=%d applied=%d\n%s"), MissingCount, HardFailCount, SkippedCount, AppliedCount, *OutError);
     }
 
-    return bAllOK;
-
-    //if (!bAllOK)
+    return bAllOKFinal;
+//if (!bAllOK)
     //{
     //    OutError = CombinedErrors.TrimStartAndEnd();
     //    PushToast(ERIToastType::Warning, TEXT("Imported with errors (see log)"), 3.0f);
@@ -3037,7 +3092,11 @@ bool UInspectorWorldSubsystem::ImportSnapshot(const FString& InFilePath, FString
     //UE_LOG(LogTemp, Log, TEXT("[RI] Snapshot imported: %s (ok=%d)"), *InFilePath, bAllOK ? 1 : 0);
     //return bAllOK;
 #else
-    OutError = TEXT("Not available in Shipping");
+    LastImportReport = FRIImportReport();
+    LastImportReport.bSuccess = false;
+    LastImportReport.Summary = TEXT("Not available in Shipping");
+    LastImportReport.Details = LastImportReport.Summary;
+    OutError = LastImportReport.Summary;
     return false;
 #endif
 }

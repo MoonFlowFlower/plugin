@@ -9,6 +9,7 @@
 #include "GameFramework/Actor.h"
 #include "Components/ActorComponent.h"
 #include "InspectorMaterialParamItem.h"
+#include "InspectorTypes.h"
 
 
 #include "InspectorWorldSubsystem.generated.h"
@@ -218,6 +219,13 @@ public:
     UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Snapshot")
     bool ImportSnapshot(const FString& InFilePath, FString& OutError);
 
+    // Last snapshot import report (cached for UI)
+    UFUNCTION(BlueprintPure, Category = "RuntimeInspector|Snapshot")
+    FRIImportReport GetLastImportReport() const { return LastImportReport; }
+
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Snapshot")
+    void ClearLastImportReport();
+
     UFUNCTION(BlueprintPure, Category = "RuntimeInspector|Snapshot")
     bool IsPropertyItemModified(const UInspectorPropertyItem* Item) const;
 
@@ -326,6 +334,10 @@ private:
         void InsertPinnedGroupIfNeeded(TArray<UObject*>& OutItems);
 
         // ===== Snapshot state (Only Modified / Export / Import) =====
+        // Cached import result for UI
+        UPROPERTY(Transient)
+        FRIImportReport LastImportReport;
+
         UPROPERTY(Transient)
         TMap<FString, FString> BaselineValueByKey;
 
