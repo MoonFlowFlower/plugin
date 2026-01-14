@@ -27,6 +27,10 @@ class RUNTIMEINSPECTOR_API UInspectorGroupItem : public UObject
 	GENERATED_BODY()
 
 public:
+
+	UPROPERTY(BlueprintReadOnly, Category = "RuntimeInspector|Tree")
+	int32 Depth = 0;
+
 	UPROPERTY(BlueprintReadOnly, Category = "RuntimeInspector")
 	EInspectorGroupKind Kind = EInspectorGroupKind::RootActor;
 
@@ -79,7 +83,7 @@ public:
 	UFUNCTION(BlueprintPure, Category = "RuntimeInspector")
 	bool IsMaterialSlot() const
 	{
-		return MaterialSlotIndex != INDEX_NONE;
+		return StableKey.Contains(TEXT(":MATERIALS:MAT:"));
 	}
 
 	UFUNCTION(BlueprintCallable, Category = "RuntimeInspector")

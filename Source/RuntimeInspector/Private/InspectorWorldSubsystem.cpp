@@ -464,6 +464,8 @@ void UInspectorWorldSubsystem::SetSelectedActor(AActor* NewActor)
 
     UnbindFromSelectedActor();
     SelectedActor = NewActor;
+    SelectedMaterialSlotIndex = INDEX_NONE;
+    SelectedGroupKey.Reset();
     BindToSelectedActor(NewActor);
 
 #if !UE_BUILD_SHIPPING
@@ -530,6 +532,290 @@ void UInspectorWorldSubsystem::RefreshPanel(EInspectorRefreshReason Reason)
     }
 #endif
 }
+void UInspectorWorldSubsystem::SetGroupExpanded(const FString& GroupKey, bool bExpanded)
+{
+#if !UE_BUILD_SHIPPING
+    GroupExpandedMap.Add(GroupKey, bExpanded);
+#endif
+}
+void UInspectorWorldSubsystem::GetGroupTreeRootsForSelected(const FString& SearchText, TArray<UObject*>& OutRoots)
+{
+#if !UE_BUILD_SHIPPING
+    OutRoots.Reset();
+
+    AActor* ActorPtr = SelectedActor.Get();
+    if (!ActorPtr) return;
+
+    const bool bSearchMode = !SearchText.IsEmpty();
+
+    UInspectorGroupItem* ActorGroup = GetOrCreateGroupItem(TEXT("ROOT_ACTOR"));
+    ActorGroup->Kind = EInspectorGroupKind::RootActor;
+    ActorGroup->DisplayName = TEXT("Actor");
+    ActorGroup->StableKey = TEXT("ROOT_ACTOR");
+    ActorGroup->Depth = 0;
+    ActorGroup->bExpanded = bSearchMode ? true : GetGroupExpanded(ActorGroup->StableKey, true);
+    OutRoots.Add(ActorGroup);
+
+    UInspectorGroupItem* CompRoot = GetOrCreateGroupItem(TEXT("ROOT_COMPONENTS"));
+    CompRoot->Kind = EInspectorGroupKind::RootComponents;
+    CompRoot->DisplayName = TEXT("Components");
+    CompRoot->StableKey = TEXT("ROOT_COMPONENTS");
+    CompRoot->Depth = 0;
+    CompRoot->bExpanded = bSearchMode ? true : GetGroupExpanded(CompRoot->StableKey, true);
+    OutRoots.Add(CompRoot);
+#endif
+}
+
+
+
+static bool RI_Match(const FString& Haystack, const FString& Needle)
+{
+    return Needle.IsEmpty() || Haystack.Contains(Needle, ESearchCase::IgnoreCase);
+}
+
+
+void UInspectorWorldSubsystem::GetGroupTreeChildrenForItem(
+    UInspectorGroupItem* Parent,
+    const FString& SearchText,
+    TArray<UObject*>& OutChildren)
+{
+#if !UE_BUILD_SHIPPING
+    OutChildren.Reset();
+    if (!Parent) return;
+
+    UE_LOG(LogTemp, Warning, TEXT("[RI] GetTreeChildren ParentKey=%s Target=%s"),
+        *Parent->StableKey, *GetNameSafe(Parent->TargetObject));
+
+    const bool bSearchMode = !SearchText.IsEmpty();
+    AActor* ActorPtr = SelectedActor.Get();
+    // Actor 根：不需要子节点（你现在就是点 Actor 显示右侧属性）
+    if (Parent->StableKey == TEXT("ROOT_ACTOR"))
+    {
+        return;
+    }
+    // ✅ 叶子：Slot 没孩子
+    if (Parent->IsMaterialSlot())
+    {
+        return;
+    }
+    // ✅ MaterialsRoot：返回 Slot 子节点
+    if (Parent->IsMaterialsRoot())
+    {
+        UStaticMeshComponent* SMC = Cast<UStaticMeshComponent>(Parent->TargetObject);
+        if (!SMC) return;
+
+        const int32 NumMats = SMC->GetNumMaterials();
+        for (int32 Slot = 0; Slot < NumMats; ++Slot)
+        {
+            UMaterialInterface* Mat = SMC->GetMaterial(Slot);
+            if (!Mat) continue;
+
+            const FString SlotKey = Parent->StableKey + FString::Printf(TEXT(":MAT:%d"), Slot);
+
+            UInspectorGroupItem* SlotGroup = GetOrCreateGroupItem(SlotKey);
+            SlotGroup->Kind = EInspectorGroupKind::Component;  // ✅ 保持你旧结构不变
+            SlotGroup->TargetObject = SMC;
+            SlotGroup->Depth= Parent->Depth+1;
+            SlotGroup->DisplayName = FString::Printf(TEXT("Element %d: %s"), Slot, *GetNameSafe(Mat));
+            SlotGroup->StableKey = SlotKey;
+            SlotGroup->MaterialSlotIndex = Slot;
+
+            OutChildren.Add(SlotGroup);
+
+            UE_LOG(LogTemp, Warning, TEXT("[RI] -> children=%d"), OutChildren.Num());
+        }
+        return;
+    }
+    // ✅ 普通组件节点：如果 TargetObject 是 StaticMeshComponent，则挂一个 MaterialsRoot
+    if (UStaticMeshComponent* SMC = Cast<UStaticMeshComponent>(Parent->TargetObject))
+    {
+        const FString MatRootKey = Parent->StableKey + TEXT(":MATERIALS");
+
+        UInspectorGroupItem* MatRoot = GetOrCreateGroupItem(MatRootKey);
+        MatRoot->Kind = EInspectorGroupKind::Component;       // ✅ 保持你旧结构不变
+        MatRoot->TargetObject = SMC;                          // ✅ 关键：点击能拿到 InComp
+        MatRoot->DisplayName = TEXT("Materials");
+        MatRoot->StableKey = MatRootKey;
+        MatRoot->Depth = Parent->Depth + 1;
+        OutChildren.Add(MatRoot);
+
+        UE_LOG(LogTemp, Warning, TEXT("[RI] -> children=%d"), OutChildren.Num());
+        return;
+    }
+
+    // Components 根：返回组件
+    if (Parent->StableKey == TEXT("ROOT_COMPONENTS"))
+    {
+        TArray<UActorComponent*> Components;
+        ActorPtr->GetComponents(Components);
+
+        for (UActorComponent* Comp : Components)
+        {
+            if (!IsWhitelistedComponent(Comp)) continue;
+
+            const FString CompKey = MakeComponentKey(ActorPtr, Comp);
+
+            UInspectorGroupItem* CompGroup = GetOrCreateGroupItem(CompKey);
+            CompGroup->Kind = EInspectorGroupKind::Component;
+            CompGroup->TargetObject = Comp;
+            CompGroup->DisplayName = FString::Printf(TEXT("%s (%s)"), *Comp->GetName(), *Comp->GetClass()->GetName());
+            CompGroup->StableKey = CompKey;
+            CompGroup->Depth = Parent->Depth + 1;
+            CompGroup->bExpanded = bSearchMode ? true : GetGroupExpanded(CompKey, false);
+
+            OutChildren.Add(CompGroup);
+        }
+        return;
+    }
+       
+
+    // 2) 如果 Parent 是一个“真实组件节点”，并且它是 StaticMeshComponent -> 返回一个 MaterialsRoot
+    //    注意：这里要排除 Parent 自己就是 MaterialsRoot/Slot 的情况（靠 StableKey 判断）
+    //const bool bIsMaterialsRoot = Parent->StableKey.EndsWith(TEXT(":MATERIALS"));
+    //const bool bIsMatSlot = Parent->StableKey.Contains(TEXT(":MATERIALS:MAT:"));
+    //if (!bIsMaterialsRoot && !bIsMatSlot)
+    //{
+    //    if (UStaticMeshComponent* SMC = Cast<UStaticMeshComponent>(Parent->TargetObject))
+    //    {
+    //        const FString MatRootKey = Parent->StableKey + TEXT(":MATERIALS");
+
+    //        UInspectorGroupItem* MatRoot = GetOrCreateGroupItem(MatRootKey);
+    //        MatRoot->Kind = EInspectorGroupKind::Component;      // ✅ 沿用你原逻辑
+    //        MatRoot->TargetObject = SMC;                         // ✅ 关键：UI 点击仍能拿到 InComp
+    //        MatRoot->DisplayName = TEXT("Materials");
+    //        MatRoot->StableKey = MatRootKey;
+
+    //        // TreeView 的展开由 UI 控制；这里仅用于“初始展开状态”
+    //        MatRoot->bExpanded = bSearchMode ? true : GetGroupExpanded(MatRootKey, false);
+
+    //        OutChildren.Add(MatRoot);
+    //    }
+    //    return;
+    //}
+
+    //// 3) Parent 是 MaterialsRoot：返回 slots
+    //if (bIsMaterialsRoot)
+    //{
+    //    UStaticMeshComponent* SMC = Cast<UStaticMeshComponent>(Parent->TargetObject);
+    //    if (!SMC) return;
+
+    //    const int32 NumMats = SMC->GetNumMaterials();
+    //    for (int32 Slot = 0; Slot < NumMats; ++Slot)
+    //    {
+    //        UMaterialInterface* Mat = SMC->GetMaterial(Slot);
+    //        if (!Mat) continue;
+
+    //        const FString SlotKey = Parent->StableKey + FString::Printf(TEXT(":MAT:%d"), Slot);
+
+    //        UInspectorGroupItem* SlotGroup = GetOrCreateGroupItem(SlotKey);
+    //        SlotGroup->Kind = EInspectorGroupKind::Component;    // ✅ 沿用你原逻辑
+    //        SlotGroup->TargetObject = SMC;
+    //        SlotGroup->DisplayName = FString::Printf(TEXT("Element %d: %s"), Slot, *GetNameSafe(Mat));
+    //        SlotGroup->StableKey = SlotKey;
+    //        SlotGroup->MaterialSlotIndex = Slot;
+
+    //        // slot 通常是叶子；bExpanded 你留着也不影响
+    //        SlotGroup->bExpanded = bSearchMode ? true : GetGroupExpanded(SlotKey, false);
+
+    //        OutChildren.Add(SlotGroup);
+    //    }
+    //    return;
+    //}
+
+    // 4) Parent 是 Slot：叶子节点，无 children
+#endif
+}
+
+//void UInspectorWorldSubsystem::GetGroupTreeChildrenForItem(
+//    UInspectorGroupItem* Parent, const FString& SearchText, TArray<UObject*>& OutChildren)
+//{
+//#if !UE_BUILD_SHIPPING
+//    OutChildren.Reset();
+//    AActor* ActorPtr = SelectedActor.Get();
+//    if (!ActorPtr || !Parent) return;
+//
+//    const bool bSearchMode = !SearchText.IsEmpty();
+//
+//    // Actor 根：不需要子节点（你现在就是点 Actor 显示右侧属性）
+//    if (Parent->StableKey == TEXT("ROOT_ACTOR"))
+//    {
+//        return;
+//    }
+//
+//    // Components 根：返回组件
+//    if (Parent->StableKey == TEXT("ROOT_COMPONENTS"))
+//    {
+//        TArray<UActorComponent*> Components;
+//        ActorPtr->GetComponents(Components);
+//
+//        for (UActorComponent* Comp : Components)
+//        {
+//            if (!IsWhitelistedComponent(Comp)) continue;
+//
+//            const FString CompKey = MakeComponentKey(ActorPtr, Comp);
+//
+//            UInspectorGroupItem* CompGroup = GetOrCreateGroupItem(CompKey);
+//            CompGroup->Kind = EInspectorGroupKind::Component;
+//            CompGroup->TargetObject = Comp;
+//            CompGroup->DisplayName = FString::Printf(TEXT("%s (%s)"), *Comp->GetName(), *Comp->GetClass()->GetName());
+//            CompGroup->StableKey = CompKey;
+//            CompGroup->Depth = Parent->Depth + 1;
+//            CompGroup->bExpanded = bSearchMode ? true : GetGroupExpanded(CompKey, false);
+//
+//            OutChildren.Add(CompGroup);
+//        }
+//        return;
+//    }
+//
+//    // 组件节点：如果是 StaticMeshComponent，挂一个 MaterialsRoot
+//    if (Parent->Kind == EInspectorGroupKind::Component)
+//    {
+//        UStaticMeshComponent* SMC = Cast<UStaticMeshComponent>(Parent->TargetObject);
+//        if (!SMC) return;
+//
+//        const FString MatRootKey = Parent->StableKey + TEXT(":MATERIALS");
+//
+//        UInspectorGroupItem* MatRoot = GetOrCreateGroupItem(MatRootKey);
+//        MatRoot->Kind = EInspectorGroupKind::MaterialsRoot;
+//        MatRoot->TargetObject = SMC;
+//        MatRoot->DisplayName = TEXT("Materials");
+//        MatRoot->StableKey = MatRootKey;
+//        MatRoot->Depth = Parent->Depth + 1;
+//        MatRoot->bExpanded = bSearchMode ? true : GetGroupExpanded(MatRootKey, false);
+//
+//        OutChildren.Add(MatRoot);
+//        return;
+//    }
+//
+//    // MaterialsRoot：挂 slots
+//    if (Parent->Kind == EInspectorGroupKind::MaterialsRoot || Parent->IsMaterialsRoot())
+//    {
+//        UStaticMeshComponent* SMC = Cast<UStaticMeshComponent>(Parent->TargetObject);
+//        if (!SMC) return;
+//
+//        const int32 NumMats = SMC->GetNumMaterials();
+//        for (int32 Slot = 0; Slot < NumMats; ++Slot)
+//        {
+//            UMaterialInterface* Mat = SMC->GetMaterial(Slot);
+//            if (!Mat) continue;
+//
+//            const FString SlotKey = Parent->StableKey + FString::Printf(TEXT(":MAT:%d"), Slot);
+//
+//            UInspectorGroupItem* SlotGroup = GetOrCreateGroupItem(SlotKey);
+//            SlotGroup->Kind = EInspectorGroupKind::MaterialSlot;
+//            SlotGroup->TargetObject = SMC;
+//            SlotGroup->DisplayName = FString::Printf(TEXT("Element %d: %s"), Slot, *GetNameSafe(Mat));
+//            SlotGroup->StableKey = SlotKey;
+//            SlotGroup->MaterialSlotIndex = Slot;
+//            SlotGroup->Depth = Parent->Depth + 1;
+//
+//            OutChildren.Add(SlotGroup);
+//        }
+//        return;
+//    }
+//#endif
+//}
+
 
 void UInspectorWorldSubsystem::GetGroupItemsForSelected(const FString& SearchText, TArray<UObject*>& OutGroups)
 {
@@ -623,20 +909,17 @@ void UInspectorWorldSubsystem::GetPropertyItemsForSelected(const FString& Search
 #if !UE_BUILD_SHIPPING
 
 
+   
     OutItems.Reset();
 
-   
-    AActor* ActorPtr = nullptr;
-    {
-        ActorPtr = SelectedActor.Get(); // <<< 如果你这里编译报错，就换成 SelectedActor.Get()
-    }
+    AActor* TargetActor = SelectedActor.Get();
+    UObject* InspectObj = SelectedInspectObject ? SelectedInspectObject.Get() : TargetActor;
 
-    if (!ActorPtr)
-    {
-        return;
-    }
+    if (!TargetActor) return;
+    if (!InspectObj) return;
 
     const bool bSearchMode = !SearchText.IsEmpty();
+
 
 
     if (PropertyViewMode == ERIPropertyViewMode::MaterialOnly)
@@ -686,6 +969,22 @@ void UInspectorWorldSubsystem::GetPropertyItemsForSelected(const FString& Search
         return; // ✅ 关键：直接 return，阻止后面 Append 父级组件属性
     }
 
+    // ✅ Focused 模式：如果左侧选中了某个节点（Actor/组件/MaterialsRoot/Slot），右侧只显示它
+// 规则：只要 SelectedInspectObject 被设置过（或者你也可以用 SelectedGroupKey 非空来判断）
+    if (SelectedInspectObject != nullptr && PropertyViewMode != ERIPropertyViewMode::MaterialOnly)
+    {
+        // 可选：加一个标题组（不想要标题就删掉这几行）
+        UInspectorGroupItem* FocusGroup = GetOrCreateGroupItem(TEXT("VIEW_SELECTED_ONLY"));
+        FocusGroup->Kind = EInspectorGroupKind::Component;
+        FocusGroup->DisplayName = InspectObj->GetName();
+        FocusGroup->StableKey = TEXT("VIEW_SELECTED_ONLY");
+        FocusGroup->bExpanded = true;
+        OutItems.Add(FocusGroup);
+
+        AppendPropertiesForObject(InspectObj, SearchText, OutItems, TEXT(""), bSearchMode);
+        return; // ✅ 关键：不再走下面那套 Actor+Components 全展开逻辑
+    }
+
     // ---------- 1) Actor 根组 ----------
     {
 
@@ -699,7 +998,7 @@ void UInspectorWorldSubsystem::GetPropertyItemsForSelected(const FString& Search
 
         if (ActorGroup->bExpanded)
         {
-            AppendPropertiesForObject(ActorPtr, SearchText, OutItems, TEXT(""), bSearchMode);
+            AppendPropertiesForObject(TargetActor, SearchText, OutItems, TEXT(""), bSearchMode);
         }
     }
 
@@ -721,7 +1020,7 @@ void UInspectorWorldSubsystem::GetPropertyItemsForSelected(const FString& Search
         }
 
         TArray<UActorComponent*> Components;
-        ActorPtr->GetComponents(Components);
+        TargetActor->GetComponents(Components);
 
         for (UActorComponent* Comp : Components)
         {
@@ -731,7 +1030,7 @@ void UInspectorWorldSubsystem::GetPropertyItemsForSelected(const FString& Search
             }
 
             // 组件组 Key
-            const FString CompKey = MakeComponentKey(ActorPtr, Comp);
+            const FString CompKey = MakeComponentKey(TargetActor, Comp);
 
             // 搜索模式：只显示“有命中属性”的组件，并强制展开（但不写回折叠状态）
             if (bSearchMode)
@@ -779,7 +1078,7 @@ void UInspectorWorldSubsystem::GetPropertyItemsForSelected(const FString& Search
                     // Materials 子组
 
                     // Materials Key
-                    const FString MatRootKey = MakeComponentKey(ActorPtr, Comp) + TEXT(":MATERIALS");
+                    const FString MatRootKey = MakeComponentKey(TargetActor, Comp) + TEXT(":MATERIALS");
 
                     UInspectorGroupItem* MatRoot = GetOrCreateGroupItem(MatRootKey);
                     MatRoot->Kind = EInspectorGroupKind::MaterialsRoot;
@@ -3377,6 +3676,42 @@ void UInspectorWorldSubsystem::GetPropertyItemsForSelectedEx(const FString& Sear
                 });
         };
 
+    // ----- Focused：如果左侧选中了某个节点（组件/MaterialsRoot），右侧只显示该对象 -----
+    // Slot 的情况不走这里：Slot 应该已经切到 PropertyViewMode==MaterialOnly（你在 SetSelectedGroupItem 里做）
+    UObject* InspectObj = SelectedInspectObject ? SelectedInspectObject.Get() : ActorPtr;
+
+    const bool bHasOverride =
+        (SelectedInspectObject != nullptr) &&
+        (PropertyViewMode != ERIPropertyViewMode::MaterialOnly);
+
+    if (bHasOverride)
+    {
+        TArray<UObject*> Props;
+        AppendPropertiesForObject(InspectObj, SearchText, Props, TEXT(""), bSearchMode);
+
+        // OnlyModified 模式下过滤
+        FilterOnlyModified(Props);
+
+        // 没有任何 modified（或搜索后为空）就直接空列表返回
+        if (Props.Num() == 0)
+        {
+            return;
+        }
+
+        // 可选：加一个标题组（体验更好，不想要可以删掉这一段）
+        UInspectorGroupItem* FocusGroup = GetOrCreateGroupItem(TEXT("VIEW_SELECTED_ONLY"));
+        FocusGroup->Kind = EInspectorGroupKind::Component;
+        FocusGroup->DisplayName = InspectObj ? InspectObj->GetName() : TEXT("Selected");
+        FocusGroup->StableKey = TEXT("VIEW_SELECTED_ONLY");
+        FocusGroup->bExpanded = true;
+
+        OutItems.Add(FocusGroup);
+        OutItems.Append(Props);
+        return; // ✅ 关键：别再走下面 Actor/Components 全量逻辑
+    }
+
+
+
     // ----- MaterialOnly：右侧显示当前选中的 Material Slot 参数 -----
     if (PropertyViewMode == ERIPropertyViewMode::MaterialOnly)
     {
@@ -3714,5 +4049,94 @@ bool UInspectorWorldSubsystem::IsItemModified(UObject* Item) const
     return false;
 #else
     return false;
+#endif
+}
+
+void UInspectorWorldSubsystem::ClearSelectedGroupItem()
+{
+#if !UE_BUILD_SHIPPING
+    SelectedInspectObject = nullptr;
+    SelectedMaterialSlotIndex = INDEX_NONE;
+    SelectedGroupKey.Reset();
+#endif
+}
+
+void UInspectorWorldSubsystem::SetSelectedGroupItem(UInspectorGroupItem* Item)
+{
+#if !UE_BUILD_SHIPPING
+    // 1) 每次选择都先清理“材质槽”状态，避免从上一次 slot 串到别的节点
+    SelectedMaterialSlotIndex = INDEX_NONE;
+    SelectedGroupKey = Item ? Item->StableKey : TEXT("");
+
+    // 2) 默认回退：Actor
+    AActor* ActorPtr = SelectedActor.Get();
+    SelectedInspectObject = ActorPtr;
+
+    if (!Item) return;
+
+    // 3) ROOT_ACTOR：强制显示 Actor
+    if (Item->StableKey == TEXT("ROOT_ACTOR"))
+    {
+        SelectedInspectObject = ActorPtr;
+        return;
+    }
+
+    // 4) ROOT_COMPONENTS：一般不显示任何组件属性（你想显示 Actor 也行）
+    if (Item->StableKey == TEXT("ROOT_COMPONENTS"))
+    {
+        SelectedInspectObject = ActorPtr;
+        return;
+    }
+
+    // 5) 其它：优先用 GroupItem.TargetObject（你的树里组件/SMC 都是这个）
+    if (Item->TargetObject)
+    {
+        SelectedInspectObject = Item->TargetObject;
+    }
+
+    // 6) Slot：右侧显示材质参数（slot index 必须有效）
+    //    你现在 Kind 可能都等于 Component，所以只用 StableKey/MaterialSlotIndex 判断
+    const bool bIsSlot = (Item->MaterialSlotIndex != INDEX_NONE) ||
+        Item->StableKey.Contains(TEXT(":MATERIALS:MAT:"));
+
+    if (bIsSlot)
+    {
+        int32 SlotIndex = Item->MaterialSlotIndex;
+
+        // 兜底：如果字段没填，就从 StableKey 解析 ":MAT:%d"
+        if (SlotIndex == INDEX_NONE)
+        {
+            // 解析最后一个 ":MAT:" 后面的数字
+            int32 MatPos = Item->StableKey.Find(TEXT(":MAT:"), ESearchCase::IgnoreCase, ESearchDir::FromEnd);
+            if (MatPos != INDEX_NONE)
+            {
+                const FString Tail = Item->StableKey.Mid(MatPos + 5);
+                int32 Parsed = INDEX_NONE;
+                if (LexTryParseString(Parsed, *Tail))
+                {
+                    SlotIndex = Parsed;
+                }
+            }
+        }
+
+        if (SlotIndex != INDEX_NONE)
+        {
+            SelectedMaterialSlotIndex = SlotIndex;
+        }
+    }
+
+    // 选中 slot -> 右侧进入材质参数模式
+    if (SelectedMaterialSlotIndex != INDEX_NONE)
+    {
+        ViewMeshComp = Cast<UMeshComponent>(SelectedInspectObject.Get()); // 你 TargetObject 放的是 SMC/MC
+        ViewMaterialSlot = SelectedMaterialSlotIndex;
+        PropertyViewMode = ERIPropertyViewMode::MaterialOnly;
+    }
+    else
+    {
+        // 选中 Actor/组件/MaterialsRoot -> 回到普通属性模式
+        // 这里用你项目里“默认模式”的枚举值替换（比如 All / Default / ActorAndComponents 等）
+        PropertyViewMode = ERIPropertyViewMode::Full;
+    }
 #endif
 }

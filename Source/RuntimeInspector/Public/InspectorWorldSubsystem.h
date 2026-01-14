@@ -407,6 +407,39 @@ private:
 
         UFUNCTION(BlueprintPure, Category = "RuntimeInspector|Snapshot")
         FString GetSnapshotDirectory() const;
+
+	// ===== Group Tree Support =====
+    public:
+
+        UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Tree")
+        void GetGroupTreeRootsForSelected(const FString& SearchText, TArray<UObject*>& OutRoots);
+
+        UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Tree")
+        void GetGroupTreeChildrenForItem(UInspectorGroupItem* Parent, const FString& SearchText, TArray<UObject*>& OutChildren);
+
+        UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Groups")
+        void SetGroupExpanded(const FString& GroupKey, bool bExpanded);
+
+		// ===== Selection Support =====
+    public:
+
+
+        UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Selection")
+        void SetSelectedGroupItem(class UInspectorGroupItem* Item);
+
+        UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Selection")
+        void ClearSelectedGroupItem();
+
+
+	private:
+        UPROPERTY()
+        TObjectPtr<UObject> SelectedInspectObject = nullptr;
+
+        UPROPERTY()
+        int32 SelectedMaterialSlotIndex = INDEX_NONE;
+
+        UPROPERTY()
+        FString SelectedGroupKey;
 };
 
 
