@@ -184,3 +184,236 @@ bool UInspectorMaterialParamItem::ApplyFromText(const FString& NewText, FString&
 
     return true;
 }
+
+
+EInspectorValueType UInspectorMaterialParamItem::GetValueType() const
+{
+    // Material params are currently only Scalar(float) and Vector(FLinearColor)
+    return (ParamType == EInspectorMatParamType::Scalar) ? EInspectorValueType::Float : EInspectorValueType::LinearColor;
+}
+
+bool UInspectorMaterialParamItem::GetScalar(float& OutValue, FString& OutError)
+{
+    OutError.Reset();
+    OutValue = 0.f;
+
+    if (ParamType != EInspectorMatParamType::Scalar)
+    {
+        OutError = TEXT("ParamType is not Scalar");
+        return false;
+    }
+
+    UMeshComponent* MeshComp = TargetComp.Get();
+    if (!MeshComp)
+    {
+        OutError = TEXT("Target invalid");
+        return false;
+    }
+
+    UMaterialInterface* Mat = MeshComp->GetMaterial(SlotIndex);
+    if (!Mat)
+    {
+        OutError = TEXT("Material missing");
+        return false;
+    }
+
+    if (UMaterialInstanceDynamic* MID = Cast<UMaterialInstanceDynamic>(Mat))
+    {
+        OutValue = MID->K2_GetScalarParameterValue(ParamName);
+        return true;
+    }
+
+    const FMaterialParameterInfo Info(ParamName);
+    float V = 0.f;
+    if (Mat->GetScalarParameterValue(Info, V))
+    {
+        OutValue = V;
+        return true;
+    }
+
+    OutError = TEXT("Scalar parameter not found");
+    return false;
+}
+
+bool UInspectorMaterialParamItem::GetVector(FLinearColor& OutValue, FString& OutError)
+{
+    OutError.Reset();
+    OutValue = FLinearColor::Black;
+
+    if (ParamType != EInspectorMatParamType::Vector)
+    {
+        OutError = TEXT("ParamType is not Vector");
+        return false;
+    }
+
+    UMeshComponent* MeshComp = TargetComp.Get();
+    if (!MeshComp)
+    {
+        OutError = TEXT("Target invalid");
+        return false;
+    }
+
+    UMaterialInterface* Mat = MeshComp->GetMaterial(SlotIndex);
+    if (!Mat)
+    {
+        OutError = TEXT("Material missing");
+        return false;
+    }
+
+    if (UMaterialInstanceDynamic* MID = Cast<UMaterialInstanceDynamic>(Mat))
+    {
+        OutValue = MID->K2_GetVectorParameterValue(ParamName);
+        return true;
+    }
+
+    const FMaterialParameterInfo Info(ParamName);
+    FLinearColor C;
+    if (Mat->GetVectorParameterValue(Info, C))
+    {
+        OutValue = C;
+        return true;
+    }
+
+    OutError = TEXT("Vector parameter not found");
+    return false;
+}
+
+bool UInspectorMaterialParamItem::SetScalar(float NewValue, FString& OutError)
+{
+    OutError.Reset();
+
+    if (ParamType != EInspectorMatParamType::Scalar)
+    {
+        OutError = TEXT("ParamType is not Scalar");
+        return false;
+    }
+
+    UMeshComponent* MeshComp = TargetComp.Get();
+    if (!MeshComp)
+    {
+        OutError = TEXT("Target invalid");
+        return false;
+    }
+
+    UInspectorWorldSubsystem* Sub = Cast<UInspectorWorldSubsystem>(GetOuter());
+    if (!Sub)
+    {
+        OutError = TEXT("Subsystem invalid (Outer is not UInspectorWorldSubsystem)");
+        return false;
+    }
+
+    if (!Sub->IsRIEnabled())
+    {
+        OutError = Sub->GetRIDisabledReason();
+        return false;
+    }
+
+    UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(MeshComp);
+    if (!PrimComp)
+    {
+        OutError = TEXT("Target is not PrimitiveComponent");
+        return false;
+    }
+
+    // Old value (for history)
+    float OldV = 0.f;
+    {
+        FString Tmp;
+        GetScalar(OldV, Tmp); // best-effort
+    }
+
+    UMaterialInstanceDynamic* MID = Sub->GetOrCreateMID(PrimComp, SlotIndex);
+    if (!MID)
+    {
+        OutError = TEXT("Failed to get/create MID");
+        return false;
+    }
+
+    MID->SetScalarParameterValue(ParamName, NewValue);
+    PrimComp->MarkRenderStateDirty();
+
+    if (!Sub->IsApplyingHistory())
+    {
+        FInspectorChange Change;
+        Change.DebugObjectName = GetNameSafe(PrimComp);
+        Change.TargetComponent = PrimComp;
+        Change.MaterialIndex = SlotIndex;
+        Change.ParamName = ParamName;
+        Change.ChangeType = EInspectorChangeType::MaterialScalar;
+        Change.OldScalar = OldV;
+        Change.NewScalar = MID->K2_GetScalarParameterValue(ParamName);
+        Sub->RecordChange(Change);
+    }
+
+    return true;
+}
+
+bool UInspectorMaterialParamItem::SetVector(const FLinearColor& NewValue, FString& OutError)
+{
+    OutError.Reset();
+
+    if (ParamType != EInspectorMatParamType::Vector)
+    {
+        OutError = TEXT("ParamType is not Vector");
+        return false;
+    }
+
+    UMeshComponent* MeshComp = TargetComp.Get();
+    if (!MeshComp)
+    {
+        OutError = TEXT("Target invalid");
+        return false;
+    }
+
+    UInspectorWorldSubsystem* Sub = Cast<UInspectorWorldSubsystem>(GetOuter());
+    if (!Sub)
+    {
+        OutError = TEXT("Subsystem invalid (Outer is not UInspectorWorldSubsystem)");
+        return false;
+    }
+
+    if (!Sub->IsRIEnabled())
+    {
+        OutError = Sub->GetRIDisabledReason();
+        return false;
+    }
+
+    UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(MeshComp);
+    if (!PrimComp)
+    {
+        OutError = TEXT("Target is not PrimitiveComponent");
+        return false;
+    }
+
+    // Old value (for history)
+    FLinearColor OldC = FLinearColor::Black;
+    {
+        FString Tmp;
+        GetVector(OldC, Tmp); // best-effort
+    }
+
+    UMaterialInstanceDynamic* MID = Sub->GetOrCreateMID(PrimComp, SlotIndex);
+    if (!MID)
+    {
+        OutError = TEXT("Failed to get/create MID");
+        return false;
+    }
+
+    MID->SetVectorParameterValue(ParamName, NewValue);
+    PrimComp->MarkRenderStateDirty();
+
+    if (!Sub->IsApplyingHistory())
+    {
+        FInspectorChange Change;
+        Change.DebugObjectName = GetNameSafe(PrimComp);
+        Change.TargetComponent = PrimComp;
+        Change.MaterialIndex = SlotIndex;
+        Change.ParamName = ParamName;
+        Change.ChangeType = EInspectorChangeType::MaterialVector;
+        Change.OldVector = OldC;
+        Change.NewVector = MID->K2_GetVectorParameterValue(ParamName);
+        Sub->RecordChange(Change);
+    }
+
+    return true;
+}

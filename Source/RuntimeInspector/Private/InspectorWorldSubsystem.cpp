@@ -7,6 +7,9 @@
 #include "InspectorMaterialParamItem.h"
 #include "InspectorSnapshotItem.h"
 
+// For TBaseStructure<>
+#include "UObject/NoExportTypes.h"
+
 
 #include "HAL/PlatformFilemanager.h"
 #include "HAL/IConsoleManager.h"
@@ -1956,6 +1959,19 @@ bool UInspectorWorldSubsystem::IsSupportedByInspector(const FProperty* Prop)
     if (const FByteProperty* ByteProp = CastField<FByteProperty>(Prop))
     {
         return ByteProp->Enum != nullptr;
+    }
+
+    // Allow a small set of commonly tuned struct types.
+    if (const FStructProperty* SP = CastField<FStructProperty>(Prop))
+    {
+        const UScriptStruct* S = SP->Struct;
+        if (S == TBaseStructure<FVector2D>::Get()) return true;
+        if (S == TBaseStructure<FVector>::Get())   return true;
+        if (S == TBaseStructure<FVector4>::Get())  return true;
+        if (S == TBaseStructure<FRotator>::Get())  return true;
+        if (S == TBaseStructure<FTransform>::Get())return true;
+        if (S == TBaseStructure<FLinearColor>::Get()) return true;
+        if (S == TBaseStructure<FColor>::Get()) return true;
     }
 
     return false;

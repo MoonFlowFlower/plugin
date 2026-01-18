@@ -24,6 +24,49 @@ public:
     UFUNCTION(BlueprintCallable)
     bool ApplyFromText(const FString& NewText, FString& OutError);
 
+    // ===== Struct helpers (Vector/Rotator/Transform/Color) =====
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Struct")
+    bool GetVector2D(FVector2D& OutValue) const;
+
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Struct")
+    bool GetVector(FVector& OutValue) const;
+
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Struct")
+    bool GetVector4(FVector4& OutValue) const;
+
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Struct")
+    bool GetRotator(FRotator& OutValue) const;
+
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Struct")
+    bool GetTransform(FTransform& OutValue) const;
+
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Struct")
+    bool GetLinearColor(FLinearColor& OutValue) const;
+
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Struct")
+    bool GetColor(FColor& OutValue) const;
+
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Struct")
+    bool SetVector2D(const FVector2D& InValue, FString& OutError);
+
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Struct")
+    bool SetVector(const FVector& InValue, FString& OutError);
+
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Struct")
+    bool SetVector4(const FVector4& InValue, FString& OutError);
+
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Struct")
+    bool SetRotator(const FRotator& InValue, FString& OutError);
+
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Struct")
+    bool SetTransform(const FTransform& InValue, FString& OutError);
+
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Struct")
+    bool SetLinearColor(const FLinearColor& InValue, FString& OutError);
+
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Struct")
+    bool SetColor(const FColor& InValue, FString& OutError);
+
     UFUNCTION(BlueprintCallable)
     bool IsValidItem() const { return Target.IsValid(); }
 

@@ -16,6 +16,15 @@ enum class EInspectorValueType : uint8
     String      UMETA(DisplayName = "String"),
     Name        UMETA(DisplayName = "Name"),
     Enum        UMETA(DisplayName = "Enum"),
+
+    // Struct types (commonly tuned at runtime)
+    Vector2     UMETA(DisplayName = "Vector2"),
+    Vector3     UMETA(DisplayName = "Vector"),
+    Vector4     UMETA(DisplayName = "Vector4"),
+    Rotator     UMETA(DisplayName = "Rotator"),
+    Transform   UMETA(DisplayName = "Transform"),
+    LinearColor UMETA(DisplayName = "LinearColor"),
+    Color       UMETA(DisplayName = "Color"),
 };
 
 // ===== Snapshot Import Report (UI-facing) =====

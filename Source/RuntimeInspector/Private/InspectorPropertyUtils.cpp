@@ -1,5 +1,7 @@
 #include "InspectorPropertyUtils.h"
 
+#include "UObject/NoExportTypes.h"
+
 namespace InspectorPropertyUtils
 {
     FProperty* FindProperty(UObject* Target, FName PropertyName)
@@ -53,7 +55,19 @@ namespace InspectorPropertyUtils
         if (Prop->IsA<FArrayProperty>() ||
             Prop->IsA<FMapProperty>() || 
             Prop->IsA<FSetProperty>()) return false;
-        if (Prop->IsA<FStructProperty>()) return false; // 先别做，后面专门支持Vector/Rotator再放开
+        if (const FStructProperty* SP = CastField<FStructProperty>(Prop))
+        {
+            const UScriptStruct* S = SP->Struct;
+            if (S == TBaseStructure<FVector2D>::Get()) return true;
+            if (S == TBaseStructure<FVector>::Get())   return true;
+            if (S == TBaseStructure<FVector4>::Get())  return true;
+            if (S == TBaseStructure<FRotator>::Get())  return true;
+            if (S == TBaseStructure<FTransform>::Get())return true;
+            if (S == TBaseStructure<FLinearColor>::Get()) return true;
+            if (S == TBaseStructure<FColor>::Get()) return true;
+            return false;
+        }
+ // 先别做，后面专门支持Vector/Rotator再放开
 
         // 先支持基础类型 + enum（读起来稳定）
         if (Prop->IsA<FBoolProperty>()) return true;

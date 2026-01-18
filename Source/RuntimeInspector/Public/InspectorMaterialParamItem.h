@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "UObject/Object.h"
 
+#include "InspectorTypes.h"
 
 #include "InspectorMaterialParamItem.generated.h"
 
@@ -35,6 +36,21 @@ public:
 
     UFUNCTION(BlueprintCallable, Category = "RuntimeInspector")
     bool IsEnum() const { return false; }
+
+    UFUNCTION(BlueprintPure, Category = "RuntimeInspector")
+    EInspectorValueType GetValueType() const;
+
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector")
+    bool GetScalar(float& OutValue, FString& OutError);
+
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector")
+    bool SetScalar(float NewValue, FString& OutError);
+
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector")
+    bool GetVector(FLinearColor& OutValue, FString& OutError);
+
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector")
+    bool SetVector(const FLinearColor& NewValue, FString& OutError);
 
 private:
     UPROPERTY()

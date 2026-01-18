@@ -10,6 +10,9 @@
 #include "GameFramework/Actor.h"
 #include "UObject/UnrealType.h"
 
+// For TBaseStructure<>
+#include "UObject/NoExportTypes.h"
+
 
 void UInspectorPropertyItem::Init(UObject* InTarget, FName InPropertyName)
 {
@@ -65,6 +68,18 @@ static EInspectorValueType GetTypeFromProperty(const FProperty* Prop)
         if (ByteProp->Enum) return EInspectorValueType::Enum;
     }
 
+
+    if (const FStructProperty* SP = CastField<FStructProperty>(Prop))
+    {
+        const UScriptStruct* S = SP->Struct;
+        if (S == TBaseStructure<FVector2D>::Get()) return EInspectorValueType::Vector2;
+        if (S == TBaseStructure<FVector>::Get())   return EInspectorValueType::Vector3;
+        if (S == TBaseStructure<FVector4>::Get())  return EInspectorValueType::Vector4;
+        if (S == TBaseStructure<FRotator>::Get())  return EInspectorValueType::Rotator;
+        if (S == TBaseStructure<FTransform>::Get())return EInspectorValueType::Transform;
+        if (S == TBaseStructure<FLinearColor>::Get()) return EInspectorValueType::LinearColor;
+        if (S == TBaseStructure<FColor>::Get()) return EInspectorValueType::Color;
+    }
     return EInspectorValueType::Unsupported;
 }
 
@@ -232,4 +247,223 @@ bool UInspectorPropertyItem::ApplyFromText(const FString& NewText, FString& OutE
     }
 
     return true;
+}
+
+// ===== Struct helpers (Vector/Rotator/Transform/Color) =====
+
+static bool RI_GetStructPtr(UObject* Target, FName PropertyName, const UScriptStruct* WantStruct, void*& OutValuePtr, FProperty*& OutProp)
+{
+    OutValuePtr = nullptr;
+    OutProp = nullptr;
+    if (!Target) return false;
+
+    FProperty* Prop = InspectorPropertyUtils::FindProperty(Target, PropertyName);
+    if (!Prop) return false;
+
+    const FStructProperty* SP = CastField<FStructProperty>(Prop);
+    if (!SP || SP->Struct != WantStruct) return false;
+
+    void* ValuePtr = Prop->ContainerPtrToValuePtr<void>(Target);
+    if (!ValuePtr) return false;
+
+    OutValuePtr = ValuePtr;
+    OutProp = Prop;
+    return true;
+}
+
+static bool RI_SetStructValue(UInspectorPropertyItem* Item, const void* InStructValue, const UScriptStruct* WantStruct, FString& OutError)
+{
+    OutError.Reset();
+    if (!Item) { OutError = TEXT("Invalid item"); return false; }
+
+    UObject* Obj = Item->GetTargetObject();
+    if (!Obj) { OutError = TEXT("Target invalid"); return false; }
+
+    FProperty* Prop = InspectorPropertyUtils::FindProperty(Obj, Item->GetPropertyFName());
+    if (!Prop) { OutError = TEXT("Property not found"); return false; }
+
+    if (!InspectorPropertyUtils::IsEditableProperty(Prop))
+    {
+        OutError = TEXT("Property is not editable");
+        return false;
+    }
+
+    const FStructProperty* SP = CastField<FStructProperty>(Prop);
+    if (!SP || SP->Struct != WantStruct)
+    {
+        OutError = TEXT("Property is not the expected struct type");
+        return false;
+    }
+
+    // 1) old text
+    FString OldText;
+    InspectorPropertyUtils::GetValueAsText(Obj, Item->GetPropertyFName(), OldText);
+
+    // 2) write memory
+    void* ValuePtr = Prop->ContainerPtrToValuePtr<void>(Obj);
+    if (!ValuePtr)
+    {
+        OutError = TEXT("Invalid value pointer");
+        return false;
+    }
+
+    SP->Struct->CopyScriptStruct(ValuePtr, InStructValue);
+
+    // 3) runtime fixups (minimal)
+    if (UActorComponent* AC = Cast<UActorComponent>(Obj))
+    {
+        AC->MarkRenderStateDirty();
+        AC->MarkRenderTransformDirty();
+    }
+
+    if (USceneComponent* SC = Cast<USceneComponent>(Obj))
+    {
+        // If user edits these common fields, go through setters to ensure engine side-effects.
+        const FName PName = Item->GetPropertyFName();
+        if (PName == TEXT("RelativeLocation"))
+        {
+            SC->SetRelativeLocation(SC->GetRelativeLocation());
+        }
+        else if (PName == TEXT("RelativeRotation"))
+        {
+            SC->SetRelativeRotation(SC->GetRelativeRotation());
+        }
+        else if (PName == TEXT("RelativeScale3D"))
+        {
+            SC->SetRelativeScale3D(SC->GetRelativeScale3D());
+        }
+        else if (PName == TEXT("RelativeTransform"))
+        {
+            SC->SetRelativeTransform(SC->GetRelativeTransform());
+        }
+    }
+
+    // 4) new text + record change
+    FString NewText;
+    InspectorPropertyUtils::GetValueAsText(Obj, Item->GetPropertyFName(), NewText);
+
+    if (UInspectorWorldSubsystem* Sub = Cast<UInspectorWorldSubsystem>(Item->GetOuter()))
+    {
+        FInspectorChange Change;
+        Change.Target = Obj;
+        Change.PropertyName = Item->GetPropertyFName();
+        Change.OldValueText = OldText;
+        Change.NewValueText = NewText;
+        Change.DebugObjectName = GetNameSafe(Obj);
+        Sub->RecordChange(Change);
+    }
+
+    return true;
+}
+
+bool UInspectorPropertyItem::GetVector2D(FVector2D& OutValue) const
+{
+    OutValue = FVector2D::ZeroVector;
+    void* Ptr = nullptr;
+    FProperty* Prop = nullptr;
+    if (!Target.IsValid()) return false;
+    if (!RI_GetStructPtr(Target.Get(), PropertyName, TBaseStructure<FVector2D>::Get(), Ptr, Prop)) return false;
+    OutValue = *reinterpret_cast<FVector2D*>(Ptr);
+    return true;
+}
+
+bool UInspectorPropertyItem::GetVector(FVector& OutValue) const
+{
+    OutValue = FVector::ZeroVector;
+    void* Ptr = nullptr;
+    FProperty* Prop = nullptr;
+    if (!Target.IsValid()) return false;
+    if (!RI_GetStructPtr(Target.Get(), PropertyName, TBaseStructure<FVector>::Get(), Ptr, Prop)) return false;
+    OutValue = *reinterpret_cast<FVector*>(Ptr);
+    return true;
+}
+
+bool UInspectorPropertyItem::GetVector4(FVector4& OutValue) const
+{
+    OutValue = FVector4(0,0,0,0);
+    void* Ptr = nullptr;
+    FProperty* Prop = nullptr;
+    if (!Target.IsValid()) return false;
+    if (!RI_GetStructPtr(Target.Get(), PropertyName, TBaseStructure<FVector4>::Get(), Ptr, Prop)) return false;
+    OutValue = *reinterpret_cast<FVector4*>(Ptr);
+    return true;
+}
+
+bool UInspectorPropertyItem::GetRotator(FRotator& OutValue) const
+{
+    OutValue = FRotator::ZeroRotator;
+    void* Ptr = nullptr;
+    FProperty* Prop = nullptr;
+    if (!Target.IsValid()) return false;
+    if (!RI_GetStructPtr(Target.Get(), PropertyName, TBaseStructure<FRotator>::Get(), Ptr, Prop)) return false;
+    OutValue = *reinterpret_cast<FRotator*>(Ptr);
+    return true;
+}
+
+bool UInspectorPropertyItem::GetTransform(FTransform& OutValue) const
+{
+    OutValue = FTransform::Identity;
+    void* Ptr = nullptr;
+    FProperty* Prop = nullptr;
+    if (!Target.IsValid()) return false;
+    if (!RI_GetStructPtr(Target.Get(), PropertyName, TBaseStructure<FTransform>::Get(), Ptr, Prop)) return false;
+    OutValue = *reinterpret_cast<FTransform*>(Ptr);
+    return true;
+}
+
+bool UInspectorPropertyItem::GetLinearColor(FLinearColor& OutValue) const
+{
+    OutValue = FLinearColor::Black;
+    void* Ptr = nullptr;
+    FProperty* Prop = nullptr;
+    if (!Target.IsValid()) return false;
+    if (!RI_GetStructPtr(Target.Get(), PropertyName, TBaseStructure<FLinearColor>::Get(), Ptr, Prop)) return false;
+    OutValue = *reinterpret_cast<FLinearColor*>(Ptr);
+    return true;
+}
+
+bool UInspectorPropertyItem::GetColor(FColor& OutValue) const
+{
+    OutValue = FColor::Black;
+    void* Ptr = nullptr;
+    FProperty* Prop = nullptr;
+    if (!Target.IsValid()) return false;
+    if (!RI_GetStructPtr(Target.Get(), PropertyName, TBaseStructure<FColor>::Get(), Ptr, Prop)) return false;
+    OutValue = *reinterpret_cast<FColor*>(Ptr);
+    return true;
+}
+
+bool UInspectorPropertyItem::SetVector2D(const FVector2D& InValue, FString& OutError)
+{
+    return RI_SetStructValue(this, &InValue, TBaseStructure<FVector2D>::Get(), OutError);
+}
+
+bool UInspectorPropertyItem::SetVector(const FVector& InValue, FString& OutError)
+{
+    return RI_SetStructValue(this, &InValue, TBaseStructure<FVector>::Get(), OutError);
+}
+
+bool UInspectorPropertyItem::SetVector4(const FVector4& InValue, FString& OutError)
+{
+    return RI_SetStructValue(this, &InValue, TBaseStructure<FVector4>::Get(), OutError);
+}
+
+bool UInspectorPropertyItem::SetRotator(const FRotator& InValue, FString& OutError)
+{
+    return RI_SetStructValue(this, &InValue, TBaseStructure<FRotator>::Get(), OutError);
+}
+
+bool UInspectorPropertyItem::SetTransform(const FTransform& InValue, FString& OutError)
+{
+    return RI_SetStructValue(this, &InValue, TBaseStructure<FTransform>::Get(), OutError);
+}
+
+bool UInspectorPropertyItem::SetLinearColor(const FLinearColor& InValue, FString& OutError)
+{
+    return RI_SetStructValue(this, &InValue, TBaseStructure<FLinearColor>::Get(), OutError);
+}
+
+bool UInspectorPropertyItem::SetColor(const FColor& InValue, FString& OutError)
+{
+    return RI_SetStructValue(this, &InValue, TBaseStructure<FColor>::Get(), OutError);
 }
