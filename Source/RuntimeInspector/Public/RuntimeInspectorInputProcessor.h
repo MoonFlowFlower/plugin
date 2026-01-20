@@ -16,6 +16,7 @@ public:
         FSlateApplication& SlateApp,
         TSharedRef<ICursor, ESPMode::ThreadSafe> Cursor) override;
 
-   
+    virtual bool HandleMouseButtonDownEvent(FSlateApplication& SlateApp, const FPointerEvent& MouseEvent) override;
+
     virtual bool HandleKeyDownEvent(FSlateApplication& SlateApp, const FKeyEvent& InKeyEvent) override;
 };

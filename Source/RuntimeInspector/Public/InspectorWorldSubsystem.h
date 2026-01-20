@@ -25,9 +25,9 @@
 //    UPROPERTY() FString OldValueText;
 //    UPROPERTY() FString NewValueText;
 //
-//    UPROPERTY() FString DebugObjectName; // ¿ÉÑ¡£¬±ãÓÚÈÕÖ¾
+//    UPROPERTY() FString DebugObjectName; // ï¿½ï¿½Ñ¡ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö¾
 //};
-
+class UCameraComponent;
 class UUserWidget;
 class UInspectorPropertyItem;
 class FRuntimeInspectorInputProcessor;
@@ -45,17 +45,17 @@ enum class EInspectorChangeType : uint8
 UENUM()
 enum class ERIPropertyViewMode : uint8
 {
-    Full,           // Ä¬ÈÏ£ºActor + Components + Materials£¨ÄãÏÖÔÚÕâÑù£©
-    MaterialOnly,   // Ö»ÏÔÊ¾Ä³¸ö×é¼şµÄ Materials ²ÎÊı
+    Full,           // Ä¬ï¿½Ï£ï¿½Actor + Components + Materialsï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+    MaterialOnly,   // Ö»ï¿½ï¿½Ê¾Ä³ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ Materials ï¿½ï¿½ï¿½ï¿½
 };
 
 UENUM(BlueprintType)
 enum class EInspectorRefreshReason : uint8
 {
-    ValuesChanged UMETA(DisplayName = "Values Changed"),      // Ö»Ë¢ĞÂÏÔÊ¾Öµ
-    UIStateChanged UMETA(DisplayName = "UI State Changed"),   // ÕÛµş/ËÑË÷µÈ
-    UndoRedo UMETA(DisplayName = "Undo/Redo"),                // ĞèÒªÓ²Ë¢ĞÂ Entry
-    StructureChanged UMETA(DisplayName = "Structure Changed"),// ×é¼şÔöÉ¾/Ñ¡ÖĞ±ä»¯
+    ValuesChanged UMETA(DisplayName = "Values Changed"),      // Ö»Ë¢ï¿½ï¿½ï¿½ï¿½Ê¾Öµ
+    UIStateChanged UMETA(DisplayName = "UI State Changed"),   // ï¿½Ûµï¿½/ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+    UndoRedo UMETA(DisplayName = "Undo/Redo"),                // ï¿½ï¿½ÒªÓ²Ë¢ï¿½ï¿½ Entry
+    StructureChanged UMETA(DisplayName = "Structure Changed"),// ï¿½ï¿½ï¿½ï¿½ï¿½É¾/Ñ¡ï¿½Ğ±ä»¯
     TargetInvalid UMETA(DisplayName = "Target Invalid"),      // Actor Ê§Ğ§
 };
 
@@ -74,17 +74,17 @@ struct FInspectorChange
 {
     GENERATED_BODY()
 
-    // ====== ÄãÏÖÓĞ×Ö¶Î£¨Ê¾Àı£©======
+    // ====== ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö¶Î£ï¿½Ê¾ï¿½ï¿½ï¿½ï¿½======
     UPROPERTY() TWeakObjectPtr<UObject> Target;
     UPROPERTY() FName PropertyName = NAME_None;
     UPROPERTY() FString OldValueText;
     UPROPERTY() FString NewValueText;
     UPROPERTY() FString DebugObjectName;
 
-    // ====== ĞÂÔö£ºÀàĞÍ ======
+    // ====== ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ======
     UPROPERTY() EInspectorChangeType ChangeType = EInspectorChangeType::Property;
 
-    // ====== ĞÂÔö£º²ÄÖÊ²ÎÊı»Ø·ÅËùĞèĞÅÏ¢ ======
+    // ====== ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê²ï¿½ï¿½ï¿½ï¿½Ø·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ï¢ ======
     UPROPERTY() TWeakObjectPtr<UPrimitiveComponent> TargetComponent;
     UPROPERTY() int32 MaterialIndex = INDEX_NONE;
     UPROPERTY() FName ParamName = NAME_None;
@@ -103,7 +103,7 @@ UCLASS()
 class RUNTIMEINSPECTOR_API UInspectorWorldSubsystem : public UTickableWorldSubsystem
 {
     GENERATED_BODY()
-	//Modified Ïà¹Ø
+	//Modified ï¿½ï¿½ï¿½
 public:
     UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Modified")
     bool RevertModifiedForSelection(int32& OutRevertedCount, int32& OutFailedCount, FString& OutError);
@@ -148,7 +148,7 @@ public:
     bool IsOpen() const { return bOpen; }
 
     UFUNCTION(BlueprintCallable, Category = "RuntimeInspector")
-    void PickActorInView(); // F2: ÊÓ½ÇÖĞĞÄÉäÏßÑ¡ÖĞ
+    void PickActorInView(); // F2: ï¿½Ó½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ñ¡ï¿½ï¿½
 
 
     UFUNCTION(BlueprintPure, Category = "RuntimeInspector")
@@ -178,7 +178,7 @@ public:
     UFUNCTION(BlueprintCallable, Category = "RuntimeInspector")
     bool Redo();
 
-    // ¸ø PropertyItem µ÷ÓÃ
+    // ï¿½ï¿½ PropertyItem ï¿½ï¿½ï¿½ï¿½
     void RecordChange(const FInspectorChange& Change);
 
     void OnUndoKeyPressed();
@@ -187,7 +187,7 @@ public:
     bool IsInspectorOpen() const { return bInspectorOpen; }
 
 
-    // >>> ADD£ºÕÛµş×´Ì¬¿ØÖÆ£¨BP µã»÷×é±êÌâÓÃ£©
+    // >>> ADDï¿½ï¿½ï¿½Ûµï¿½×´Ì¬ï¿½ï¿½ï¿½Æ£ï¿½BP ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ã£ï¿½
     UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Groups")
     void ToggleGroupExpanded(const FString& GroupKey, bool bDefault);
 
@@ -237,13 +237,12 @@ public:
 
 
 private:
-    void TryBindInputs();
     APlayerController* GetLocalPC() const;
     bool ApplyChange(const FInspectorChange& Change, bool bUseNewValue);
     void EnsurePanelWidget();
     //void RefreshPanel();
 
-    // <<< ADD£ºÕÛµş×´Ì¬¿ØÖÆ
+    // <<< ADDï¿½ï¿½ï¿½Ûµï¿½×´Ì¬ï¿½ï¿½ï¿½ï¿½
     UPROPERTY()
     TMap<FString, bool> GroupExpandedMap;
 
@@ -261,7 +260,7 @@ private:
 
     TWeakObjectPtr<UUserWidget> PanelWidget;
 
-    // Äã¿ÉÒÔºóĞø×ö³ÉÉèÖÃÏî£»ÏÈÓ²±àÂëÒ»¸öÄ¬ÈÏÂ·¾¶
+    // ï¿½ï¿½ï¿½ï¿½Ôºï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½î£»ï¿½ï¿½Ó²ï¿½ï¿½ï¿½ï¿½Ò»ï¿½ï¿½Ä¬ï¿½ï¿½Â·ï¿½ï¿½
     UPROPERTY()
     TSoftClassPtr<UUserWidget> PanelWidgetClass;
 
@@ -275,7 +274,7 @@ private:
 
 	
 
-    // >>> ADD£º¸¨Öú£º¹¹½¨ Key / °×Ãûµ¥ / ÊÕ¼¯ÊôĞÔ
+    // >>> ADDï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ Key / ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ / ï¿½Õ¼ï¿½ï¿½ï¿½ï¿½ï¿½
     static FString MakeComponentKey(const AActor* Actor, const UActorComponent* Comp);
     static bool IsWhitelistedComponent(const UActorComponent* Comp);
 
@@ -294,14 +293,14 @@ private:
 
 	// Lifecycle
     private:
-        // --- ÉúÃüÖÜÆÚ°ó¶¨ ---
+        // --- ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ú°ï¿½ ---
         void BindToSelectedActor(AActor* Actor);
         void UnbindFromSelectedActor();
 
         UFUNCTION()
         void HandleSelectedActorDestroyed(AActor* DestroyedActor);
 
-        // --- Item ¸´ÓÃ³Ø£º±ÜÃâÃ¿´Î GetPropertyItemsForSelected ¶¼ NewObject ---
+        // --- Item ï¿½ï¿½ï¿½Ã³Ø£ï¿½ï¿½ï¿½ï¿½ï¿½Ã¿ï¿½ï¿½ GetPropertyItemsForSelected ï¿½ï¿½ NewObject ---
         UPROPERTY(Transient)
         TMap<FString, TObjectPtr<UObject>> ItemPool;
 
@@ -311,13 +310,13 @@ private:
         UInspectorPropertyItem* GetOrCreatePropertyItem(UObject* TargetObject, FName PropertyName);
         UInspectorMaterialParamItem* GetOrCreateMaterialItem(UMeshComponent* Comp, int32 Slot, FName ParamName, EInspectorMatParamType Type);
 
-        // --- ÇáÁ¿ÉúÃüÖÜÆÚĞ£Ñé£¨TickÀïÓÃ£©---
+        // --- ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ğ£ï¿½é£¨Tickï¿½ï¿½ï¿½Ã£ï¿½---
         float ValidateAccum = 0.f;
         void ValidateSelection();
 
-        // --- Ë¢ĞÂ£º´øÔ­Òò£¬¸ø BP ¾ö¶¨ RequestRefresh / Regenerate / Rebuild ---
+        // --- Ë¢ï¿½Â£ï¿½ï¿½ï¿½Ô­ï¿½ò£¬¸ï¿½ BP ï¿½ï¿½ï¿½ï¿½ RequestRefresh / Regenerate / Rebuild ---
         void RefreshPanel(EInspectorRefreshReason Reason);
-        void RefreshPanel(); // ¼æÈİ¾Éµ÷ÓÃ
+        void RefreshPanel(); // ï¿½ï¿½ï¿½İ¾Éµï¿½ï¿½ï¿½
 
 
     // ===== Favorites persistence =====
@@ -330,7 +329,7 @@ private:
 
         FString MakeFavoriteKeyForProperty(UObject* TargetObject, FName PropertyName) const;
 
-        // ¸ø GetPropertyItemsForSelected ÓÃ£º°Ñµ±Ç° OutItems ÀïÄÜ pin µÄÌô³öÀ´
+        // ï¿½ï¿½ GetPropertyItemsForSelected ï¿½Ã£ï¿½ï¿½Ñµï¿½Ç° OutItems ï¿½ï¿½ï¿½ï¿½ pin ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
         void InsertPinnedGroupIfNeeded(TArray<UObject*>& OutItems);
 
         // ===== Snapshot state (Only Modified / Export / Import) =====
@@ -363,7 +362,7 @@ private:
                     PropertyViewMode = ERIPropertyViewMode::MaterialOnly;
                     ViewMeshComp = InComp;
                     ViewMaterialSlot = InSlot;
-                    RefreshPanel(); // ÄãÏÖÔÚÊÇ OnInspectorRefreshEx£¬¾Í×ßÄÇ¸ö
+                    RefreshPanel(); // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ OnInspectorRefreshExï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ç¸ï¿½
         #endif
                 }
 
@@ -440,6 +439,36 @@ private:
 
         UPROPERTY()
         FString SelectedGroupKey;
+
+		// ===== Input Binding =====
+    public:
+        UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Selection")
+        bool PickActorUnderCursor();
+    private:
+        void TryBindInputs();
+        void OnPickKeyPressed(); // NEW
+
+		// ===== Actor Outline Support =====
+    private:
+        TWeakObjectPtr<AActor> OutlinedActor;
+
+        bool bWarnedCustomDepthStencil = false;
+        bool EnsureCustomDepthStencilEnabled();
+
+        void SetActorOutline(AActor* Actor, bool bEnable, int32 StencilValue = 1);
+
+        UCameraComponent* FindOutlineCamera(APlayerController* PC) const;
+
+        void EnableOutlinePP(bool bEnable);
+
+        // è¿è¡Œæ—¶åˆ›å»ºçš„ MID
+        UPROPERTY(Transient)
+        TObjectPtr<UMaterialInstanceDynamic> OutlineMID;
+
+        // è®°å½•ç›¸æœºåŸæœ¬çš„ PostProcessBlendWeightï¼Œå…³é—­æ—¶æ¢å¤
+        float SavedCamPPBlendWeight = 0.0f;
+        bool bSavedCamPPBlendWeightValid = false;
+
 };
 
 

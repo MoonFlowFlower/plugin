@@ -35,8 +35,9 @@ public class RuntimeInspector : ModuleRules
 				"SlateCore",
 				"Json", 
 				"JsonUtilities",
-                "InputCore"        
-			}
+                "InputCore",
+				"DeveloperSettings"
+            }
 		);
 			
 		

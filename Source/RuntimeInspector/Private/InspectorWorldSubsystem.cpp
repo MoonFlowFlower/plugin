@@ -1,5 +1,4 @@
 ﻿#include "InspectorWorldSubsystem.h"
-#include "RuntimeInspectorInputProcessor.h"
 #include "InspectorGroupItem.h"
 #include "InspectorPropertyUtils.h"
 #include "InspectorDefines.h"
@@ -7,34 +6,34 @@
 #include "InspectorMaterialParamItem.h"
 #include "InspectorSnapshotItem.h"
 
-// For TBaseStructure<>
-#include "UObject/NoExportTypes.h"
-
-
-#include "HAL/PlatformFilemanager.h"
-#include "HAL/IConsoleManager.h"
-#include "HAL/PlatformApplicationMisc.h"
-
-#include "Dom/JsonObject.h"
+#include "RuntimeInspectorInputProcessor.h"
+#include "RuntimeInspectorSettings.h"
 
 #include "Blueprint/UserWidget.h"
 
+
+#include "Components/StaticMeshComponent.h"
+#include "Components/LightComponent.h"
+#include "Components/PrimitiveComponent.h"
+
+#include "Camera/CameraComponent.h"
+
+#include "Dom/JsonObject.h"
+
 #include "Engine/World.h"
 #include "EngineUtils.h"
-
-#include "Kismet/GameplayStatics.h"
+#include "Engine/Scene.h" 
 
 #include "Framework/Application/SlateApplication.h"
 
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/CharacterMovementComponent.h"
 
-#include "UObject/Class.h"
-#include "UObject/UnrealType.h"
+#include "HAL/PlatformFilemanager.h"
+#include "HAL/IConsoleManager.h"
+#include "HAL/PlatformApplicationMisc.h"
 
-#include "Components/StaticMeshComponent.h"
-#include "Components/LightComponent.h"
-#include "Components/PrimitiveComponent.h"
+#include "Kismet/GameplayStatics.h"
 
 #include "Materials/Material.h"
 #include "Materials/MaterialInterface.h"
@@ -47,6 +46,10 @@
 
 #include "Serialization/JsonWriter.h"
 #include "Serialization/JsonSerializer.h"
+
+#include "UObject/Class.h"
+#include "UObject/UnrealType.h"
+#include "UObject/NoExportTypes.h"
 
 // =======================
 // Property Whitelists (MVP)
@@ -342,11 +345,18 @@ void UInspectorWorldSubsystem::TryBindInputs()
 
     PC->InputComponent->BindKey(EKeys::Z, IE_Pressed, this, &UInspectorWorldSubsystem::OnUndoKeyPressed);
     PC->InputComponent->BindKey(EKeys::Y, IE_Pressed, this, &UInspectorWorldSubsystem::OnRedoKeyPressed);
-    // F1 Toggle
-    PC->InputComponent->BindKey(EKeys::O, IE_Pressed, this, &UInspectorWorldSubsystem::Toggle);
 
-    // F2 Pick
-    PC->InputComponent->BindKey(EKeys::P, IE_Pressed, this, &UInspectorWorldSubsystem::PickActorInView);
+    const URuntimeInspectorSettings* Settings = GetDefault<URuntimeInspectorSettings>();
+
+    const FKey ToggleKey = Settings ? Settings->ToggleKey : EKeys::O;
+    const FKey PickKey = Settings ? Settings->PickKey : EKeys::P;
+
+    PC->InputComponent->BindKey(ToggleKey, IE_Pressed, this, &UInspectorWorldSubsystem::Toggle);
+    PC->InputComponent->BindKey(PickKey, IE_Pressed, this, &UInspectorWorldSubsystem::OnPickKeyPressed);
+    //// F1 Toggle
+    //PC->InputComponent->BindKey(EKeys::O, IE_Pressed, this, &UInspectorWorldSubsystem::Toggle);
+    //// F2 Pick
+    //PC->InputComponent->BindKey(EKeys::P, IE_Pressed, this, &UInspectorWorldSubsystem::PickActorInView);
 
     bInputsBound = true;
 #endif
@@ -366,7 +376,7 @@ void UInspectorWorldSubsystem::Open()
 #if RUNTIME_INSPECTOR_ENABLED
     if (bOpen) return;
     bOpen = true;
-
+    bInspectorOpen = true;
 
     RegisterInputProcessor();
 
@@ -385,7 +395,7 @@ void UInspectorWorldSubsystem::Open()
         Mode.SetHideCursorDuringCapture(false);
         PC->SetInputMode(Mode);
     }
-
+    EnableOutlinePP(true);
     RefreshPanel();
 #endif
 }
@@ -397,7 +407,7 @@ void UInspectorWorldSubsystem::Close()
 
     if (!bOpen) return;
     bOpen = false;
-
+    bInspectorOpen = false;
     if (UUserWidget* W = PanelWidget.Get())
     {
         W->RemoveFromParent();
@@ -408,6 +418,10 @@ void UInspectorWorldSubsystem::Close()
         PC->bShowMouseCursor = false;
         PC->SetInputMode(FInputModeGameOnly());
     }
+    if (AActor* A = OutlinedActor.Get())
+    { SetActorOutline(A, false); }
+    OutlinedActor.Reset();
+    EnableOutlinePP(false);
 #endif
 }
 
@@ -426,6 +440,34 @@ void UInspectorWorldSubsystem::EnsurePanelWidget()
     PanelWidget = W;
 #endif
 }
+bool UInspectorWorldSubsystem::PickActorUnderCursor()
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    APlayerController* PC = GetLocalPC();
+    if (!PC) return false;
+
+    // 你也可以改成 ECC_Camera / 自定义 TraceChannel
+    FHitResult Hit;
+    const bool bHit = PC->GetHitResultUnderCursorByChannel(
+        UEngineTypes::ConvertToTraceType(ECC_Visibility),
+        /*bTraceComplex=*/ true,
+        Hit
+    );
+
+    AActor* HitActor = Hit.GetActor();
+    if (!bHit || !HitActor) return false;
+
+    // ✅ 这里要复用你现有“选中一个Actor后”的逻辑
+    // 常见是：SelectedActor = HitActor; Refresh/RequestRebuild/OnInspectorRefreshEx 等
+    // 我不写伪代码：你项目里一般是走 SetSelectedActor / SetSelectedObject 这类函数
+    // 直接调用你已有的“设置选中”的函数即可，例如：
+    SetSelectedActor(HitActor);   // <- 用你项目里真实存在的函数名替换/对应
+    return true;
+#else
+    return false;
+#endif
+}
+
 
 void UInspectorWorldSubsystem::PickActorInView()
 {
@@ -436,16 +478,31 @@ void UInspectorWorldSubsystem::PickActorInView()
     APlayerController* PC = GetLocalPC();
     if (!PC) return;
 
-    FVector CamLoc;
-    FRotator CamRot;
-    PC->GetPlayerViewPoint(CamLoc, CamRot);
+    // 1) 拿鼠标在 viewport 内的坐标（像素）
+    float MouseX = 0.f;
+    float MouseY = 0.f;
+    if (!PC->GetMousePosition(MouseX, MouseY))
+    {
+        return;
+    }
 
-    const FVector Start = CamLoc;
-    const FVector End = Start + CamRot.Vector() * 100000.f;
+    // 2) 反投影到世界射线
+    FVector WorldOrigin;
+    FVector WorldDir;
+    if (!PC->DeprojectScreenPositionToWorld(MouseX, MouseY, WorldOrigin, WorldDir))
+    {
+        return;
+    }
+
+    const FVector Start = WorldOrigin;
+    const FVector End = Start + WorldDir * 100000.f;
 
     FHitResult Hit;
     FCollisionQueryParams Params(SCENE_QUERY_STAT(RuntimeInspectorPick), true);
     Params.bReturnPhysicalMaterial = false;
+
+    // 可选：避免点到自己控制的Pawn/Character（如果你想）
+    // if (APawn* Pawn = PC->GetPawn()) { Params.AddIgnoredActor(Pawn); }
 
     if (GetWorld()->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, Params))
     {
@@ -457,6 +514,37 @@ void UInspectorWorldSubsystem::PickActorInView()
 #endif
 }
 
+
+//void UInspectorWorldSubsystem::PickActorInView()
+//{
+//    UE_LOG(LogTemp, Log, TEXT("Test:::::::PickActorInView"));
+//#if RUNTIME_INSPECTOR_ENABLED
+//    if (!bOpen) return;
+//
+//    APlayerController* PC = GetLocalPC();
+//    if (!PC) return;
+//
+//    FVector CamLoc;
+//    FRotator CamRot;
+//    PC->GetPlayerViewPoint(CamLoc, CamRot);
+//
+//    const FVector Start = CamLoc;
+//    const FVector End = Start + CamRot.Vector() * 100000.f;
+//
+//    FHitResult Hit;
+//    FCollisionQueryParams Params(SCENE_QUERY_STAT(RuntimeInspectorPick), true);
+//    Params.bReturnPhysicalMaterial = false;
+//
+//    if (GetWorld()->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, Params))
+//    {
+//        if (AActor* HitActor = Hit.GetActor())
+//        {
+//            SetSelectedActor(HitActor);
+//        }
+//    }
+//#endif
+//}
+
 void UInspectorWorldSubsystem::SetSelectedActor(AActor* NewActor)
 {
 #if RUNTIME_INSPECTOR_ENABLED
@@ -464,6 +552,25 @@ void UInspectorWorldSubsystem::SetSelectedActor(AActor* NewActor)
     {
         return;
     }
+
+    AActor* Prev = SelectedActor.Get();
+    if (Prev && Prev != NewActor)
+    {
+        SetActorOutline(Prev, false);
+    }
+
+    SelectedActor = NewActor;
+
+    if (NewActor)
+    {
+        SetActorOutline(NewActor, true, /*StencilValue=*/ 1);
+        OutlinedActor = NewActor;
+    }
+    else
+    {
+        OutlinedActor.Reset();
+    }
+
 
     UnbindFromSelectedActor();
     SelectedActor = NewActor;
@@ -485,22 +592,7 @@ void UInspectorWorldSubsystem::SetSelectedActor(AActor* NewActor)
 #endif
 }
 
-//void UInspectorWorldSubsystem::RefreshPanel()
-//{
-//#if RUNTIME_INSPECTOR_ENABLED
-//    // 这里我们不直接依赖你面板的具体类，先用“BlueprintImplementableEvent”方式解耦
-//    // 让 WBP_InspectorPanel 自己去拉取 SelectedActor 并刷新列表
-//    if (UUserWidget* W = PanelWidget.Get())
-//    {
-//        // 约定：WBP_InspectorPanel 里实现一个名为 "OnInspectorRefresh" 的事件
-//        static const FName RefreshFuncName(TEXT("OnInspectorRefresh"));
-//        if (W->GetClass()->FindFunctionByName(RefreshFuncName))
-//        {
-//            W->ProcessEvent(W->FindFunction(RefreshFuncName), nullptr);
-//        }
-//    }
-//#endif
-//}
+
 void UInspectorWorldSubsystem::RefreshPanel()
 {
 #if RUNTIME_INSPECTOR_ENABLED
@@ -1427,6 +1519,36 @@ bool UInspectorWorldSubsystem::ApplyChangeValue(UObject* Target, FName PropName,
     return false;
 #endif
 }
+void UInspectorWorldSubsystem::OnPickKeyPressed()
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    if (!bOpen) return;
+
+    APlayerController* PC = GetLocalPC();
+    if (!PC) return;
+
+    const URuntimeInspectorSettings* Settings = GetDefault<URuntimeInspectorSettings>();
+    if (Settings)
+    {
+        if (Settings->bPickKeyRequiresCtrl)
+        {
+            const bool bCtrl =
+                PC->IsInputKeyDown(EKeys::LeftControl) || PC->IsInputKeyDown(EKeys::RightControl);
+            if (!bCtrl) return;
+        }
+
+        if (Settings->bPickKeyRequiresShift)
+        {
+            const bool bShift =
+                PC->IsInputKeyDown(EKeys::LeftShift) || PC->IsInputKeyDown(EKeys::RightShift);
+            if (!bShift) return;
+        }
+    }
+
+    PickActorInView();
+#endif
+}
+
 
 bool UInspectorWorldSubsystem::Undo()
 {
@@ -4153,6 +4275,164 @@ void UInspectorWorldSubsystem::SetSelectedGroupItem(UInspectorGroupItem* Item)
         // 选中 Actor/组件/MaterialsRoot -> 回到普通属性模式
         // 这里用你项目里“默认模式”的枚举值替换（比如 All / Default / ActorAndComponents 等）
         PropertyViewMode = ERIPropertyViewMode::Full;
+    }
+#endif
+}
+
+void UInspectorWorldSubsystem::SetActorOutline(AActor* Actor, bool bEnable, int32 StencilValue)
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    if (!Actor) return;
+
+    if (bEnable)
+    {
+        if (!EnsureCustomDepthStencilEnabled())
+        {
+            return; // 不满足条件就不做，避免“开了也没效果”
+        }
+    }
+
+
+    TInlineComponentArray<UPrimitiveComponent*> Comps;
+    Actor->GetComponents<UPrimitiveComponent>(Comps);
+
+    for (UPrimitiveComponent* Prim : Comps)
+    {
+        if (!Prim) continue;
+        if (!Prim->IsRegistered()) continue;
+
+        Prim->SetRenderCustomDepth(bEnable);
+
+        if (bEnable)
+        {
+            Prim->SetCustomDepthStencilValue(StencilValue);
+        }
+
+        Prim->MarkRenderStateDirty();
+    }
+
+#endif
+}
+
+bool UInspectorWorldSubsystem::EnsureCustomDepthStencilEnabled()
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    IConsoleVariable* CVar = IConsoleManager::Get().FindConsoleVariable(TEXT("r.CustomDepth"));
+    const int32 Val = CVar ? CVar->GetInt() : 0;
+
+    // 3 = enabled + stencil writes enabled
+    if (Val >= 3) return true;
+
+    if (!bWarnedCustomDepthStencil)
+    {
+        bWarnedCustomDepthStencil = true;
+
+        UE_LOG(LogTemp, Warning,
+            TEXT("[RI] Outline requires Custom Depth-Stencil Pass = 'Enabled with Stencil'. ")
+            TEXT("Please enable it in Project Settings -> Rendering -> Postprocessing -> Custom Depth-Stencil Pass, then restart editor. ")
+            TEXT("(r.CustomDepth current=%d; need >=3)"), Val);
+
+        // 如果你有 RI Toast，就在这里弹一条
+        // RI_Toast(TEXT("Outline needs Custom Depth-Stencil Pass = Enabled with Stencil (restart editor)."));
+    }
+
+    return false;
+#else
+    return false;
+#endif
+}
+
+static void SetBlendableWeight(FPostProcessSettings& PPS, UObject* Blendable, float Weight)
+{
+    if (!Blendable) return;
+
+    TArray<FWeightedBlendable>& Arr = PPS.WeightedBlendables.Array;
+    for (FWeightedBlendable& B : Arr)
+    {
+        if (B.Object == Blendable)
+        {
+            B.Weight = Weight;
+            return;
+        }
+    }
+
+    Arr.Add(FWeightedBlendable(Weight, Blendable));
+}
+
+UCameraComponent* UInspectorWorldSubsystem::FindOutlineCamera(APlayerController* PC) const
+{
+    if (!PC) return nullptr;
+
+    // 优先 ViewTarget（更通用：相机可能不在 Pawn 上）
+    if (AActor* VT = PC->GetViewTarget())
+    {
+        if (UCameraComponent* Cam = VT->FindComponentByClass<UCameraComponent>())
+        {
+            return Cam;
+        }
+    }
+
+    // 再退化到 Pawn
+    if (APawn* P = PC->GetPawn())
+    {
+        return P->FindComponentByClass<UCameraComponent>();
+    }
+
+    return nullptr;
+}
+
+
+void UInspectorWorldSubsystem::EnableOutlinePP(bool bEnable)
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    APlayerController* PC = GetLocalPC();
+    if (!PC) return;
+
+    UCameraComponent* Cam = FindOutlineCamera(PC);
+    if (!Cam) return;
+
+    const URuntimeInspectorSettings* S = GetDefault<URuntimeInspectorSettings>();
+    if (!S || !S->bEnableOutlinePP) return;
+
+    if (bEnable)
+    {
+        UMaterialInterface* Mat = S->OutlinePostProcessMaterial.LoadSynchronous();
+        if (!Mat)
+        {
+            PushToast(ERIToastType::Warning, TEXT("Outline PP material not set. (Project Settings -> Plugins -> Runtime Inspector -> Outline)"));
+            return;
+        }
+
+        if (!OutlineMID || OutlineMID->Parent != Mat)
+        {
+            OutlineMID = UMaterialInstanceDynamic::Create(Mat, Cam);
+        }
+
+        // 确保相机 PP 权重 > 0，否则相机 PP 不生效
+        if (!bSavedCamPPBlendWeightValid)
+        {
+            SavedCamPPBlendWeight = Cam->PostProcessBlendWeight;
+            bSavedCamPPBlendWeightValid = true;
+        }
+        if (Cam->PostProcessBlendWeight <= 0.0f)
+        {
+            Cam->PostProcessBlendWeight = 1.0f;
+        }
+
+        SetBlendableWeight(Cam->PostProcessSettings, OutlineMID, S->OutlinePPWeight);
+    }
+    else
+    {
+        if (OutlineMID)
+        {
+            SetBlendableWeight(Cam->PostProcessSettings, OutlineMID, 0.0f);
+        }
+
+        if (bSavedCamPPBlendWeightValid)
+        {
+            Cam->PostProcessBlendWeight = SavedCamPPBlendWeight;
+            bSavedCamPPBlendWeightValid = false;
+        }
     }
 #endif
 }

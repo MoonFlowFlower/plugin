@@ -1,5 +1,7 @@
 #include "RuntimeInspectorInputProcessor.h"
+#include "RuntimeInspectorSettings.h"
 #include "InspectorWorldSubsystem.h"
+
 #include "Framework/Application/SlateApplication.h"
 #include "InputCoreTypes.h"
 
@@ -8,11 +10,10 @@ bool FRuntimeInspectorInputProcessor::HandleKeyDownEvent(FSlateApplication& Slat
     UInspectorWorldSubsystem* Sub = Subsystem.Get();
     if (!Sub) return false;
 
-    // Ö»ÔÚÃæ°å´ò¿ªÊ±²ÅÀ¹½Ø
-    if (!Sub->IsInspectorOpen()) return false;
 
-    // ±ÜÃâ°´×¡¼üµ¼ÖÂÖØ¸´´¥·¢
-    if (InKeyEvent.IsRepeat()) return true; // ÄãÒ²¿ÉÒÔ return false£¬µ«Í¨³£ true ¸ü¡°ËøËÀ¡±ĞĞÎª
+    //if (!Sub->IsInspectorOpen()) return false;
+    if (!Sub->IsOpen()) return false;
+    if (InKeyEvent.IsRepeat()) return true; 
 
     const bool bCtrl = InKeyEvent.IsControlDown();
     const bool bShift = InKeyEvent.IsShiftDown();
@@ -43,4 +44,23 @@ void FRuntimeInspectorInputProcessor::Tick(
 {
     // no-op
     
+}
+
+bool FRuntimeInspectorInputProcessor::HandleMouseButtonDownEvent(FSlateApplication& SlateApp, const FPointerEvent& MouseEvent)
+{
+    UInspectorWorldSubsystem* Sub = Subsystem.Get();
+    if (!Sub) return false;
+
+    if (!Sub->IsOpen()) return false;
+
+    const URuntimeInspectorSettings* Settings = GetDefault<URuntimeInspectorSettings>();
+    if (!Settings || !Settings->bEnableRightMousePick) return false;
+
+    if (MouseEvent.GetEffectingButton() != EKeys::RightMouseButton) return false;
+
+    if (Settings->bRightMousePickRequiresCtrl && !MouseEvent.IsControlDown()) return false;
+    if (Settings->bRightMousePickRequiresShift && !MouseEvent.IsShiftDown()) return false;
+
+    Sub->PickActorInView();
+    return true; // åƒæ‰äº‹ä»¶ï¼Œé¿å…å¼¹å‡ºå³é”®èœå•/ä¼ ç»™æ¸¸æˆ
 }
