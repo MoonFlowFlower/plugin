@@ -14,9 +14,14 @@ URuntimeInspectorSettings::URuntimeInspectorSettings()
 
     bEnableOutlinePP = true;
     OutlinePPWeight = 1.0f;
+    ThemePreset = ERuntimeInspectorThemePreset::StudioSlate;
 
     OutlinePostProcessMaterial = TSoftObjectPtr<UMaterialInterface>(
         FSoftObjectPath(TEXT("/RuntimeInspector/Effects/M_RI_OutlinePP.M_RI_OutlinePP"))
     );
-}
 
+    // Security (optional)
+    bRequireUnlock = false;
+    UnlockCode = TEXT("");
+    bAutoLockOnClose = true;
+}

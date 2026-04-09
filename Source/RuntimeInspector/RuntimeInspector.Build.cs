@@ -8,6 +8,7 @@ public class RuntimeInspector : ModuleRules
     public RuntimeInspector(ReadOnlyTargetRules Target) : base(Target)
 	{
         PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
+        PrecompileForTargets = PrecompileTargetsType.Any;
         
         PublicIncludePaths.AddRange(
 			new string[] {
@@ -44,9 +45,21 @@ public class RuntimeInspector : ModuleRules
 		PrivateDependencyModuleNames.AddRange(
 			new string[]
 			{
-                "ApplicationCore"
+                "ApplicationCore",
+                "Networking",
+                "Sockets"
             }
 		);
+
+        if (Target.bBuildEditor)
+        {
+            PrivateDependencyModuleNames.AddRange(
+                new string[]
+                {
+                    "UnrealEd"
+                }
+            );
+        }
 		
 		
 		DynamicallyLoadedModuleNames.AddRange(

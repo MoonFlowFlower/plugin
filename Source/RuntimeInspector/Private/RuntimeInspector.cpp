@@ -2,8 +2,21 @@
 
 #include "RuntimeInspector.h"
 #include "Modules/ModuleManager.h"
+#include "HAL/IConsoleManager.h"
 
 #define LOCTEXT_NAMESPACE "FRuntimeInspectorModule"
+
+static TAutoConsoleVariable<int32> CVarRIThemePreset(
+	TEXT("ri.ThemePreset"),
+	-1,
+	TEXT("RuntimeInspector theme preset override. -1=use project settings, 0=StudioSlate, 1=SoftContrast"),
+	ECVF_Default
+);
+
+int32 RI_GetThemePresetOverrideValue()
+{
+	return CVarRIThemePreset.GetValueOnGameThread();
+}
 
 void FRuntimeInspectorModule::StartupModule()
 {

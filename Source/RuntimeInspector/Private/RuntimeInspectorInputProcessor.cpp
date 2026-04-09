@@ -53,6 +53,11 @@ bool FRuntimeInspectorInputProcessor::HandleMouseButtonDownEvent(FSlateApplicati
 
     if (!Sub->IsOpen()) return false;
 
+    if (MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
+    {
+        return Sub->HandlePanelMouseButtonDown(MouseEvent);
+    }
+
     const URuntimeInspectorSettings* Settings = GetDefault<URuntimeInspectorSettings>();
     if (!Settings || !Settings->bEnableRightMousePick) return false;
 
@@ -63,4 +68,26 @@ bool FRuntimeInspectorInputProcessor::HandleMouseButtonDownEvent(FSlateApplicati
 
     Sub->PickActorInView();
     return true; // 吃掉事件，避免弹出右键菜单/传给游戏
+}
+
+bool FRuntimeInspectorInputProcessor::HandleMouseMoveEvent(FSlateApplication& SlateApp, const FPointerEvent& MouseEvent)
+{
+    UInspectorWorldSubsystem* Sub = Subsystem.Get();
+    if (!Sub || !Sub->IsOpen())
+    {
+        return false;
+    }
+
+    return Sub->HandlePanelMouseMove(MouseEvent);
+}
+
+bool FRuntimeInspectorInputProcessor::HandleMouseButtonUpEvent(FSlateApplication& SlateApp, const FPointerEvent& MouseEvent)
+{
+    UInspectorWorldSubsystem* Sub = Subsystem.Get();
+    if (!Sub || !Sub->IsOpen())
+    {
+        return false;
+    }
+
+    return Sub->HandlePanelMouseButtonUp(MouseEvent);
 }

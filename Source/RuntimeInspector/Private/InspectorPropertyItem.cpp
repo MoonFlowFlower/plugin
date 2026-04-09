@@ -22,7 +22,37 @@ void UInspectorPropertyItem::Init(UObject* InTarget, FName InPropertyName)
 
 FString UInspectorPropertyItem::GetPropertyName() const
 {
-    return PropertyName.ToString();
+    if (!Target.IsValid())
+    {
+        return PropertyName.ToString();
+    }
+
+    const FProperty* Prop = InspectorPropertyUtils::FindProperty(Target.Get(), PropertyName);
+
+    FString DisplayName = PropertyName.ToString();
+    if (Prop)
+    {
+        const FString Friendly = Prop->GetDisplayNameText().ToString();
+        if (!Friendly.IsEmpty())
+        {
+            DisplayName = Friendly;
+        }
+        else
+        {
+            const FString Authored = Prop->GetAuthoredName();
+            if (!Authored.IsEmpty())
+            {
+                DisplayName = Authored;
+            }
+        }
+    }
+
+    if (!OwnerPrefix.IsEmpty())
+    {
+        return FString::Printf(TEXT("%s / %s"), *OwnerPrefix, *DisplayName);
+    }
+
+    return DisplayName;
 }
 
 FString UInspectorPropertyItem::GetValueText()
@@ -42,12 +72,7 @@ bool UInspectorPropertyItem::IsEditable() const
     FProperty* Prop = InspectorPropertyUtils::FindProperty(Target.Get(), PropertyName);
     if (!Prop) return false;
 
-    // ÕâÀïÑØÓÃÄãÖ®Ç°µÄ¡°¿ÉÐ´¡±¹æÔò£º±ØÐëÊÇ Edit ÇÒ²»ÊÇ EditConst µÈ
-    if (!Prop->HasAnyPropertyFlags(CPF_Edit)) return false;
-    //if (Prop->HasAnyPropertyFlags(CPF_EditConst)) return false;
-    //if (Prop->HasAnyPropertyFlags(CPF_DisableEditOnInstance)) return false;
-
-    return true;
+    return InspectorPropertyUtils::CanSetFromText(Target.Get(), Prop);
 }
 
 static EInspectorValueType GetTypeFromProperty(const FProperty* Prop)
@@ -90,6 +115,72 @@ EInspectorValueType UInspectorPropertyItem::GetValueType() const
     return GetTypeFromProperty(Prop);
 }
 
+bool UInspectorPropertyItem::IsReadOnly() const
+{
+    return IsValidItem() && !IsEditable();
+}
+
+static FString RI_GetPropertyTypeLabel(const FProperty* Prop)
+{
+    if (!Prop)
+    {
+        return TEXT("Unknown");
+    }
+
+    if (const FStructProperty* StructProperty = CastField<FStructProperty>(Prop))
+    {
+        return StructProperty->Struct ? StructProperty->Struct->GetName() : TEXT("Struct");
+    }
+    if (const FEnumProperty* EnumProperty = CastField<FEnumProperty>(Prop))
+    {
+        return EnumProperty->GetEnum() ? EnumProperty->GetEnum()->GetName() : TEXT("Enum");
+    }
+    if (const FByteProperty* ByteProperty = CastField<FByteProperty>(Prop))
+    {
+        if (ByteProperty->Enum)
+        {
+            return ByteProperty->Enum->GetName();
+        }
+    }
+
+    return Prop->GetCPPType();
+}
+
+FString UInspectorPropertyItem::GetTypeLabel() const
+{
+    if (!Target.IsValid())
+    {
+        return TEXT("Unknown");
+    }
+
+    FProperty* Prop = InspectorPropertyUtils::FindProperty(Target.Get(), PropertyName);
+    return RI_GetPropertyTypeLabel(Prop);
+}
+
+FString UInspectorPropertyItem::GetReadOnlyReason() const
+{
+    if (!Target.IsValid())
+    {
+        return TEXT("Target invalid");
+    }
+
+    FProperty* Prop = InspectorPropertyUtils::FindProperty(Target.Get(), PropertyName);
+    if (!Prop)
+    {
+        return TEXT("Property not found");
+    }
+    if (!Prop->HasAnyPropertyFlags(CPF_Edit))
+    {
+        return TEXT("Property is visible but not editable");
+    }
+    if (!InspectorPropertyUtils::IsSupportedEditableProperty(Prop))
+    {
+        return FString::Printf(TEXT("Read-only %s"), *RI_GetPropertyTypeLabel(Prop));
+    }
+
+    return FString();
+}
+
 bool UInspectorPropertyItem::IsEnum() const
 {
     return GetValueType() == EInspectorValueType::Enum;
@@ -117,11 +208,13 @@ void UInspectorPropertyItem::GetEnumOptions(TArray<FString>& OutOptions) const
     UEnum* Enum = GetEnumFromProperty(Prop);
     if (!Enum) return;
 
-    // ¹ýÂËµô _MAX Ö®ÀàµÄÒþ²ØÏî£¨¿ÉÑ¡£©
+    // è¿‡æ»¤æŽ‰ _MAX ä¹‹ç±»çš„éšè—é¡¹ï¼ˆå¯é€‰ï¼‰
     const int32 Num = Enum->NumEnums();
     for (int32 i = 0; i < Num; ++i)
     {
+#if WITH_EDITOR
         if (Enum->HasMetaData(TEXT("Hidden"), i)) continue;
+#endif
 
         const FString Name = Enum->GetNameStringByIndex(i);
         if (Name.EndsWith(TEXT("_MAX"))) continue;
@@ -133,119 +226,26 @@ void UInspectorPropertyItem::GetEnumOptions(TArray<FString>& OutOptions) const
 bool UInspectorPropertyItem::ApplyFromText(const FString& NewText, FString& OutError)
 {
     OutError.Reset();
-    if (!Target.IsValid())
+    UObject* Obj = Target.Get();
+    if (!Obj)
     {
         OutError = TEXT("Target invalid");
         return false;
     }
 
-    // 1) ¼ÇÂ¼¾ÉÖµ
-    FString OldText;
-    InspectorPropertyUtils::GetValueAsText(Target.Get(), PropertyName, OldText);
+    // Delegate apply/undo/modified tracking to the subsystem so it can debounce writes.
+    if (UInspectorWorldSubsystem* Sub = Cast<UInspectorWorldSubsystem>(GetOuter()))
+    {
+        return Sub->RequestApplyPropertyText(Obj, PropertyName, NewText, OutError);
+    }
 
-    // 2) Ð´ÈëÐÂÖµ
     FString Err;
-    const bool bOK = InspectorPropertyUtils::SetValueFromText(Target.Get(), PropertyName, NewText, &Err);
+    const bool bOK = InspectorPropertyUtils::SetValueFromText(Obj, PropertyName, NewText, &Err);
     if (!bOK)
     {
         OutError = Err;
         return false;
     }
-
-
-    // 3) ¼ÇÂ¼Ð´ÈëºóµÄ¡°ÕæÊµÖµ¡±£¨¿ÉÄÜ±»¹æ·¶»¯£©
-    FString NewTextActual;
-    InspectorPropertyUtils::GetValueAsText(Target.Get(), PropertyName, NewTextActual);
-
-    // ---- Fixup: make changes take effect immediately (runtime-friendly) ----
-    if (UObject* Obj = Target.Get())
-    {
-        FProperty* Prop = InspectorPropertyUtils::FindProperty(Obj, PropertyName);
-
-        // 1) ¶Ô Scene/Primitive ×é¼þ×öÍ¨ÓÃË¢ÐÂ
-        if (UActorComponent* AC = Cast<UActorComponent>(Obj))
-        {
-            AC->MarkRenderStateDirty();
-            AC->MarkRenderTransformDirty();
-        }
-
-        // 2) ¶Ô¡°³£¼ûÐèÒª×ß setter¡±µÄ×Ö¶Î×ö²¹³¥£¨±ÜÃâ½ö¸ÄÊôÐÔµ«ÒýÇæÃ»´¥·¢ÄÚ²¿Âß¼­£©
-        if (USceneComponent* SC = Cast<USceneComponent>(Obj))
-        {
-            // Visibility
-            if (Prop && PropertyName == TEXT("bVisible"))
-            {
-                if (FBoolProperty* BP = CastField<FBoolProperty>(Prop))
-                {
-                    const bool b = BP->GetPropertyValue_InContainer(Obj);
-                    SC->SetVisibility(b, true);
-                }
-            }
-            // HiddenInGame
-            else if (Prop && PropertyName == TEXT("bHiddenInGame"))
-            {
-                if (FBoolProperty* BP = CastField<FBoolProperty>(Prop))
-                {
-                    const bool b = BP->GetPropertyValue_InContainer(Obj);
-                    SC->SetHiddenInGame(b, true);
-                }
-            }
-            // Mobility£¨ºÜ¶àÇé¿öÏÂÖ»¸ÄÊôÐÔ²»»á´¥·¢ÖØ×¢²á£©
-            else if (Prop && PropertyName == TEXT("Mobility"))
-            {
-                // Mobility Í¨³£ÊÇ enum/byte
-                EComponentMobility::Type Mobility = SC->Mobility;
-
-                if (FEnumProperty* EP = CastField<FEnumProperty>(Prop))
-                {
-                    const void* VPtr = EP->ContainerPtrToValuePtr<void>(Obj);
-                    const int64 V = EP->GetUnderlyingProperty()->GetSignedIntPropertyValue(VPtr);
-                    Mobility = static_cast<EComponentMobility::Type>(V);
-                }
-                else if (FByteProperty* BP = CastField<FByteProperty>(Prop))
-                {
-                    const uint8 V = BP->GetPropertyValue_InContainer(Obj);
-                    Mobility = static_cast<EComponentMobility::Type>(V);
-                }
-
-                SC->SetMobility(Mobility);
-            }
-        }
-
-        // 3) Light ³£¼û×Ö¶Î£¨Intensity ¸ÄÍêÁ¢¿Ì¸üÐÂ£©
-        if (ULightComponent* LC = Cast<ULightComponent>(Obj))
-        {
-            if (Prop && PropertyName == TEXT("Intensity"))
-            {
-                float V = 0.f;
-
-                if (FFloatProperty* FP = CastField<FFloatProperty>(Prop))
-                {
-                    V = FP->GetPropertyValue_InContainer(Obj);
-                }
-                else if (FDoubleProperty* DP = CastField<FDoubleProperty>(Prop))
-                {
-                    V = static_cast<float>(DP->GetPropertyValue_InContainer(Obj));
-                }
-
-                LC->SetIntensity(V);
-            }
-        }
-    }
-    // ---- Fixup end ----
-
-    // 4) °Ñ±ä¸ü½»¸ø Subsystem£¨ÄãµÄ Item Outer ÕýºÃÊÇ Subsystem£©
-    if (UInspectorWorldSubsystem* Sub = Cast<UInspectorWorldSubsystem>(GetOuter()))
-    {
-        FInspectorChange Change;
-        Change.Target = Target.Get();
-        Change.PropertyName = PropertyName;
-        Change.OldValueText = OldText;
-        Change.NewValueText = NewTextActual;
-        Change.DebugObjectName = GetNameSafe(Target.Get());
-        Sub->RecordChange(Change);
-    }
-
     return true;
 }
 

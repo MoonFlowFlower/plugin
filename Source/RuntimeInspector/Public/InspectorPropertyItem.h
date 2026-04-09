@@ -15,13 +15,13 @@ class RUNTIMEINSPECTOR_API UInspectorPropertyItem : public UObject
 public:
     void Init(UObject* InTarget, FName InPropertyName);
 
-    UFUNCTION(BlueprintCallable)
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector")
     FString GetPropertyName() const;
 
-    UFUNCTION(BlueprintCallable)
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector")
     FString GetValueText();
 
-    UFUNCTION(BlueprintCallable)
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector")
     bool ApplyFromText(const FString& NewText, FString& OutError);
 
     // ===== Struct helpers (Vector/Rotator/Transform/Color) =====
@@ -67,11 +67,20 @@ public:
     UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Struct")
     bool SetColor(const FColor& InValue, FString& OutError);
 
-    UFUNCTION(BlueprintCallable)
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector")
     bool IsValidItem() const { return Target.IsValid(); }
 
-    UFUNCTION(BlueprintCallable)
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector")
     bool IsEditable() const;
+
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector")
+    bool IsReadOnly() const;
+
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector")
+    FString GetTypeLabel() const;
+
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector")
+    FString GetReadOnlyReason() const;
 
     UFUNCTION(BlueprintCallable, Category = "RuntimeInspector")
     EInspectorValueType GetValueType() const;
@@ -94,4 +103,3 @@ private:
     TWeakObjectPtr<UObject> Target;
     FName PropertyName;
 };
-

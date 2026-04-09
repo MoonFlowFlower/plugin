@@ -1,13 +1,14 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "UObject/EnumProperty.h"
 #include "UObject/UnrealType.h"
 
 #include "InspectorDefines.h"
 
 namespace InspectorPropertyUtils
 {
-    // ֻһ a.b.c
+    bool IsDisplayableProperty(const FProperty* Prop);
     bool IsSupportedEditableProperty(const FProperty* Prop);
     bool IsEditableProperty(const FProperty* Prop);
     bool CanSetFromText(UObject* obj,const FProperty* Prop);

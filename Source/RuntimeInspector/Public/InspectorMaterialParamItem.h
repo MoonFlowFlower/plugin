@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Components/MeshComponent.h"
 #include "UObject/Object.h"
 
 #include "InspectorTypes.h"

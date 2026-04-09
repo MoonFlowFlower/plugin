@@ -4,6 +4,8 @@
 
 #include "Modules/ModuleManager.h"
 
+RUNTIMEINSPECTOR_API int32 RI_GetThemePresetOverrideValue();
+
 class FRuntimeInspectorModule : public IModuleInterface
 {
 public:

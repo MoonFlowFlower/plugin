@@ -2,8 +2,16 @@
 
 #include "CoreMinimal.h"
 #include "Engine/DeveloperSettings.h"
+#include "Materials/MaterialInterface.h"
 #include "InputCoreTypes.h"
 #include "RuntimeInspectorSettings.generated.h"
+
+UENUM()
+enum class ERuntimeInspectorThemePreset : uint8
+{
+    StudioSlate UMETA(DisplayName = "Studio Slate"),
+    SoftContrast UMETA(DisplayName = "Soft Contrast")
+};
 
 UCLASS(config = Game, defaultconfig, meta = (DisplayName = "Runtime Inspector"))
 class RUNTIMEINSPECTOR_API URuntimeInspectorSettings : public UDeveloperSettings
@@ -50,5 +58,29 @@ public:
 
     UPROPERTY(EditAnywhere, config, Category = "Outline")
     TSoftObjectPtr<UMaterialInterface> OutlinePostProcessMaterial;
+
+    // Apply throttling (for sliders/drags): debounce property writes to reduce频繁 SetValueFromText.
+    UPROPERTY(EditAnywhere, config, Category = "Apply")
+    bool bEnableApplyDebounce = true;
+
+    // Suggested 0.05~0.10 seconds.
+    UPROPERTY(EditAnywhere, config, Category = "Apply", meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "0.20"))
+    float ApplyDebounceSeconds = 0.08f;
+
+    UPROPERTY(EditAnywhere, config, Category = "Appearance")
+    ERuntimeInspectorThemePreset ThemePreset = ERuntimeInspectorThemePreset::StudioSlate;
+
+    // ===== Security (optional) =====
+    // If enabled, the inspector panel will stay locked until unlocked via console command `ri.Unlock`.
+    UPROPERTY(EditAnywhere, config, Category = "Security")
+    bool bRequireUnlock = false;
+
+    // If non-empty, `ri.Unlock <code>` must match this string.
+    UPROPERTY(EditAnywhere, config, Category = "Security", meta = (EditCondition = "bRequireUnlock"))
+    FString UnlockCode;
+
+    // Recommended for packaged builds: auto-lock again when the panel is closed.
+    UPROPERTY(EditAnywhere, config, Category = "Security", meta = (EditCondition = "bRequireUnlock"))
+    bool bAutoLockOnClose = true;
 
 };

@@ -17,13 +17,13 @@ namespace InspectorPropertyUtils
     {
         if (!Prop) return false;
 
-        // 必须可编辑
+        // 卤脴脨毛驴脡卤脿录颅
         if (!Prop->HasAnyPropertyFlags(CPF_Edit)) return false;
 
-        // 不能是只读
+        // 虏禄脛脺脢脟脰禄露脕
         if (Prop->HasAnyPropertyFlags(CPF_EditConst)) return false;
 
-        // 不能禁止实例编辑
+        // 虏禄脛脺陆没脰鹿脢碌脌媒卤脿录颅
         if (Prop->HasAnyPropertyFlags(CPF_DisableEditOnInstance)) return false;
 
         return true;
@@ -31,18 +31,7 @@ namespace InspectorPropertyUtils
 
     bool CanSetFromText(UObject* Obj, const FProperty* Prop)
     {
-        if (!Prop) return false;
-
-        // 必须可编辑
-        if (!Prop->HasAnyPropertyFlags(CPF_Edit)) return false;
-
-        //// 不能是只读
-        //if (Prop->HasAnyPropertyFlags(CPF_EditConst)) return false;
-
-        //// 不能禁止实例编辑
-        //if (Prop->HasAnyPropertyFlags(CPF_DisableEditOnInstance)) return false;
-
-        return true;
+        return IsSupportedEditableProperty(Prop);
     }
 
 
@@ -50,8 +39,8 @@ namespace InspectorPropertyUtils
     {
         if (!Prop) return false;
 
-        // 过滤掉太危险/没意义的（你可以逐步放开）
-        if (Prop->IsA<FObjectPropertyBase>()) return false; // UObject*、组件指针等先不碰
+        // 鹿媒脗脣碌么脤芦脦拢脧脮/脙禄脪芒脪氓碌脛拢篓脛茫驴脡脪脭脰冒虏陆路脜驴陋拢漏
+        if (Prop->IsA<FObjectPropertyBase>()) return false; // UObject*隆垄脳茅录镁脰赂脮毛碌脠脧脠虏禄脜枚
         if (Prop->IsA<FArrayProperty>() ||
             Prop->IsA<FMapProperty>() || 
             Prop->IsA<FSetProperty>()) return false;
@@ -67,9 +56,9 @@ namespace InspectorPropertyUtils
             if (S == TBaseStructure<FColor>::Get()) return true;
             return false;
         }
- // 先别做，后面专门支持Vector/Rotator再放开
+ // 脧脠卤冒脳枚拢卢潞贸脙忙脳篓脙脜脰搂鲁脰Vector/Rotator脭脵路脜驴陋
 
-        // 先支持基础类型 + enum（读起来稳定）
+        // 脧脠脰搂鲁脰禄霉麓隆脌脿脨脥 + enum拢篓露脕脝冒脌麓脦脠露篓拢漏
         if (Prop->IsA<FBoolProperty>()) return true;
         if (Prop->IsA<FIntProperty>()) return true;
         if (Prop->IsA<FFloatProperty>() ||
@@ -82,10 +71,18 @@ namespace InspectorPropertyUtils
         return false;
     }
 
+    bool IsDisplayableProperty(const FProperty* Prop)
+    {
+        if (!Prop) return false;
+        if (Prop->HasAnyPropertyFlags(CPF_Deprecated)) return false;
+        if (Prop->IsA<FDelegateProperty>() || Prop->IsA<FMulticastDelegateProperty>()) return false;
+        return true;
+    }
+
     bool IsEditableProperty(const FProperty* Prop)
     {
         if (!Prop) return false;
-       //  仍然推荐：只允许 Edit 的写入
+       //  脠脭脠禄脥脝录枚拢潞脰禄脭脢脨铆 Edit 碌脛脨麓脠毛
         if (!Prop->HasAnyPropertyFlags(CPF_Edit)) return false;
         //if (Prop->HasAnyPropertyFlags(CPF_EditConst)) return false;
         //if (Prop->HasAnyPropertyFlags(CPF_DisableEditOnInstance)) return false;
@@ -100,7 +97,15 @@ namespace InspectorPropertyUtils
         for (TFieldIterator<FProperty> It(Target->GetClass()); It; ++It)
         {
             const FProperty* Prop = *It;
-            if (!IsSupportedReadableProperty(Prop)) continue;
+            if (!Prop) continue;
+            if (!IsDisplayableProperty(Prop))
+            {
+                continue;
+            }
+            if (!Prop->HasAnyPropertyFlags(CPF_Edit) && !Prop->HasAnyPropertyFlags(CPF_BlueprintVisible))
+            {
+                continue;
+            }
             OutPropertyNames.Add(Prop->GetFName());
         }
     }
@@ -124,7 +129,7 @@ namespace InspectorPropertyUtils
         void* ValuePtr = Prop->ContainerPtrToValuePtr<void>(Target);
         if (!ValuePtr) return false;
 
-        // Export 成字符串
+        // Export 鲁脡脳脰路没麓庐
         Prop->ExportTextItem_Direct(OutText, ValuePtr, nullptr, Target, PPF_None);
         return true;
     }
@@ -153,7 +158,7 @@ namespace InspectorPropertyUtils
             return false;
         }
 
-        // Import 字符串写入
+        // Import 脳脰路没麓庐脨麓脠毛
         const TCHAR* Buffer = *InText;
         const TCHAR* Result = Prop->ImportText_Direct(Buffer, ValuePtr, Target, PPF_None);
 
@@ -163,8 +168,8 @@ namespace InspectorPropertyUtils
             return false;
         }
 
-        // 让某些系统感知变化（轻量处理）
-        Target->MarkPackageDirty(); // runtime里没啥副作用；后续你也可改成仅Editor
+        // 脠脙脛鲁脨漏脧碌脥鲁赂脨脰陋卤盲禄炉拢篓脟谩脕驴麓娄脌铆拢漏
+        Target->MarkPackageDirty(); // runtime脌茂脙禄脡露赂卤脳梅脫脙拢禄潞贸脨酶脛茫脪虏驴脡赂脛鲁脡陆枚Editor
         return true;
     }
 
