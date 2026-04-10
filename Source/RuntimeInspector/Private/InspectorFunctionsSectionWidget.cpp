@@ -12,6 +12,7 @@
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
+#include "GameFramework/Actor.h"
 
 namespace
 {
@@ -76,6 +77,12 @@ void UInspectorFunctionsSectionWidget::BuildWidgetTree()
         RICompactUI::MakeSectionTitle(WidgetTree, TEXT("Functions"), RICompactUI::ERISectionVisualStyle::Emphasis)))
     {
         HeaderSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+    }
+
+    FocusSummaryText = RICompactUI::MakeText(WidgetTree, TEXT("Focused object"), RICompactUI::GetMutedFontSize(), false, RI_FunctionMutedColor(), true);
+    if (UVerticalBoxSlot* SummarySlot = RootBox->AddChildToVerticalBox(FocusSummaryText))
+    {
+        SummarySlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
     }
 
     UScrollBox* ScrollBox = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("RI_ActorFunctionsScroll"));
@@ -143,6 +150,15 @@ void UInspectorFunctionsSectionWidget::RefreshFromSubsystem()
 
     TArray<UInspectorFunctionItem*> Items;
     InspectorSubsystem->GetFunctionItemsForSelected(InspectorSubsystem->GetCurrentActorSearchText(), Items);
+
+    if (FocusSummaryText)
+    {
+        const UObject* FocusedObject = InspectorSubsystem->GetFocusedInspectObject();
+        const FString FocusLabel = FocusedObject
+            ? FString::Printf(TEXT("Focused object: %s"), *FocusedObject->GetName())
+            : TEXT("Focused object: None");
+        FocusSummaryText->SetText(FText::FromString(FocusLabel));
+    }
 
     if (Items.Num() == 0)
     {

@@ -1362,7 +1362,7 @@ static FAutoConsoleCommandWithWorldAndArgs CCmdRIApplyFabScreenshotState(
 
 static FAutoConsoleCommandWithWorldAndArgs CCmdRIShowInspectorPage(
     TEXT("ri.ShowInspectorPage"),
-    TEXT("Show a RuntimeInspector page. Usage: ri.ShowInspectorPage Actor|Changes|Settings|Tools"),
+    TEXT("Show a RuntimeInspector page. Usage: ri.ShowInspectorPage Inspect|Snapshot|Diagnostics"),
     FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RI_CmdShowInspectorPage)
 );
 
@@ -2704,9 +2704,6 @@ static void RI_UpdateActorPropertyHeader(UUserWidget* PanelWidget, UObject* Focu
     }
 
     const FString FocusLabel = FocusedObject ? FocusedObject->GetName() : TEXT("Actor");
-    const FString FocusClassLabel = FocusedObject && FocusedObject->GetClass()
-        ? FocusedObject->GetClass()->GetName()
-        : TEXT("No class");
 
     if (UTextBlock* FocusText = Cast<UTextBlock>(PanelWidget->WidgetTree->FindWidget(TEXT("TXT_SelectCompName"))))
     {
@@ -2716,7 +2713,7 @@ static void RI_UpdateActorPropertyHeader(UUserWidget* PanelWidget, UObject* Focu
 
     if (UTextBlock* TitleText = Cast<UTextBlock>(PanelWidget->WidgetTree->FindWidget(TEXT("TXT_ToolName"))))
     {
-        TitleText->SetText(FText::FromString(FString::Printf(TEXT("Properties: %s"), *FocusClassLabel)));
+        TitleText->SetText(FText::FromString(TEXT("RuntimeInspector")));
     }
 }
 
@@ -3215,15 +3212,14 @@ void UInspectorWorldSubsystem::BindPanelTabButtons()
     FileHostPanel = FindFileHostPanel();
     SettingsHostPanel = FindSettingsHostPanel();
     TestHostPanel = FindTestHostPanel();
-    ActorTabButton = FindPanelTabButtonByTexts({ TEXT("Actor") });
-    FileTabButton = FindPanelTabButtonByTexts({ TEXT("File"), TEXT("Changes") });
+    ActorTabButton = FindPanelTabButtonByTexts({ TEXT("Actor"), TEXT("Inspect") });
+    FileTabButton = FindPanelTabButtonByTexts({ TEXT("File"), TEXT("Changes"), TEXT("Snapshot") });
     SettingsTabButton = FindPanelTabButtonByTexts({ TEXT("Setting"), TEXT("Settings") });
-    TestTabButton = FindPanelTabButtonByTexts({ TEXT("Test"), TEXT("Tools") });
+    TestTabButton = FindPanelTabButtonByTexts({ TEXT("Test"), TEXT("Tools"), TEXT("Diagnostics") });
 
-    SetPanelTabButtonLabel(ActorTabButton.Get(), TEXT("Actor"));
-    SetPanelTabButtonLabel(FileTabButton.Get(), TEXT("Changes"));
-    SetPanelTabButtonLabel(SettingsTabButton.Get(), TEXT("Settings"));
-    SetPanelTabButtonLabel(TestTabButton.Get(), TEXT("Tools"));
+    SetPanelTabButtonLabel(ActorTabButton.Get(), TEXT("Inspect"));
+    SetPanelTabButtonLabel(FileTabButton.Get(), TEXT("Snapshot"));
+    SetPanelTabButtonLabel(TestTabButton.Get(), TEXT("Diagnostics"));
 
     if (UButton* Button = ActorTabButton.Get())
     {
@@ -3238,7 +3234,7 @@ void UInspectorWorldSubsystem::BindPanelTabButtons()
     if (UButton* Button = SettingsTabButton.Get())
     {
         Button->OnClicked.RemoveAll(this);
-        Button->OnClicked.AddDynamic(this, &UInspectorWorldSubsystem::HandleSettingsTabClicked);
+        Button->SetVisibility(ESlateVisibility::Collapsed);
     }
     if (UButton* Button = TestTabButton.Get())
     {
@@ -3279,8 +3275,12 @@ void UInspectorWorldSubsystem::UpdatePanelTabButtonStyles()
 
     ApplyTabStyle(ActorTabButton.Get(), 0);
     ApplyTabStyle(FileTabButton.Get(), 1);
-    ApplyTabStyle(SettingsTabButton.Get(), SettingsPageIndex);
     ApplyTabStyle(TestTabButton.Get(), TestPageIndex);
+
+    if (UButton* Button = SettingsTabButton.Get())
+    {
+        Button->SetVisibility(ESlateVisibility::Collapsed);
+    }
 #endif
 }
 
@@ -3341,6 +3341,7 @@ void UInspectorWorldSubsystem::EnsureSharedContextStripInjected()
                 SharedContextStagedText = Cast<UTextBlock>(Widget->WidgetTree->FindWidget(TEXT("RI_SharedContextStagedValue")));
             }
         }
+        ExistingBorder->SetVisibility(ESlateVisibility::Collapsed);
         return;
     }
 
@@ -3491,6 +3492,8 @@ void UInspectorWorldSubsystem::EnsureSharedContextStripInjected()
             VerticalSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
         }
     }
+
+    StripBorder->SetVisibility(ESlateVisibility::Collapsed);
 #endif
 }
 
@@ -3508,7 +3511,7 @@ void UInspectorWorldSubsystem::UpdateSharedContextStrip()
     const FString StagedState = HasStagedPatch()
         ? FString::Printf(TEXT("Staged (%d ops)"), GetStagedPatch().Operations.Num())
         : TEXT("No staged patch");
-    const bool bHideActorCell = Selected != nullptr && GetVisiblePage() == ERIVisiblePage::Actor;
+    const bool bHideActorCell = true;
 
     auto ApplyValue = [](UTextBlock* TextWidget, const FString& InValue, bool bMuted, int32 FontSize, bool bBold, const FLinearColor& StrongColor)
     {
@@ -3545,6 +3548,21 @@ void UInspectorWorldSubsystem::UpdateSharedContextStrip()
 
 namespace
 {
+    static const TCHAR* RI_GetVisiblePageDisplayLabel(UInspectorWorldSubsystem::ERIVisiblePage Page)
+    {
+        switch (Page)
+        {
+        case UInspectorWorldSubsystem::ERIVisiblePage::Changes:
+        case UInspectorWorldSubsystem::ERIVisiblePage::Settings:
+            return TEXT("Snapshot");
+        case UInspectorWorldSubsystem::ERIVisiblePage::Tools:
+            return TEXT("Diagnostics");
+        case UInspectorWorldSubsystem::ERIVisiblePage::Actor:
+        default:
+            return TEXT("Inspect");
+        }
+    }
+
     static UWidget* RI_FindDirectChildUnderHost(UWidget* AnchorWidget, UPanelWidget* HostPanel)
     {
         if (!AnchorWidget || !HostPanel)
@@ -6278,7 +6296,7 @@ TArray<FRISelfTestDefinition> UInspectorWorldSubsystem::GetAvailableSelfTests() 
         RI_SelfTestId_ThemePresetPreview,
         TEXT("Theme Preset Preview"),
         TEXT("Settings"),
-        TEXT("Verifies switching the active theme preset rebuilds the open panel, keeps the Settings page active, and restores the original preset."),
+        TEXT("Verifies switching the active theme preset rebuilds the open panel, keeps the Snapshot controls visible, and restores the original preset."),
         true,
         false);
 
@@ -6374,7 +6392,7 @@ TArray<FRISelfTestDefinition> UInspectorWorldSubsystem::GetAvailableSelfTests() 
         RI_SelfTestId_ActorPageStructure,
         TEXT("Actor Page Structure"),
         TEXT("UI"),
-        TEXT("Verifies the Actor page shows the component tree, starred property list, component-focus property routing, and color swatch rows."),
+        TEXT("Verifies the Inspect page shows the component tree, starred property list, component-focus property routing, and color swatch rows."),
         true,
         false);
 
@@ -6518,7 +6536,7 @@ TArray<FRISelfTestDefinition> UInspectorWorldSubsystem::GetAvailableSelfTests() 
         RI_SelfTestId_FabScreenshotFoundation,
         TEXT("Fab Screenshot Foundation"),
         TEXT("Presentation"),
-        TEXT("Applies the clean RuntimeInspector screenshot state: SoftContrast theme, Changes page active, advanced sections collapsed, and BP_TestVarsActor-preferred selection."),
+        TEXT("Applies the clean RuntimeInspector screenshot state: SoftContrast theme, Snapshot page active, advanced sections collapsed, and BP_TestVarsActor-preferred selection."),
         true,
         false);
 
@@ -6526,7 +6544,7 @@ TArray<FRISelfTestDefinition> UInspectorWorldSubsystem::GetAvailableSelfTests() 
         RI_SelfTestId_FabScreenshotActorPage,
         TEXT("Fab Screenshot Actor Page"),
         TEXT("Presentation"),
-        TEXT("Applies the clean RuntimeInspector screenshot state and switches the runtime UI to the Actor page for media capture."),
+        TEXT("Applies the clean RuntimeInspector screenshot state and switches the runtime UI to the Inspect page for media capture."),
         true,
         false);
 
@@ -6534,7 +6552,7 @@ TArray<FRISelfTestDefinition> UInspectorWorldSubsystem::GetAvailableSelfTests() 
         RI_SelfTestId_FabScreenshotSettingsPage,
         TEXT("Fab Screenshot Settings Page"),
         TEXT("Presentation"),
-        TEXT("Applies the clean RuntimeInspector screenshot state and switches the runtime UI to the Settings page for media capture."),
+        TEXT("Applies the clean RuntimeInspector screenshot state and switches the runtime UI to the Snapshot page for media capture."),
         true,
         false);
 
@@ -6542,7 +6560,7 @@ TArray<FRISelfTestDefinition> UInspectorWorldSubsystem::GetAvailableSelfTests() 
         RI_SelfTestId_FabScreenshotToolsPage,
         TEXT("Fab Screenshot Tools Page"),
         TEXT("Presentation"),
-        TEXT("Applies the clean RuntimeInspector screenshot state and switches the runtime UI to the Tools page for media capture."),
+        TEXT("Applies the clean RuntimeInspector screenshot state and switches the runtime UI to the Diagnostics page for media capture."),
         true,
         false);
 
@@ -8963,13 +8981,13 @@ bool UInspectorWorldSubsystem::SetVisiblePageByName(const FString& InPageName, F
     return false;
 #else
     const FString PageName = InPageName.TrimStartAndEnd().ToLower();
-    if (PageName.IsEmpty() || PageName == TEXT("changes") || PageName == TEXT("file"))
+    if (PageName.IsEmpty() || PageName == TEXT("changes") || PageName == TEXT("file") || PageName == TEXT("snapshot"))
     {
         ShowFilePage();
         return true;
     }
 
-    if (PageName == TEXT("actor"))
+    if (PageName == TEXT("actor") || PageName == TEXT("inspect"))
     {
         HandleActorTabClicked();
         return true;
@@ -8977,11 +8995,11 @@ bool UInspectorWorldSubsystem::SetVisiblePageByName(const FString& InPageName, F
 
     if (PageName == TEXT("settings"))
     {
-        ShowSettingsPage();
+        ShowFilePage();
         return true;
     }
 
-    if (PageName == TEXT("tools") || PageName == TEXT("test"))
+    if (PageName == TEXT("tools") || PageName == TEXT("test") || PageName == TEXT("diagnostics"))
     {
         ShowTestPage();
         return true;
@@ -9028,7 +9046,7 @@ bool UInspectorWorldSubsystem::RunFabScreenshotFoundationSelfTest(FString& OutRe
     const bool bPassed = bThemeOk && bChangesActive && bStagedClean && bDiagnosticsCollapsed && bAdvancedCollapsed && bToolsCollapsed && bActorOk;
 
     OutReport = FString::Printf(
-        TEXT("FabScreenshotFoundationSelfTest=%s | Theme=%s ActiveIndex=%d ChangesIndex=%d Actor=%s StagedClean=%d AdvancedCollapsed=%d DiagnosticsCollapsed=%d ToolsCollapsed=%d Summary=%s"),
+        TEXT("FabScreenshotFoundationSelfTest=%s | Theme=%s ActiveIndex=%d SnapshotIndex=%d Actor=%s StagedClean=%d AdvancedCollapsed=%d DiagnosticsCollapsed=%d ToolsCollapsed=%d Summary=%s"),
         bPassed ? TEXT("PASS") : TEXT("FAIL"),
         bThemeOk ? TEXT("SoftContrast") : TEXT("mismatch"),
         Switcher ? Switcher->GetActiveWidgetIndex() : INDEX_NONE,
@@ -9097,17 +9115,7 @@ bool UInspectorWorldSubsystem::RunFabScreenshotPageSelfTest(const FString& InPag
     const bool bActorCellHiddenOk = ExpectedPage != ERIVisiblePage::Actor
         || !SharedContextActorCell.IsValid()
         || SharedContextActorCell->GetVisibility() != ESlateVisibility::Visible;
-    const TCHAR* VisiblePageLabel = TEXT("Actor");
-    switch (bSwitcherOk ? GetVisiblePage() : ERIVisiblePage::Actor)
-    {
-    case ERIVisiblePage::Changes: VisiblePageLabel = TEXT("Changes"); break;
-    case ERIVisiblePage::Settings: VisiblePageLabel = TEXT("Settings"); break;
-    case ERIVisiblePage::Tools: VisiblePageLabel = TEXT("Tools"); break;
-    case ERIVisiblePage::Actor:
-    default:
-        VisiblePageLabel = TEXT("Actor");
-        break;
-    }
+    const TCHAR* VisiblePageLabel = RI_GetVisiblePageDisplayLabel(bSwitcherOk ? GetVisiblePage() : ERIVisiblePage::Actor);
 
     FString GroupSwitcherActiveName = TEXT("None");
     FString CustomGroupsVisibility = TEXT("None");
@@ -9245,7 +9253,7 @@ bool UInspectorWorldSubsystem::RunFabScreenshotPageSelfTest(const FString& InPag
 
 bool UInspectorWorldSubsystem::RunFabScreenshotActorPageSelfTest(FString& OutReport)
 {
-    return RunFabScreenshotPageSelfTest(TEXT("Actor"), ERIVisiblePage::Actor, TEXT("FabScreenshotActorPageSelfTest"), OutReport);
+    return RunFabScreenshotPageSelfTest(TEXT("Inspect"), ERIVisiblePage::Actor, TEXT("FabScreenshotActorPageSelfTest"), OutReport);
 }
 
 FString UInspectorWorldSubsystem::RunFabScreenshotActorPageSelfTestSimple()
@@ -9261,7 +9269,7 @@ FString UInspectorWorldSubsystem::RunFabScreenshotActorPageSelfTestSimple()
 
 bool UInspectorWorldSubsystem::RunFabScreenshotSettingsPageSelfTest(FString& OutReport)
 {
-    return RunFabScreenshotPageSelfTest(TEXT("Settings"), ERIVisiblePage::Settings, TEXT("FabScreenshotSettingsPageSelfTest"), OutReport);
+    return RunFabScreenshotPageSelfTest(TEXT("Snapshot"), ERIVisiblePage::Changes, TEXT("FabScreenshotSettingsPageSelfTest"), OutReport);
 }
 
 FString UInspectorWorldSubsystem::RunFabScreenshotSettingsPageSelfTestSimple()
@@ -9277,7 +9285,7 @@ FString UInspectorWorldSubsystem::RunFabScreenshotSettingsPageSelfTestSimple()
 
 bool UInspectorWorldSubsystem::RunFabScreenshotToolsPageSelfTest(FString& OutReport)
 {
-    return RunFabScreenshotPageSelfTest(TEXT("Tools"), ERIVisiblePage::Tools, TEXT("FabScreenshotToolsPageSelfTest"), OutReport);
+    return RunFabScreenshotPageSelfTest(TEXT("Diagnostics"), ERIVisiblePage::Tools, TEXT("FabScreenshotToolsPageSelfTest"), OutReport);
 }
 
 FString UInspectorWorldSubsystem::RunFabScreenshotToolsPageSelfTestSimple()

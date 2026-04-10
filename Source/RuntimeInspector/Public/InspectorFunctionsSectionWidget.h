@@ -45,6 +45,9 @@ private:
     UVerticalBox* RootBox = nullptr;
 
     UPROPERTY(Transient)
+    UTextBlock* FocusSummaryText = nullptr;
+
+    UPROPERTY(Transient)
     UVerticalBox* FunctionsEntriesBox = nullptr;
 
     UPROPERTY(Transient)

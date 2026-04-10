@@ -76,6 +76,11 @@ void UInspectorSettingsPageWidget::SetInspectorSubsystem(UInspectorWorldSubsyste
     Subsystem = InSubsystem;
 }
 
+void UInspectorSettingsPageWidget::SetPresentationMode(ERISettingsPresentationMode InMode)
+{
+    PresentationMode = InMode;
+}
+
 TSharedRef<SWidget> UInspectorSettingsPageWidget::RebuildWidget()
 {
     if (WidgetTree && !WidgetTree->RootWidget)
@@ -89,6 +94,7 @@ TSharedRef<SWidget> UInspectorSettingsPageWidget::RebuildWidget()
 void UInspectorSettingsPageWidget::NativeConstruct()
 {
     Super::NativeConstruct();
+    RefreshFromSubsystem();
 }
 
 void UInspectorSettingsPageWidget::NativeDestruct()
@@ -130,7 +136,7 @@ void UInspectorSettingsPageWidget::HandleDeferredRefreshTimerElapsed()
     CancelDeferredRefresh();
     const double StartSeconds = FPlatformTime::Seconds();
     RefreshFromSubsystem();
-    UE_LOG(LogRuntimeInspector, Log, TEXT("[RI][Perf] Settings DeferredRefresh %.2f ms"), (FPlatformTime::Seconds() - StartSeconds) * 1000.0);
+    UE_LOG(LogRuntimeInspector, Log, TEXT("[RI][Perf] Snapshot DeferredRefresh %.2f ms"), (FPlatformTime::Seconds() - StartSeconds) * 1000.0);
 }
 
 FReply UInspectorSettingsPageWidget::NativeOnPreviewKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent)
@@ -155,7 +161,7 @@ FReply UInspectorSettingsPageWidget::NativeOnPreviewKeyDown(const FGeometry& InG
     if (!InspectorSubsystem)
     {
         CancelHotkeyCapture(false);
-        SetStatusMessage(TEXT("Settings subsystem is unavailable."), true);
+        SetStatusMessage(TEXT("Snapshot controls are unavailable."), true);
         return FReply::Handled();
     }
 
@@ -192,21 +198,31 @@ void UInspectorSettingsPageWidget::BuildWidgetTree()
         return;
     }
 
-    UBorder* RootBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("RI_SettingsRoot"));
-    RootBorder->SetPadding(FMargin(6.0f));
-    RootBorder->SetBrushColor(RICompactUI::GetPageBackgroundColor());
+    const bool bEmbeddedSection = PresentationMode == ERISettingsPresentationMode::EmbeddedSection;
 
-    UVerticalBox* MainBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_SettingsMainBox"));
+    UBorder* RootBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), bEmbeddedSection ? TEXT("RI_SnapshotSectionRoot") : TEXT("RI_SettingsRoot"));
+    RootBorder->SetPadding(bEmbeddedSection ? FMargin(4.0f) : FMargin(6.0f));
+    RootBorder->SetBrushColor(bEmbeddedSection ? RI_SettingsSectionColor() : RICompactUI::GetPageBackgroundColor());
+
+    UVerticalBox* MainBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), bEmbeddedSection ? TEXT("RI_SnapshotSectionBox") : TEXT("RI_SettingsMainBox"));
     RootBorder->SetContent(MainBox);
 
-    PageScrollBox = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("RI_SettingsScroll"));
-    if (UVerticalBoxSlot* ScrollSlot = MainBox->AddChildToVerticalBox(PageScrollBox))
+    UVerticalBox* ContentBox = nullptr;
+    if (bEmbeddedSection)
     {
-        ScrollSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+        ContentBox = MainBox;
     }
+    else
+    {
+        PageScrollBox = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("RI_SettingsScroll"));
+        if (UVerticalBoxSlot* ScrollSlot = MainBox->AddChildToVerticalBox(PageScrollBox))
+        {
+            ScrollSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+        }
 
-    UVerticalBox* ContentBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_SettingsContentBox"));
-    PageScrollBox->AddChild(ContentBox);
+        ContentBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_SettingsContentBox"));
+        PageScrollBox->AddChild(ContentBox);
+    }
 
     auto AddContentWidget = [ContentBox](UWidget* Child, const FMargin& SlotPadding)
     {
@@ -221,7 +237,8 @@ void UInspectorSettingsPageWidget::BuildWidgetTree()
         }
     };
 
-    AddContentWidget(CreateSectionTitle(TEXT("Interaction"), true), FMargin(0.f, 0.f, 0.f, 4.f));
+    AddContentWidget(CreateSectionTitle(TEXT("Snapshot Controls"), true), FMargin(0.f, 0.f, 0.f, 4.f));
+    AddContentWidget(CreateSectionTitle(TEXT("Snapshot Interaction"), true), FMargin(0.f, 0.f, 0.f, 4.f));
     AddContentWidget(CreateKeybindRow(TEXT("Toggle Key"), ToggleKeyValueText, ToggleKeyButton), FMargin(0.f, 0.f, 0.f, 4.f));
     AddContentWidget(CreateKeybindRow(TEXT("Pick Key"), PickKeyValueText, PickKeyButton), FMargin(0.f, 0.f, 0.f, 4.f));
     AddContentWidget(CreateCheckRow(TEXT("Pick Requires Ctrl"), PickRequiresCtrlCheckBox), FMargin(0.f, 0.f, 0.f, 4.f));
@@ -230,18 +247,18 @@ void UInspectorSettingsPageWidget::BuildWidgetTree()
     AddContentWidget(CreateCheckRow(TEXT("RMB Requires Ctrl"), RightMousePickRequiresCtrlCheckBox), FMargin(0.f, 0.f, 0.f, 4.f));
     AddContentWidget(CreateCheckRow(TEXT("RMB Requires Shift"), RightMousePickRequiresShiftCheckBox), FMargin(0.f, 0.f, 0.f, 8.f));
 
-    AddContentWidget(CreateSectionTitle(TEXT("Outline")), FMargin(0.f, 0.f, 0.f, 4.f));
+    AddContentWidget(CreateSectionTitle(TEXT("Snapshot Outline")), FMargin(0.f, 0.f, 0.f, 4.f));
     AddContentWidget(CreateCheckRow(TEXT("Enable Outline"), EnableOutlineCheckBox), FMargin(0.f, 0.f, 0.f, 4.f));
     AddContentWidget(CreateSpinRow(TEXT("Outline Weight"), OutlineWeightSpinBox), FMargin(0.f, 0.f, 0.f, 8.f));
 
-    AddContentWidget(CreateSectionTitle(TEXT("Apply"), true), FMargin(0.f, 0.f, 0.f, 4.f));
+    AddContentWidget(CreateSectionTitle(TEXT("Snapshot Apply"), true), FMargin(0.f, 0.f, 0.f, 4.f));
     AddContentWidget(CreateCheckRow(TEXT("Enable Apply Debounce"), EnableApplyDebounceCheckBox), FMargin(0.f, 0.f, 0.f, 4.f));
     AddContentWidget(CreateSpinRow(TEXT("Debounce Seconds"), ApplyDebounceSecondsSpinBox), FMargin(0.f, 0.f, 0.f, 8.f));
 
-    AddContentWidget(CreateSectionTitle(TEXT("Appearance"), true), FMargin(0.f, 0.f, 0.f, 4.f));
+    AddContentWidget(CreateSectionTitle(TEXT("Snapshot Appearance"), true), FMargin(0.f, 0.f, 0.f, 4.f));
     AddContentWidget(CreateThemePresetRow(TEXT("Theme Preset"), ThemePresetComboBox), FMargin(0.f, 0.f, 0.f, 8.f));
 
-    AddContentWidget(CreateSectionTitle(TEXT("Security & Status"), true), FMargin(0.f, 0.f, 0.f, 4.f));
+    AddContentWidget(CreateSectionTitle(TEXT("Snapshot Security & Status"), true), FMargin(0.f, 0.f, 0.f, 4.f));
     AddContentWidget(CreateCheckRow(TEXT("Require Unlock"), RequireUnlockCheckBox), FMargin(0.f, 0.f, 0.f, 4.f));
     AddContentWidget(CreateCheckRow(TEXT("Auto Lock On Close"), AutoLockOnCloseCheckBox), FMargin(0.f, 0.f, 0.f, 4.f));
     AddContentWidget(CreateStatusRow(TEXT("Runtime"), RuntimeEnabledValueText), FMargin(0.f, 0.f, 0.f, 4.f));
@@ -299,9 +316,9 @@ void UInspectorSettingsPageWidget::BuildWidgetTree()
     SaveButton = RICompactUI::MakeLabeledButton(
         WidgetTree,
         TEXT("BTN_SettingsSave"),
-        TEXT("Save"),
+        TEXT("Save Snapshot"),
         RICompactUI::ERIButtonVisualStyle::Primary,
-        56.0f);
+        96.0f);
     SaveButton->OnClicked.AddDynamic(this, &UInspectorSettingsPageWidget::HandleSaveClicked);
     if (UHorizontalBoxSlot* SaveSlot = FooterButtonsRow->AddChildToHorizontalBox(SaveButton))
     {
@@ -312,9 +329,9 @@ void UInspectorSettingsPageWidget::BuildWidgetTree()
     ResetButton = RICompactUI::MakeLabeledButton(
         WidgetTree,
         TEXT("BTN_SettingsReset"),
-        TEXT("Reset"),
+        TEXT("Reload Snapshot"),
         RICompactUI::ERIButtonVisualStyle::Danger,
-        56.0f);
+        104.0f);
     ResetButton->OnClicked.AddDynamic(this, &UInspectorSettingsPageWidget::HandleResetClicked);
     FooterButtonsRow->AddChildToHorizontalBox(ResetButton);
 
@@ -603,12 +620,12 @@ void UInspectorSettingsPageWidget::UpdateUIFromState()
     const bool bEditable = Diagnostics.bRuntimeEnabled && Subsystem.IsValid();
     const bool bDirty = Subsystem.IsValid() ? Subsystem->HasUnsavedSettingsChanges() : false;
     const FString EditDisabledReason = Diagnostics.bRuntimeEnabled
-        ? TEXT("Open Runtime Inspector before editing settings.")
+        ? TEXT("Open Runtime Inspector before editing snapshot controls.")
         : (Diagnostics.DisabledReason.IsEmpty() ? TEXT("Runtime Inspector is disabled.") : Diagnostics.DisabledReason);
-    const FString SaveDisabledReason = bDirty ? FString() : TEXT("No unsaved changes to save.");
-    const FString ResetDisabledReason = bDirty ? FString() : TEXT("No unsaved changes to reset.");
-    const FString OutlineDisabledReason = !DraftSettings.bEnableOutlinePP ? TEXT("Enable outline first.") : EditDisabledReason;
-    const FString DebounceDisabledReason = !DraftSettings.bEnableApplyDebounce ? TEXT("Enable apply debounce first.") : EditDisabledReason;
+    const FString SaveDisabledReason = bDirty ? FString() : TEXT("No unsaved snapshot changes to save.");
+    const FString ResetDisabledReason = bDirty ? FString() : TEXT("No unsaved snapshot changes to reset.");
+    const FString OutlineDisabledReason = !DraftSettings.bEnableOutlinePP ? TEXT("Enable snapshot outline first.") : EditDisabledReason;
+    const FString DebounceDisabledReason = !DraftSettings.bEnableApplyDebounce ? TEXT("Enable snapshot apply debounce first.") : EditDisabledReason;
     const FString UnlockDisabledReason = bEditable ? FString() : EditDisabledReason;
     const FString AutoLockDisabledReason = !DraftSettings.bRequireUnlock ? TEXT("Enable Require Unlock first.") : EditDisabledReason;
     auto SetEnabledState = [](UWidget* Widget, bool bEnabled, const FString& DisabledReason, const FString& EnabledTooltip = FString())
@@ -627,32 +644,32 @@ void UInspectorSettingsPageWidget::UpdateUIFromState()
     if (PickRequiresCtrlCheckBox)
     {
         PickRequiresCtrlCheckBox->SetIsChecked(DraftSettings.bPickKeyRequiresCtrl);
-        SetEnabledState(PickRequiresCtrlCheckBox, bEditable, EditDisabledReason, TEXT("Toggle whether the pick key requires Ctrl."));
+        SetEnabledState(PickRequiresCtrlCheckBox, bEditable, EditDisabledReason, TEXT("Toggle whether the snapshot pick key requires Ctrl."));
     }
     if (PickRequiresShiftCheckBox)
     {
         PickRequiresShiftCheckBox->SetIsChecked(DraftSettings.bPickKeyRequiresShift);
-        SetEnabledState(PickRequiresShiftCheckBox, bEditable, EditDisabledReason, TEXT("Toggle whether the pick key requires Shift."));
+        SetEnabledState(PickRequiresShiftCheckBox, bEditable, EditDisabledReason, TEXT("Toggle whether the snapshot pick key requires Shift."));
     }
     if (EnableRightMousePickCheckBox)
     {
         EnableRightMousePickCheckBox->SetIsChecked(DraftSettings.bEnableRightMousePick);
-        SetEnabledState(EnableRightMousePickCheckBox, bEditable, EditDisabledReason, TEXT("Enable or disable right mouse pick."));
+        SetEnabledState(EnableRightMousePickCheckBox, bEditable, EditDisabledReason, TEXT("Enable or disable snapshot right mouse pick."));
     }
     if (RightMousePickRequiresCtrlCheckBox)
     {
         RightMousePickRequiresCtrlCheckBox->SetIsChecked(DraftSettings.bRightMousePickRequiresCtrl);
-        SetEnabledState(RightMousePickRequiresCtrlCheckBox, bEditable && DraftSettings.bEnableRightMousePick, EditDisabledReason.IsEmpty() ? TEXT("Enable right mouse pick first.") : EditDisabledReason, TEXT("Right mouse pick requires Ctrl."));
+        SetEnabledState(RightMousePickRequiresCtrlCheckBox, bEditable && DraftSettings.bEnableRightMousePick, EditDisabledReason.IsEmpty() ? TEXT("Enable snapshot right mouse pick first.") : EditDisabledReason, TEXT("Snapshot right mouse pick requires Ctrl."));
     }
     if (RightMousePickRequiresShiftCheckBox)
     {
         RightMousePickRequiresShiftCheckBox->SetIsChecked(DraftSettings.bRightMousePickRequiresShift);
-        SetEnabledState(RightMousePickRequiresShiftCheckBox, bEditable && DraftSettings.bEnableRightMousePick, EditDisabledReason.IsEmpty() ? TEXT("Enable right mouse pick first.") : EditDisabledReason, TEXT("Right mouse pick requires Shift."));
+        SetEnabledState(RightMousePickRequiresShiftCheckBox, bEditable && DraftSettings.bEnableRightMousePick, EditDisabledReason.IsEmpty() ? TEXT("Enable snapshot right mouse pick first.") : EditDisabledReason, TEXT("Snapshot right mouse pick requires Shift."));
     }
     if (EnableOutlineCheckBox)
     {
         EnableOutlineCheckBox->SetIsChecked(DraftSettings.bEnableOutlinePP);
-        SetEnabledState(EnableOutlineCheckBox, bEditable, EditDisabledReason, TEXT("Toggle the outline post-process effect."));
+        SetEnabledState(EnableOutlineCheckBox, bEditable, EditDisabledReason, TEXT("Toggle the snapshot outline post-process effect."));
     }
     if (OutlineWeightSpinBox)
     {
@@ -660,12 +677,12 @@ void UInspectorSettingsPageWidget::UpdateUIFromState()
         OutlineWeightSpinBox->SetMaxValue(5.0f);
         OutlineWeightSpinBox->SetDelta(0.05f);
         OutlineWeightSpinBox->SetValue(DraftSettings.OutlinePPWeight);
-        SetEnabledState(OutlineWeightSpinBox, bEditable && DraftSettings.bEnableOutlinePP, OutlineDisabledReason, TEXT("Adjust the outline post-process weight."));
+        SetEnabledState(OutlineWeightSpinBox, bEditable && DraftSettings.bEnableOutlinePP, OutlineDisabledReason, TEXT("Adjust the snapshot outline post-process weight."));
     }
     if (EnableApplyDebounceCheckBox)
     {
         EnableApplyDebounceCheckBox->SetIsChecked(DraftSettings.bEnableApplyDebounce);
-        SetEnabledState(EnableApplyDebounceCheckBox, bEditable, EditDisabledReason, TEXT("Toggle apply debounce for runtime changes."));
+        SetEnabledState(EnableApplyDebounceCheckBox, bEditable, EditDisabledReason, TEXT("Toggle snapshot apply debounce for runtime changes."));
     }
     if (ApplyDebounceSecondsSpinBox)
     {
@@ -673,7 +690,7 @@ void UInspectorSettingsPageWidget::UpdateUIFromState()
         ApplyDebounceSecondsSpinBox->SetMaxValue(0.20f);
         ApplyDebounceSecondsSpinBox->SetDelta(0.01f);
         ApplyDebounceSecondsSpinBox->SetValue(DraftSettings.ApplyDebounceSeconds);
-        SetEnabledState(ApplyDebounceSecondsSpinBox, bEditable && DraftSettings.bEnableApplyDebounce, DebounceDisabledReason, TEXT("Adjust how long apply debounce waits."));
+        SetEnabledState(ApplyDebounceSecondsSpinBox, bEditable && DraftSettings.bEnableApplyDebounce, DebounceDisabledReason, TEXT("Adjust how long snapshot apply debounce waits."));
     }
     if (ThemePresetComboBox)
     {
@@ -682,39 +699,39 @@ void UInspectorSettingsPageWidget::UpdateUIFromState()
         {
             ThemePresetComboBox->SetSelectedOption(DesiredOption);
         }
-        SetEnabledState(ThemePresetComboBox, Subsystem.IsValid(), EditDisabledReason, TEXT("Switch the active UI theme preset."));
+        SetEnabledState(ThemePresetComboBox, Subsystem.IsValid(), EditDisabledReason, TEXT("Switch the active snapshot UI theme preset."));
     }
     if (RequireUnlockCheckBox)
     {
         RequireUnlockCheckBox->SetIsChecked(DraftSettings.bRequireUnlock);
-        SetEnabledState(RequireUnlockCheckBox, bEditable, UnlockDisabledReason, TEXT("Require unlock before editing."));
+        SetEnabledState(RequireUnlockCheckBox, bEditable, UnlockDisabledReason, TEXT("Require unlock before editing snapshot controls."));
     }
     if (AutoLockOnCloseCheckBox)
     {
         AutoLockOnCloseCheckBox->SetIsChecked(DraftSettings.bAutoLockOnClose);
-        SetEnabledState(AutoLockOnCloseCheckBox, bEditable && DraftSettings.bRequireUnlock, AutoLockDisabledReason, TEXT("Automatically lock when the panel closes."));
+        SetEnabledState(AutoLockOnCloseCheckBox, bEditable && DraftSettings.bRequireUnlock, AutoLockDisabledReason, TEXT("Automatically lock snapshot controls when the panel closes."));
     }
 
     if (ToggleKeyButton)
     {
-        SetEnabledState(ToggleKeyButton, bEditable, EditDisabledReason, TEXT("Rebind the toggle key."));
+        SetEnabledState(ToggleKeyButton, bEditable, EditDisabledReason, TEXT("Rebind the snapshot toggle key."));
     }
     if (PickKeyButton)
     {
-        SetEnabledState(PickKeyButton, bEditable, EditDisabledReason, TEXT("Rebind the pick key."));
+        SetEnabledState(PickKeyButton, bEditable, EditDisabledReason, TEXT("Rebind the snapshot pick key."));
     }
     if (SaveButton)
     {
-        SetEnabledState(SaveButton, bEditable && bDirty, SaveDisabledReason, TEXT("Save the current settings to config."));
+        SetEnabledState(SaveButton, bEditable && bDirty, SaveDisabledReason, TEXT("Save the current snapshot settings to config."));
     }
     if (ResetButton)
     {
-        SetEnabledState(ResetButton, bEditable && bDirty, ResetDisabledReason, TEXT("Restore the saved settings from config."));
+        SetEnabledState(ResetButton, bEditable && bDirty, ResetDisabledReason, TEXT("Restore the saved snapshot settings from config."));
     }
 
     if (DirtyStateText)
     {
-        DirtyStateText->SetText(FText::FromString(bDirty ? TEXT("Unsaved Changes") : TEXT("Saved")));
+        DirtyStateText->SetText(FText::FromString(bDirty ? TEXT("Unsaved Snapshot Changes") : TEXT("Snapshot Saved")));
         DirtyStateText->SetColorAndOpacity(FSlateColor(bDirty ? RI_SettingsWarningColor() : RI_SettingsSuccessColor()));
     }
     if (StatusMessageText)
@@ -788,7 +805,7 @@ void UInspectorSettingsPageWidget::SetStatusMessage(const FString& InMessage, bo
     {
         InspectorSubsystem->AppendActivityLog(
             bIsError ? ERIToastType::Error : ERIToastType::Info,
-            TEXT("Settings"),
+            TEXT("Snapshot"),
             InMessage);
     }
     UpdateUIFromState();
@@ -806,7 +823,7 @@ bool UInspectorSettingsPageWidget::ApplyPreviewSettings(const FRIEditableSetting
     UInspectorWorldSubsystem* InspectorSubsystem = Subsystem.Get();
     if (!InspectorSubsystem)
     {
-        SetStatusMessage(TEXT("Settings subsystem is unavailable."), true);
+        SetStatusMessage(TEXT("Snapshot controls are unavailable."), true);
         return false;
     }
 
@@ -822,7 +839,7 @@ bool UInspectorSettingsPageWidget::ApplyPreviewSettings(const FRIEditableSetting
 
     if (bShowSuccessMessage)
     {
-        SetStatusMessage(TEXT("Preview applied."), false);
+        SetStatusMessage(TEXT("Snapshot preview applied."), false);
     }
     else
     {
@@ -838,7 +855,7 @@ void UInspectorSettingsPageWidget::BeginHotkeyCapture(ERIHotkeyCaptureTarget Cap
 {
     if (!Subsystem.IsValid())
     {
-        SetStatusMessage(TEXT("Settings subsystem is unavailable."), true);
+        SetStatusMessage(TEXT("Snapshot controls are unavailable."), true);
         return;
     }
 
@@ -983,7 +1000,7 @@ void UInspectorSettingsPageWidget::HandleThemePresetSelectionChanged(FString Sel
     }
 
     ActiveThemePreset = Subsystem->GetThemePreset();
-    SetStatusMessage(TEXT("Theme preview applied."), false);
+    SetStatusMessage(TEXT("Snapshot theme preview applied."), false);
 }
 
 void UInspectorSettingsPageWidget::HandleSaveClicked()
@@ -991,7 +1008,7 @@ void UInspectorSettingsPageWidget::HandleSaveClicked()
     UInspectorWorldSubsystem* InspectorSubsystem = Subsystem.Get();
     if (!InspectorSubsystem)
     {
-        SetStatusMessage(TEXT("Settings subsystem is unavailable."), true);
+        SetStatusMessage(TEXT("Snapshot controls are unavailable."), true);
         return;
     }
 
@@ -1004,7 +1021,7 @@ void UInspectorSettingsPageWidget::HandleSaveClicked()
 
     Diagnostics = InspectorSubsystem->GetSettingsDiagnostics();
     DraftSettings = InspectorSubsystem->GetEditableSettings();
-    SetStatusMessage(TEXT("Saved to config."), false);
+    SetStatusMessage(TEXT("Saved snapshot controls to config."), false);
 }
 
 void UInspectorSettingsPageWidget::HandleResetClicked()
@@ -1012,11 +1029,11 @@ void UInspectorSettingsPageWidget::HandleResetClicked()
     UInspectorWorldSubsystem* InspectorSubsystem = Subsystem.Get();
     if (!InspectorSubsystem)
     {
-        SetStatusMessage(TEXT("Settings subsystem is unavailable."), true);
+        SetStatusMessage(TEXT("Snapshot controls are unavailable."), true);
         return;
     }
 
     InspectorSubsystem->ReloadSettingsFromConfig();
     RefreshFromSubsystem();
-    SetStatusMessage(TEXT("Reloaded from config."), false);
+    SetStatusMessage(TEXT("Reloaded snapshot controls from config."), false);
 }

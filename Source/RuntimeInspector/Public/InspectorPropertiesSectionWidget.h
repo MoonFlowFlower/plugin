@@ -7,7 +7,9 @@
 class UInspectorPropertyRowWidget;
 class UInspectorWorldSubsystem;
 class UBorder;
+class UHorizontalBox;
 class UScrollBox;
+class UTextBlock;
 class UVerticalBox;
 
 UCLASS()
@@ -28,6 +30,7 @@ protected:
 
 private:
     void BuildWidgetTree();
+    void RefreshHeaderFromSubsystem();
     UWidget* CreatePropertyRow(UObject* ItemObject);
 
 private:
@@ -36,6 +39,21 @@ private:
 
     UPROPERTY(Transient)
     TObjectPtr<UVerticalBox> RootBox = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UBorder> HeaderBorder = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UTextBlock> HeaderActorText = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UTextBlock> HeaderFocusText = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UTextBlock> HeaderSourceText = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UTextBlock> HeaderStatusText = nullptr;
 
     UPROPERTY(Transient)
     TObjectPtr<UScrollBox> ScrollBox = nullptr;

@@ -15,6 +15,7 @@ class UButton;
 class UComboBoxString;
 class UEditableTextBox;
 class UScrollBox;
+class UInspectorSettingsPageWidget;
 class UVerticalBox;
 class UInspectorWorldSubsystem;
 struct FRIAuditLine;
@@ -103,6 +104,7 @@ private:
     UWidget* CreateStatusSection();
     UWidget* CreateAuditsSection();
     UWidget* CreatePresetsSection();
+    UWidget* CreateSnapshotSettingsSection();
     UWidget* CreateDiagnosticsSection();
     UWidget* CreateCollapsibleSectionHeader(const FString& InTitle, TObjectPtr<UTextBlock>& OutToggleText, const FName& ButtonName);
     UWidget* CreateAuditLineCard(const FRIAuditLine& InLine, int32 DisplayIndex);
@@ -345,6 +347,9 @@ private:
 
     UPROPERTY(Transient)
     TObjectPtr<UScrollBox> PageScrollBox = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UInspectorSettingsPageWidget> SnapshotSettingsSectionWidget = nullptr;
 
     UPROPERTY(Transient)
     TObjectPtr<UVerticalBox> AuditsSectionBody = nullptr;
