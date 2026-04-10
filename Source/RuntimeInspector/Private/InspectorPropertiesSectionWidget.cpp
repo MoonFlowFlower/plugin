@@ -108,6 +108,11 @@ void UInspectorPropertiesSectionWidget::SetOnlyModified(bool bInOnlyModified)
     bOnlyModified = bInOnlyModified;
 }
 
+int32 UInspectorPropertiesSectionWidget::GetEntryWidgetCountForAutomation() const
+{
+    return EntriesBox ? EntriesBox->GetChildrenCount() : INDEX_NONE;
+}
+
 TSharedRef<SWidget> UInspectorPropertiesSectionWidget::RebuildWidget()
 {
     if (WidgetTree && !WidgetTree->RootWidget)
@@ -257,6 +262,7 @@ UWidget* UInspectorPropertiesSectionWidget::CreatePropertyRow(UObject* ItemObjec
 
     Row->SetInspectorSubsystem(Subsystem.Get());
     Row->SetPropertyItem(PropertyItem);
+    Row->TakeWidget();
     return Row;
 }
 

@@ -636,6 +636,24 @@ public:
     int32 GetActivityLogEntryCountForAutomation() const;
     UFUNCTION(BlueprintPure, Category = "RuntimeInspector|Automation")
     FString GetLastActivityLogSummaryForAutomation() const;
+    UFUNCTION(BlueprintPure, Category = "RuntimeInspector|Automation")
+    int32 GetActorGroupsEntryCountForAutomation() const;
+    UFUNCTION(BlueprintPure, Category = "RuntimeInspector|Automation")
+    int32 GetActorPinnedEntryCountForAutomation() const;
+    UFUNCTION(BlueprintPure, Category = "RuntimeInspector|Automation")
+    int32 GetActorPropertyRowCountForAutomation() const;
+    UFUNCTION(BlueprintPure, Category = "RuntimeInspector|Automation")
+    int32 GetActorFunctionRowCountForAutomation() const;
+    UFUNCTION(BlueprintPure, Category = "RuntimeInspector|Automation")
+    FString GetActorPropertyHostDebugSummaryForAutomation() const;
+    UFUNCTION(BlueprintPure, Category = "RuntimeInspector|Automation")
+    FString GetActorPropertyAnchorChainForAutomation() const;
+    UFUNCTION(BlueprintPure, Category = "RuntimeInspector|Automation")
+    FString GetInspectBodyChildrenDebugSummaryForAutomation() const;
+    UFUNCTION(BlueprintPure, Category = "RuntimeInspector|Automation")
+    FString GetPanelPresentationDebugSummaryForAutomation() const;
+    UFUNCTION(BlueprintPure, Category = "RuntimeInspector|Automation")
+    FString GetPanelHostWindowDebugSummaryForAutomation() const;
     void ClearActivityLog();
     void AppendActivityLog(ERIToastType Severity, const FString& Category, const FString& Message);
     bool HandlePanelMouseButtonDown(const FPointerEvent& MouseEvent);
@@ -965,6 +983,7 @@ private:
     void MaybePrecreateSecondaryPageWidgets();
     void MaybePrecreateFilePageWidget();
     void MaybePrecreateSettingsPageWidget();
+    void EnsureActorWorkbenchBodyInjected();
     void EnsureActorGroupsSectionInjected();
     void RefreshActorGroupsSection();
     void EnsureActorPropertiesSectionInjected();
@@ -1459,6 +1478,8 @@ private:
         TWeakObjectPtr<UPanelWidget> TestHostPanel;
         TWeakObjectPtr<UPanelWidget> SharedContextStripHostPanel;
         TWeakObjectPtr<UWidget> PanelTitleBarWidget;
+        TWeakObjectPtr<UWidget> PanelRootContentWidget;
+        TWeakObjectPtr<class UCanvasPanelSlot> PanelRootCanvasSlot;
         TWeakObjectPtr<USizeBox> PanelSizeBox;
         TWeakObjectPtr<UWidget> SharedContextActorCell;
         UPROPERTY(Transient)
@@ -1508,6 +1529,15 @@ private:
         UPROPERTY(Transient)
         TObjectPtr<UVerticalBox> ActorPropertyFunctionHostBoxStrong = nullptr;
 
+        UPROPERTY(Transient)
+        TObjectPtr<UHorizontalBox> ActorWorkbenchBodyHostStrong = nullptr;
+
+        UPROPERTY(Transient)
+        TObjectPtr<UVerticalBox> ActorWorkbenchSidebarHostStrong = nullptr;
+
+        UPROPERTY(Transient)
+        TObjectPtr<UVerticalBox> ActorWorkbenchContentHostStrong = nullptr;
+
         TWeakObjectPtr<UInspectorFilePageWidget> FilePageWidget;
         TWeakObjectPtr<UInspectorSettingsPageWidget> SettingsPageWidget;
         TWeakObjectPtr<UInspectorTestPageWidget> TestPageWidget;
@@ -1517,6 +1547,9 @@ private:
         TWeakObjectPtr<UInspectorPropertiesSectionWidget> ActorPropertiesSectionWidget;
         TWeakObjectPtr<UInspectorFunctionsSectionWidget> ActorFunctionsSectionWidget;
         TWeakObjectPtr<UVerticalBox> ActorPropertyFunctionHostBox;
+        TWeakObjectPtr<UHorizontalBox> ActorWorkbenchBodyHost;
+        TWeakObjectPtr<UVerticalBox> ActorWorkbenchSidebarHost;
+        TWeakObjectPtr<UVerticalBox> ActorWorkbenchContentHost;
         TArray<FRIHostPanelMountState> HostPanelMountStates;
         int32 SettingsPageIndex = INDEX_NONE;
         int32 TestPageIndex = INDEX_NONE;

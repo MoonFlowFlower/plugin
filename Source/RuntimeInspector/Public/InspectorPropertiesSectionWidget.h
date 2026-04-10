@@ -23,6 +23,7 @@ public:
     void SetInspectorSubsystem(UInspectorWorldSubsystem* InSubsystem);
     void SetOnlyModified(bool bInOnlyModified);
     void RefreshFromSubsystem();
+    int32 GetEntryWidgetCountForAutomation() const;
 
 protected:
     virtual TSharedRef<SWidget> RebuildWidget() override;

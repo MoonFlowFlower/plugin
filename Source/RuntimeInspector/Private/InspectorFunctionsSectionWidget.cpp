@@ -43,6 +43,11 @@ void UInspectorFunctionsSectionWidget::SetInspectorSubsystem(UInspectorWorldSubs
     Subsystem = InSubsystem;
 }
 
+int32 UInspectorFunctionsSectionWidget::GetEntryWidgetCountForAutomation() const
+{
+    return FunctionsEntriesBox ? FunctionsEntriesBox->GetChildrenCount() : INDEX_NONE;
+}
+
 TSharedRef<SWidget> UInspectorFunctionsSectionWidget::RebuildWidget()
 {
     if (WidgetTree && !WidgetTree->RootWidget)
@@ -67,7 +72,7 @@ void UInspectorFunctionsSectionWidget::BuildWidgetTree()
     }
 
     FunctionsSectionBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("RI_ActorFunctionsBorder"));
-    FunctionsSectionBorder->SetPadding(FMargin(6.f, 5.f));
+    FunctionsSectionBorder->SetPadding(FMargin(5.f, 4.f));
     FunctionsSectionBorder->SetBrushColor(RI_FunctionSectionColor());
 
     RootBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ActorFunctionsRoot"));
@@ -76,7 +81,7 @@ void UInspectorFunctionsSectionWidget::BuildWidgetTree()
     if (UVerticalBoxSlot* HeaderSlot = RootBox->AddChildToVerticalBox(
         RICompactUI::MakeSectionTitle(WidgetTree, TEXT("Functions"), RICompactUI::ERISectionVisualStyle::Emphasis)))
     {
-        HeaderSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+        HeaderSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 3.f));
     }
 
     FocusSummaryText = RICompactUI::MakeText(WidgetTree, TEXT("Focused object"), RICompactUI::GetMutedFontSize(), false, RI_FunctionMutedColor(), true);
@@ -92,7 +97,12 @@ void UInspectorFunctionsSectionWidget::BuildWidgetTree()
     ScrollBox->AddChild(FunctionsEntriesBox);
     FunctionsScrollBox = ScrollBox;
 
-    if (UVerticalBoxSlot* BodySlot = RootBox->AddChildToVerticalBox(ScrollBox))
+    USizeBox* BodySizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_ActorFunctionsBody"));
+    BodySizeBox->SetMinDesiredHeight(150.f);
+    BodySizeBox->SetMaxDesiredHeight(220.f);
+    BodySizeBox->SetContent(ScrollBox);
+
+    if (UVerticalBoxSlot* BodySlot = RootBox->AddChildToVerticalBox(BodySizeBox))
     {
         BodySlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
         BodySlot->SetPadding(FMargin(0.f, 0.f, 0.f, 0.f));
@@ -127,6 +137,7 @@ UWidget* UInspectorFunctionsSectionWidget::CreateFunctionRow(UInspectorFunctionI
 
     Row->SetInspectorSubsystem(Subsystem.Get());
     Row->SetFunctionItem(Item);
+    Row->TakeWidget();
     return Row;
 }
 

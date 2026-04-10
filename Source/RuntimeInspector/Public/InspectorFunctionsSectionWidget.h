@@ -23,6 +23,7 @@ public:
 
     void SetInspectorSubsystem(UInspectorWorldSubsystem* InSubsystem);
     void RefreshFromSubsystem();
+    int32 GetEntryWidgetCountForAutomation() const;
 
     bool HasFunctionsSection() const { return FunctionsSectionBorder != nullptr; }
 

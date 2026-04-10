@@ -104,7 +104,9 @@ void UInspectorPropertyRowWidget::BuildWidgetTree()
     NameText = RICompactUI::MakeText(WidgetTree, TEXT("Property"), RICompactUI::GetLabelFontSize(), true, RI_PropertyTextColor(), true);
     if (UHorizontalBoxSlot* NameSlot = RootBox->AddChildToHorizontalBox(NameText))
     {
-        NameSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+        FSlateChildSize SizeRule(ESlateSizeRule::Fill);
+        SizeRule.Value = 0.72f;
+        NameSlot->SetSize(SizeRule);
         NameSlot->SetVerticalAlignment(VAlign_Center);
         NameSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
     }
@@ -112,7 +114,9 @@ void UInspectorPropertyRowWidget::BuildWidgetTree()
     ReadOnlyValueText = RICompactUI::MakeText(WidgetTree, TEXT(""), RICompactUI::GetValueFontSize(), false, RI_PropertyMutedColor(), true);
     if (UHorizontalBoxSlot* ValueSlot = RootBox->AddChildToHorizontalBox(ReadOnlyValueText))
     {
-        ValueSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+        FSlateChildSize SizeRule(ESlateSizeRule::Fill);
+        SizeRule.Value = 1.28f;
+        ValueSlot->SetSize(SizeRule);
         ValueSlot->SetVerticalAlignment(VAlign_Center);
     }
 
@@ -121,7 +125,9 @@ void UInspectorPropertyRowWidget::BuildWidgetTree()
     ValueTextBox->OnTextCommitted.AddDynamic(this, &UInspectorPropertyRowWidget::HandleValueCommitted);
     if (UHorizontalBoxSlot* TextBoxSlot = RootBox->AddChildToHorizontalBox(ValueTextBox))
     {
-        TextBoxSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+        FSlateChildSize SizeRule(ESlateSizeRule::Fill);
+        SizeRule.Value = 1.28f;
+        TextBoxSlot->SetSize(SizeRule);
         TextBoxSlot->SetVerticalAlignment(VAlign_Center);
     }
 
@@ -137,7 +143,9 @@ void UInspectorPropertyRowWidget::BuildWidgetTree()
     EnumComboBox->OnSelectionChanged.AddDynamic(this, &UInspectorPropertyRowWidget::HandleEnumChanged);
     if (UHorizontalBoxSlot* EnumSlot = RootBox->AddChildToHorizontalBox(EnumComboBox))
     {
-        EnumSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+        FSlateChildSize SizeRule(ESlateSizeRule::Fill);
+        SizeRule.Value = 1.28f;
+        EnumSlot->SetSize(SizeRule);
         EnumSlot->SetVerticalAlignment(VAlign_Center);
     }
 

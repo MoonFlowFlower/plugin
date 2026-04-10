@@ -15,6 +15,12 @@
 
 `Docs/UI_GUARDRAILS.md` 仍然保留，但它只是 UI 结构附录，受本文件约束。
 
+补充文档角色：
+
+- `Docs/TROUBLESHOOTING.md`
+  - 记录已真实遇到的问题、证据链和修复方式
+  - 不是 authority，但后续排查同类问题时应先查它
+
 ## 1. 当前产品定位
 
 RuntimeInspector 当前是一个 **运行时检查、变更审阅、验证与受控 promote 工作台**，不是通用远程调试器。
@@ -81,6 +87,8 @@ RuntimeInspector 当前是一个 **运行时检查、变更审阅、验证与受
 - 如果 workflow、verification profile、screenshot foundation、packaged validation 流程有变化，先改 `UInspectorWorldSubsystem` 这条 authority，再补 UI 或脚本
 - agent 在响应需求时，必须优先理解用户的真实意图，而不是机械按表面文字逐项最小实现
 - 如果用户指出的是某块 UI / 某条主路径 / 某类职责已经失去产品意义，应按完整结果收口相关遗留结构，不要只删除字面上被点名的单个控件或文本
+- RuntimeInspector 的视觉验收不能靠猜窗口；先读 `panelHostWindowDebug`，再抓实际宿主窗口
+- 运行时浮动面板如果走 `CanvasPanelSlot`，必须先确认 anchors 语义，不能把 stretch anchors 当成固定浮窗来写 offsets
 
 ## 4. 当前验证体系
 
@@ -182,6 +190,8 @@ RuntimeInspector 当前是一个 **运行时检查、变更审阅、验证与受
   - 唯一 agent 开发权威源
 - `Docs/UI_GUARDRAILS.md`
   - UI 结构附录
+- `Docs/TROUBLESHOOTING.md`
+  - 已知问题与排查记录
 - `README.md`
   - 用户与维护者概览
 - `USER_GUIDE_zh-CN.md`
@@ -200,6 +210,7 @@ RuntimeInspector 当前是一个 **运行时检查、变更审阅、验证与受
 - 不要再把 agent 开发规则塞回 `README`、用户指南或 Fab 文档
 - 如果出现新的开发流程权威说明，只能加到本文件
 - 如果出现新的 UI 结构约束，优先更新本文件并同步 `Docs/UI_GUARDRAILS.md`
+- 如果遇到新的运行时 UI / bridge / workflow 异常，整理成证据链和修复方法时应优先补到 `Docs/TROUBLESHOOTING.md`
 
 ## 7. 当前默认执行顺序
 
@@ -210,6 +221,9 @@ RuntimeInspector 当前是一个 **运行时检查、变更审阅、验证与受
 3. 先跑窄回归，再跑主闭环
 4. UI 结构改动必须同时看 self-test 和实际页面
 5. 对外文档只保留用户或发布信息，不承担开发 authority
+6. 任何 UI 视觉结论都不能只基于 `Preview` 独立窗口或 geometry 数字
+7. 如果需求涉及比例、层级、审美或“看起来对不对”，必须先确认 `panelHostWindowDebug`，再抓实际宿主窗口验收
+8. 如有必要，再补主编辑器窗口截图做对照，避免把“宿主不同”误判成“布局不同”
 
 ## 8. 禁止回到旧状态
 
