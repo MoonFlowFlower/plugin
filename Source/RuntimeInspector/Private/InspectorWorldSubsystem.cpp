@@ -2678,6 +2678,40 @@ namespace
         return nullptr;
     }
 
+    static USizeBox* RI_FindFirstSizeBoxRecursive(UWidget* Widget)
+    {
+        if (!Widget)
+        {
+            return nullptr;
+        }
+
+        if (USizeBox* SizeBox = Cast<USizeBox>(Widget))
+        {
+            return SizeBox;
+        }
+
+        if (const UUserWidget* UserWidget = Cast<UUserWidget>(Widget))
+        {
+            if (UserWidget->WidgetTree)
+            {
+                return RI_FindFirstSizeBoxRecursive(UserWidget->WidgetTree->RootWidget);
+            }
+        }
+
+        if (const UPanelWidget* Panel = Cast<UPanelWidget>(Widget))
+        {
+            for (int32 Index = 0; Index < Panel->GetChildrenCount(); ++Index)
+            {
+                if (USizeBox* SizeBox = RI_FindFirstSizeBoxRecursive(Panel->GetChildAt(Index)))
+                {
+                    return SizeBox;
+                }
+            }
+        }
+
+        return nullptr;
+    }
+
     static void RI_ApplyLegacyActorHeaderVisibilityFix_Impl(UUserWidget* PanelWidget)
     {
         if (!PanelWidget || !PanelWidget->WidgetTree)
@@ -2784,13 +2818,19 @@ static void RI_UpdateActorPropertyHeader(UUserWidget* PanelWidget, UObject* Focu
 
     if (UTextBlock* HeaderLabelText = Cast<UTextBlock>(PanelWidget->WidgetTree->FindWidget(TEXT("TXT_SelectedName"))))
     {
-        HeaderLabelText->SetText(FText::FromString(TEXT("SELECTION")));
+        HeaderLabelText->SetText(FText::FromString(TEXT("Selection")));
+        FSlateFontInfo Font = HeaderLabelText->GetFont();
+        Font.Size = 7;
+        HeaderLabelText->SetFont(Font);
     }
 
     if (UTextBlock* HeaderValueText = Cast<UTextBlock>(PanelWidget->WidgetTree->FindWidget(TEXT("TXT_SelectedActor"))))
     {
         HeaderValueText->SetAutoWrapText(true);
         HeaderValueText->SetText(FText::FromString(ActorLabel));
+        FSlateFontInfo Font = HeaderValueText->GetFont();
+        Font.Size = 8;
+        HeaderValueText->SetFont(Font);
     }
 
     if (UTextBlock* FocusText = Cast<UTextBlock>(PanelWidget->WidgetTree->FindWidget(TEXT("TXT_SelectCompName"))))
@@ -2800,6 +2840,9 @@ static void RI_UpdateActorPropertyHeader(UUserWidget* PanelWidget, UObject* Focu
             bShowSeparateFocus
                 ? FString::Printf(TEXT("Focus: %s"), *FocusLabel)
                 : TEXT("")));
+        FSlateFontInfo Font = FocusText->GetFont();
+        Font.Size = 7;
+        FocusText->SetFont(Font);
         FocusText->SetVisibility(bShowSeparateFocus ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
     }
 
@@ -3384,6 +3427,23 @@ void UInspectorWorldSubsystem::UpdatePanelTabButtonStyles()
             ActiveIndex == ButtonIndex
                 ? RICompactUI::ERIButtonVisualStyle::TabActive
                 : RICompactUI::ERIButtonVisualStyle::TabInactive);
+
+        const bool bActive = ActiveIndex == ButtonIndex;
+        Button->SetRenderOpacity(bActive ? 1.0f : 0.82f);
+
+        if (UTextBlock* TextBlock = RI_FindFirstTextBlockRecursive(Button))
+        {
+            FSlateFontInfo Font = TextBlock->GetFont();
+            Font.Size = bActive ? 8 : 7;
+            TextBlock->SetFont(Font);
+        }
+
+        if (USizeBox* SizeBox = RI_FindFirstSizeBoxRecursive(Button))
+        {
+            const float MinWidth = ButtonIndex == 0 ? 78.0f : (ButtonIndex == 1 ? 92.0f : 108.0f);
+            SizeBox->SetMinDesiredWidth(MinWidth);
+            SizeBox->SetHeightOverride(24.0f);
+        }
     };
 
     ApplyTabStyle(ActorTabButton.Get(), 0);
@@ -4084,8 +4144,7 @@ void UInspectorWorldSubsystem::EnsureActorGroupsSectionInjected()
     {
         HostBox = Panel->WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_ActorGroupsHost"));
         HostBox->SetMinDesiredWidth(220.0f);
-        HostBox->SetMinDesiredHeight(540.0f);
-        HostBox->SetHeightOverride(540.0f);
+        HostBox->ClearHeightOverride();
 
         UVerticalBox* RootBox = Panel->WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ActorGroupsRoot"));
         HostBox->SetContent(RootBox);
@@ -4108,17 +4167,21 @@ void UInspectorWorldSubsystem::EnsureActorGroupsSectionInjected()
         GroupsScroll->AddChild(EntriesBox);
 
         USizeBox* ComponentBody = Panel->WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_ActorGroupsBody"));
-        ComponentBody->SetMinDesiredHeight(180.0f);
-        ComponentBody->SetHeightOverride(180.0f);
+        ComponentBody->SetMinDesiredHeight(168.0f);
+        ComponentBody->SetHeightOverride(168.0f);
         ComponentBody->SetContent(GroupsScroll);
         if (UVerticalBoxSlot* BodySlot = ComponentBox->AddChildToVerticalBox(ComponentBody))
         {
             BodySlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
+            BodySlot->SetHorizontalAlignment(HAlign_Fill);
+            BodySlot->SetVerticalAlignment(VAlign_Top);
         }
 
         if (UVerticalBoxSlot* ComponentSlot = RootBox->AddChildToVerticalBox(ComponentBorder))
         {
             ComponentSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
+            ComponentSlot->SetHorizontalAlignment(HAlign_Fill);
+            ComponentSlot->SetVerticalAlignment(VAlign_Top);
             ComponentSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 8.f));
         }
 
@@ -4135,20 +4198,25 @@ void UInspectorWorldSubsystem::EnsureActorGroupsSectionInjected()
             HeaderSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
         }
 
+        UScrollBox* PinnedScroll = Panel->WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("RI_ActorPinnedScroll"));
         UVerticalBox* PinnedEntries = Panel->WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ActorPinnedEntries"));
-
+        PinnedScroll->AddChild(PinnedEntries);
         USizeBox* PinnedBody = Panel->WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_ActorPinnedBody"));
         PinnedBody->SetMinDesiredHeight(120.0f);
         PinnedBody->SetHeightOverride(120.0f);
-        PinnedBody->SetContent(PinnedEntries);
+        PinnedBody->SetContent(PinnedScroll);
         if (UVerticalBoxSlot* BodySlot = PinnedBox->AddChildToVerticalBox(PinnedBody))
         {
             BodySlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
+            BodySlot->SetHorizontalAlignment(HAlign_Fill);
+            BodySlot->SetVerticalAlignment(VAlign_Top);
         }
 
         if (UVerticalBoxSlot* PinnedSlot = RootBox->AddChildToVerticalBox(PinnedBorder))
         {
             PinnedSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
+            PinnedSlot->SetHorizontalAlignment(HAlign_Fill);
+            PinnedSlot->SetVerticalAlignment(VAlign_Top);
         }
 
         ActorGroupsSectionHostBoxStrong = HostBox;
@@ -4173,6 +4241,12 @@ void UInspectorWorldSubsystem::EnsureActorGroupsSectionInjected()
 
     HostBox->SetVisibility(ESlateVisibility::Visible);
     GroupSwitcher->SetActiveWidget(HostBox);
+    if (UWidgetSwitcherSlot* SwitcherSlot = Cast<UWidgetSwitcherSlot>(HostBox->Slot))
+    {
+        SwitcherSlot->SetHorizontalAlignment(HAlign_Fill);
+        SwitcherSlot->SetVerticalAlignment(VAlign_Fill);
+        SwitcherSlot->SetPadding(FMargin(0.f));
+    }
     GroupSwitcher->ForceLayoutPrepass();
 
     if (UWidget* GroupList = Panel->WidgetTree->FindWidget(TEXT("LV_Group")))
@@ -4228,6 +4302,31 @@ void UInspectorWorldSubsystem::RefreshActorGroupsSection()
     TArray<UObject*> RootObjects;
     GetGroupTreeRootsForSelected(SearchText, RootObjects);
 
+    auto AddEmptyStateCard = [Panel](UVerticalBox* TargetBox, const FString& Message)
+    {
+        if (!Panel || !Panel->WidgetTree || !TargetBox)
+        {
+            return;
+        }
+
+        UBorder* EmptyBorder = Panel->WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
+        EmptyBorder->SetPadding(FMargin(8.f, 10.f));
+        EmptyBorder->SetBrushColor(RICompactUI::GetRowSurfaceBackgroundColor());
+        EmptyBorder->SetContent(
+            RICompactUI::MakeText(
+                Panel->WidgetTree,
+                Message,
+                RICompactUI::GetMutedFontSize(),
+                false,
+                RICompactUI::GetMutedTextColor(),
+                true));
+
+        if (UVerticalBoxSlot* EmptySlot = TargetBox->AddChildToVerticalBox(EmptyBorder))
+        {
+            EmptySlot->SetPadding(FMargin(0.f, 0.f, 0.f, 2.f));
+        }
+    };
+
     TArray<UInspectorGroupItem*> FlatItems;
     TFunction<void(UInspectorGroupItem*)> AppendItemRecursive = [&](UInspectorGroupItem* Item)
     {
@@ -4271,8 +4370,7 @@ void UInspectorWorldSubsystem::RefreshActorGroupsSection()
 
     if (FlatItems.Num() == 0)
     {
-        EntriesBox->AddChildToVerticalBox(
-            RICompactUI::MakeText(Panel->WidgetTree, TEXT("No components available."), RICompactUI::GetMutedFontSize(), false, RICompactUI::GetMutedTextColor(), true));
+        AddEmptyStateCard(EntriesBox, TEXT("No components available."));
     }
     else
     {
@@ -4333,8 +4431,7 @@ void UInspectorWorldSubsystem::RefreshActorGroupsSection()
     GetPinnedItemsForSelected(SearchText, PinnedItems);
     if (PinnedItems.Num() == 0)
     {
-        PinnedEntriesBox->AddChildToVerticalBox(
-            RICompactUI::MakeText(Panel->WidgetTree, TEXT("No starred properties yet."), RICompactUI::GetMutedFontSize(), false, RICompactUI::GetMutedTextColor(), true));
+        AddEmptyStateCard(PinnedEntriesBox, TEXT("No starred properties yet."));
     }
     else
     {
@@ -4527,28 +4624,6 @@ void UInspectorWorldSubsystem::EnsureActorPropertiesSectionInjected()
 
     AttachChildToHost(SectionWidget);
     AttachChildToHost(FunctionWidget);
-
-    if (UContentWidget* ContentHost = Cast<UContentWidget>(DirectAnchorChild))
-    {
-        if (UPanelWidget* ExistingParent = Cast<UPanelWidget>(HostBox->GetParent()))
-        {
-            if (ExistingParent != ContentHost)
-            {
-                ExistingParent->RemoveChild(HostBox);
-            }
-        }
-
-        if (ContentHost->GetContent() != HostBox)
-        {
-            ContentHost->SetContent(HostBox);
-        }
-
-        ContentHost->SetVisibility(ESlateVisibility::Visible);
-        HostBox->SetVisibility(ESlateVisibility::Visible);
-        SectionWidget->SetVisibility(ESlateVisibility::Visible);
-        FunctionWidget->SetVisibility(ESlateVisibility::Visible);
-        return;
-    }
 
     if (DirectAnchorChild)
     {

@@ -146,12 +146,12 @@ void UInspectorPropertiesSectionWidget::BuildWidgetTree()
     HeaderBorder->SetContent(HeaderRoot);
 
     if (UVerticalBoxSlot* HeaderTitleSlot = HeaderRoot->AddChildToVerticalBox(
-        RICompactUI::MakeText(WidgetTree, TEXT("SELECTION"), RICompactUI::GetMutedFontSize(), true, RICompactUI::GetMutedTextColor())))
+        RICompactUI::MakeText(WidgetTree, TEXT("Selection"), RICompactUI::GetMutedFontSize(), true, RICompactUI::GetMutedTextColor())))
     {
         HeaderTitleSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
     }
 
-    HeaderActorText = RICompactUI::MakeText(WidgetTree, TEXT("No selected actor"), 11, true, RICompactUI::GetStrongTextColor(), true);
+    HeaderActorText = RICompactUI::MakeText(WidgetTree, TEXT("No selected actor"), 10, true, RICompactUI::GetStrongTextColor(), true);
     if (UVerticalBoxSlot* ActorSlot = HeaderRoot->AddChildToVerticalBox(HeaderActorText))
     {
         ActorSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
