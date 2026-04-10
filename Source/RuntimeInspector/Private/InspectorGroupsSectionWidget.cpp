@@ -2,7 +2,6 @@
 
 #include "InspectorCompactWidgetUtils.h"
 #include "InspectorGroupItem.h"
-#include "InspectorGroupRowWidget.h"
 #include "InspectorMaterialParamItem.h"
 #include "InspectorPropertyItem.h"
 #include "InspectorWorldSubsystem.h"
@@ -130,6 +129,11 @@ int32 UInspectorGroupsSectionWidget::GetEntryWidgetCountForDebug() const
     return LastEntryWidgetCount;
 }
 
+int32 UInspectorGroupsSectionWidget::GetPinnedEntryWidgetCountForDebug() const
+{
+    return LastPinnedEntryWidgetCount;
+}
+
 TSharedRef<SWidget> UInspectorGroupsSectionWidget::RebuildWidget()
 {
     if (WidgetTree && !WidgetTree->RootWidget)
@@ -147,8 +151,12 @@ void UInspectorGroupsSectionWidget::NativeConstruct()
     {
         RootSizeBox = Cast<USizeBox>(WidgetTree->FindWidget(TEXT("RI_GroupSectionSizeBox")));
         RootBox = Cast<UVerticalBox>(WidgetTree->FindWidget(TEXT("RI_GroupSectionRoot")));
-        ScrollBox = Cast<UScrollBox>(WidgetTree->FindWidget(TEXT("RI_GroupSectionScroll")));
+        ComponentSectionBorder = Cast<UBorder>(WidgetTree->FindWidget(TEXT("RI_GroupSectionBorder")));
+        ComponentScrollBox = Cast<UScrollBox>(WidgetTree->FindWidget(TEXT("RI_GroupSectionScroll")));
         EntriesBox = Cast<UVerticalBox>(WidgetTree->FindWidget(TEXT("RI_GroupSectionEntries")));
+        PinnedSectionBorder = Cast<UBorder>(WidgetTree->FindWidget(TEXT("RI_PinnedSectionBorder")));
+        PinnedScrollBox = Cast<UScrollBox>(WidgetTree->FindWidget(TEXT("RI_PinnedSectionScroll")));
+        PinnedEntriesBox = Cast<UVerticalBox>(WidgetTree->FindWidget(TEXT("RI_PinnedSectionEntries")));
     }
     RefreshFromSubsystem();
 }
@@ -165,13 +173,67 @@ void UInspectorGroupsSectionWidget::BuildWidgetTree()
     RootSizeBox->SetMinDesiredHeight(420.0f);
 
     RootBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_GroupSectionRoot"));
-    ScrollBox = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("RI_GroupSectionScroll"));
+    ComponentSectionBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("RI_GroupSectionBorder"));
+    ComponentSectionBorder->SetPadding(FMargin(6.f, 5.f));
+    ComponentSectionBorder->SetBrushColor(RICompactUI::GetSectionSurfaceBackgroundColor());
+
+    UVerticalBox* ComponentBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_GroupSectionComponentBox"));
+    ComponentSectionBorder->SetContent(ComponentBox);
+
+    if (UVerticalBoxSlot* HeaderSlot = ComponentBox->AddChildToVerticalBox(
+        RICompactUI::MakeSectionTitle(WidgetTree, TEXT("Component"), RICompactUI::ERISectionVisualStyle::Emphasis)))
+    {
+        HeaderSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+    }
+
+    ComponentScrollBox = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("RI_GroupSectionScroll"));
     EntriesBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_GroupSectionEntries"));
-    ScrollBox->AddChild(EntriesBox);
-    if (UVerticalBoxSlot* ScrollSlot = RootBox->AddChildToVerticalBox(ScrollBox))
+    ComponentScrollBox->AddChild(EntriesBox);
+    USizeBox* ComponentBodySizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_GroupSectionBodySize"));
+    ComponentBodySizeBox->SetHeightOverride(180.0f);
+    ComponentBodySizeBox->SetMinDesiredHeight(180.0f);
+    ComponentBodySizeBox->SetContent(ComponentScrollBox);
+    if (UVerticalBoxSlot* BodySlot = ComponentBox->AddChildToVerticalBox(ComponentBodySizeBox))
+    {
+        BodySlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+    }
+
+    if (UVerticalBoxSlot* ScrollSlot = RootBox->AddChildToVerticalBox(ComponentSectionBorder))
     {
         ScrollSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+        ScrollSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 8.f));
     }
+
+    PinnedSectionBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("RI_PinnedSectionBorder"));
+    PinnedSectionBorder->SetPadding(FMargin(6.f, 5.f));
+    PinnedSectionBorder->SetBrushColor(RICompactUI::GetSectionSurfaceBackgroundColor());
+
+    UVerticalBox* PinnedBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_PinnedSectionBox"));
+    PinnedSectionBorder->SetContent(PinnedBox);
+
+    if (UVerticalBoxSlot* HeaderSlot = PinnedBox->AddChildToVerticalBox(
+        RICompactUI::MakeSectionTitle(WidgetTree, TEXT("Star"), RICompactUI::ERISectionVisualStyle::Emphasis)))
+    {
+        HeaderSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+    }
+
+    PinnedScrollBox = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("RI_PinnedSectionScroll"));
+    PinnedEntriesBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_PinnedSectionEntries"));
+    PinnedScrollBox->AddChild(PinnedEntriesBox);
+    USizeBox* PinnedBodySizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_PinnedSectionBodySize"));
+    PinnedBodySizeBox->SetHeightOverride(120.0f);
+    PinnedBodySizeBox->SetMinDesiredHeight(120.0f);
+    PinnedBodySizeBox->SetContent(PinnedScrollBox);
+    if (UVerticalBoxSlot* BodySlot = PinnedBox->AddChildToVerticalBox(PinnedBodySizeBox))
+    {
+        BodySlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+    }
+
+    if (UVerticalBoxSlot* PinnedSlot = RootBox->AddChildToVerticalBox(PinnedSectionBorder))
+    {
+        PinnedSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+    }
+
     RootSizeBox->SetContent(RootBox);
     WidgetTree->RootWidget = RootSizeBox;
 }
@@ -297,19 +359,25 @@ void UInspectorGroupsSectionWidget::RefreshFromSubsystem()
     {
         RootSizeBox = Cast<USizeBox>(WidgetTree->FindWidget(TEXT("RI_GroupSectionSizeBox")));
         RootBox = Cast<UVerticalBox>(WidgetTree->FindWidget(TEXT("RI_GroupSectionRoot")));
-        ScrollBox = Cast<UScrollBox>(WidgetTree->FindWidget(TEXT("RI_GroupSectionScroll")));
+        ComponentSectionBorder = Cast<UBorder>(WidgetTree->FindWidget(TEXT("RI_GroupSectionBorder")));
+        ComponentScrollBox = Cast<UScrollBox>(WidgetTree->FindWidget(TEXT("RI_GroupSectionScroll")));
         EntriesBox = Cast<UVerticalBox>(WidgetTree->FindWidget(TEXT("RI_GroupSectionEntries")));
+        PinnedSectionBorder = Cast<UBorder>(WidgetTree->FindWidget(TEXT("RI_PinnedSectionBorder")));
+        PinnedScrollBox = Cast<UScrollBox>(WidgetTree->FindWidget(TEXT("RI_PinnedSectionScroll")));
+        PinnedEntriesBox = Cast<UVerticalBox>(WidgetTree->FindWidget(TEXT("RI_PinnedSectionEntries")));
     }
 
-    if (!EntriesBox || !WidgetTree)
+    if (!EntriesBox || !PinnedEntriesBox || !WidgetTree)
     {
         return;
     }
 
     EntriesBox->ClearChildren();
+    PinnedEntriesBox->ClearChildren();
     ClickProxies.Reset();
     PinnedClickProxies.Reset();
     LastEntryWidgetCount = 0;
+    LastPinnedEntryWidgetCount = 0;
 
     UInspectorWorldSubsystem* InspectorSubsystem = Subsystem.Get();
     if (!InspectorSubsystem)
@@ -335,12 +403,6 @@ void UInspectorGroupsSectionWidget::RefreshFromSubsystem()
         }
     }
 
-    if (UVerticalBoxSlot* HeaderSlot = EntriesBox->AddChildToVerticalBox(
-        RICompactUI::MakeSectionTitle(WidgetTree, TEXT("Component"), RICompactUI::ERISectionVisualStyle::Emphasis)))
-    {
-        HeaderSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
-    }
-
     if (FlatItems.Num() == 0)
     {
         EntriesBox->AddChildToVerticalBox(
@@ -354,24 +416,46 @@ void UInspectorGroupsSectionWidget::RefreshFromSubsystem()
             continue;
         }
 
-        UInspectorGroupRowWidget* RowWidget = nullptr;
-        if (APlayerController* PC = GetOwningPlayer())
-        {
-            RowWidget = CreateWidget<UInspectorGroupRowWidget>(PC, UInspectorGroupRowWidget::StaticClass());
-        }
-        else if (UWorld* World = GetWorld())
-        {
-            RowWidget = CreateWidget<UInspectorGroupRowWidget>(World, UInspectorGroupRowWidget::StaticClass());
-        }
-        if (!RowWidget)
+        UButton* RowButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass());
+        UHorizontalBox* RowBox = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
+        if (!RowButton || !RowBox)
         {
             continue;
         }
 
-        RowWidget->SetInspectorSubsystem(InspectorSubsystem);
-        RowWidget->SetGroupItem(Item);
+        RowButton->SetBackgroundColor(RICompactUI::GetRowSurfaceBackgroundColor());
+        RowButton->AddChild(RowBox);
 
-        if (UVerticalBoxSlot* EntrySlot = EntriesBox->AddChildToVerticalBox(RowWidget))
+        const FString Expander = RI_GroupItemCanExpand(Item) ? (Item->bExpanded ? TEXT("v") : TEXT(">")) : TEXT(" ");
+        UTextBlock* ExpanderText = RICompactUI::MakeText(WidgetTree, Expander, RICompactUI::GetLabelFontSize(), true, RICompactUI::GetMutedTextColor(), false);
+        if (UHorizontalBoxSlot* ExpanderSlot = RowBox->AddChildToHorizontalBox(ExpanderText))
+        {
+            ExpanderSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
+            ExpanderSlot->SetVerticalAlignment(VAlign_Center);
+            ExpanderSlot->SetPadding(FMargin(0.f, 0.f, 6.f, 0.f));
+        }
+
+        UTextBlock* NameText = RICompactUI::MakeText(WidgetTree, Item->DisplayName, RICompactUI::GetLabelFontSize(), true, RICompactUI::GetStrongTextColor(), true);
+        if (UHorizontalBoxSlot* NameSlot = RowBox->AddChildToHorizontalBox(NameText))
+        {
+            NameSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+            NameSlot->SetVerticalAlignment(VAlign_Center);
+        }
+
+        if (UButtonSlot* ButtonSlot = Cast<UButtonSlot>(RowBox->Slot))
+        {
+            const float Indent = 6.0f + static_cast<float>(FMath::Max(0, Item->Depth)) * 12.0f;
+            ButtonSlot->SetPadding(FMargin(Indent, 4.f, 6.f, 4.f));
+            ButtonSlot->SetHorizontalAlignment(HAlign_Fill);
+            ButtonSlot->SetVerticalAlignment(VAlign_Fill);
+        }
+
+        UInspectorGroupButtonProxy* Proxy = NewObject<UInspectorGroupButtonProxy>(this);
+        Proxy->Initialize(InspectorSubsystem, Item);
+        RowButton->OnClicked.AddDynamic(Proxy, &UInspectorGroupButtonProxy::HandleClicked);
+        ClickProxies.Add(Proxy);
+
+        if (UVerticalBoxSlot* EntrySlot = EntriesBox->AddChildToVerticalBox(RowButton))
         {
             EntrySlot->SetPadding(FMargin(0.f, 0.f, 0.f, 2.f));
             ++LastEntryWidgetCount;
@@ -381,15 +465,9 @@ void UInspectorGroupsSectionWidget::RefreshFromSubsystem()
     TArray<UObject*> PinnedItems;
     InspectorSubsystem->GetPinnedItemsForSelected(SearchText, PinnedItems);
 
-    if (UVerticalBoxSlot* HeaderSlot = EntriesBox->AddChildToVerticalBox(
-        RICompactUI::MakeSectionTitle(WidgetTree, TEXT("Star"), RICompactUI::ERISectionVisualStyle::Emphasis)))
-    {
-        HeaderSlot->SetPadding(FMargin(0.f, FlatItems.Num() > 0 ? 8.f : 6.f, 0.f, 4.f));
-    }
-
     if (PinnedItems.Num() == 0)
     {
-        EntriesBox->AddChildToVerticalBox(
+        PinnedEntriesBox->AddChildToVerticalBox(
             RICompactUI::MakeText(WidgetTree, TEXT("No starred properties yet."), RICompactUI::GetMutedFontSize(), false, RICompactUI::GetMutedTextColor(), true));
     }
     else
@@ -398,26 +476,43 @@ void UInspectorGroupsSectionWidget::RefreshFromSubsystem()
         {
             if (UWidget* PinnedRow = CreatePinnedRow(PinnedItem))
             {
-                if (UVerticalBoxSlot* EntrySlot = EntriesBox->AddChildToVerticalBox(PinnedRow))
+                if (UVerticalBoxSlot* EntrySlot = PinnedEntriesBox->AddChildToVerticalBox(PinnedRow))
                 {
                     EntrySlot->SetPadding(FMargin(0.f, 0.f, 0.f, 2.f));
-                    ++LastEntryWidgetCount;
+                    ++LastPinnedEntryWidgetCount;
                 }
             }
         }
     }
 
-    if (ScrollBox)
+    if (ComponentScrollBox)
     {
-        ScrollBox->SetScrollOffset(0.0f);
+        ComponentScrollBox->SetScrollOffset(0.0f);
         if (EntriesBox->GetChildrenCount() > 0)
         {
-            ScrollBox->ScrollWidgetIntoView(EntriesBox->GetChildAt(0), true, EDescendantScrollDestination::TopOrLeft, 0.0f);
+            ComponentScrollBox->ScrollWidgetIntoView(EntriesBox->GetChildAt(0), true, EDescendantScrollDestination::TopOrLeft, 0.0f);
+        }
+    }
+
+    if (PinnedScrollBox)
+    {
+        PinnedScrollBox->SetScrollOffset(0.0f);
+        if (PinnedEntriesBox->GetChildrenCount() > 0)
+        {
+            PinnedScrollBox->ScrollWidgetIntoView(PinnedEntriesBox->GetChildAt(0), true, EDescendantScrollDestination::TopOrLeft, 0.0f);
         }
     }
 
     EntriesBox->InvalidateLayoutAndVolatility();
-    ScrollBox->InvalidateLayoutAndVolatility();
+    PinnedEntriesBox->InvalidateLayoutAndVolatility();
+    if (ComponentScrollBox)
+    {
+        ComponentScrollBox->InvalidateLayoutAndVolatility();
+    }
+    if (PinnedScrollBox)
+    {
+        PinnedScrollBox->InvalidateLayoutAndVolatility();
+    }
     InvalidateLayoutAndVolatility();
     ForceLayoutPrepass();
 }

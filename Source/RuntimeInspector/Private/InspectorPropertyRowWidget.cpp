@@ -6,11 +6,14 @@
 
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
+#include "Components/Button.h"
+#include "Components/ButtonSlot.h"
 #include "Components/CheckBox.h"
 #include "Components/ComboBoxString.h"
 #include "Components/EditableTextBox.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
+#include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
 
 namespace
@@ -29,6 +32,11 @@ namespace
     {
         return RICompactUI::GetMutedTextColor();
     }
+
+    static FLinearColor RI_PropertyFavoriteActiveColor()
+    {
+        return RICompactUI::GetWarningTextColor();
+    }
 }
 
 UInspectorPropertyRowWidget::UInspectorPropertyRowWidget(const FObjectInitializer& ObjectInitializer)
@@ -46,6 +54,21 @@ void UInspectorPropertyRowWidget::SetPropertyItem(UInspectorPropertyItem* InItem
 {
     PropertyItem = InItem;
     RefreshRow();
+}
+
+bool UInspectorPropertyRowWidget::IsColorSwatchVisibleForAutomation() const
+{
+    return ColorButton && ColorButton->GetVisibility() == ESlateVisibility::Visible;
+}
+
+bool UInspectorPropertyRowWidget::IsReadOnlyValueVisibleForAutomation() const
+{
+    return ReadOnlyValueText && ReadOnlyValueText->GetVisibility() == ESlateVisibility::Visible;
+}
+
+bool UInspectorPropertyRowWidget::IsValueTextBoxVisibleForAutomation() const
+{
+    return ValueTextBox && ValueTextBox->GetVisibility() == ESlateVisibility::Visible;
 }
 
 TSharedRef<SWidget> UInspectorPropertyRowWidget::RebuildWidget()
@@ -118,6 +141,33 @@ void UInspectorPropertyRowWidget::BuildWidgetTree()
         EnumSlot->SetVerticalAlignment(VAlign_Center);
     }
 
+    ColorButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("RI_PropertyRowColorButton"));
+    RICompactUI::ConfigureButton(ColorButton, RICompactUI::ERIButtonVisualStyle::Secondary, false);
+    ColorButton->OnClicked.AddDynamic(this, &UInspectorPropertyRowWidget::HandleColorClicked);
+    USizeBox* ColorSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_PropertyRowColorSize"));
+    ColorSizeBox->SetWidthOverride(24.f);
+    ColorSizeBox->SetHeightOverride(24.f);
+    ColorSwatch = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("RI_PropertyRowColorSwatch"));
+    ColorSwatch->SetPadding(FMargin(0.f));
+    ColorSwatch->SetBrushColor(FLinearColor::Black);
+    ColorSizeBox->SetContent(ColorSwatch);
+    ColorButton->AddChild(ColorSizeBox);
+    if (UHorizontalBoxSlot* ColorSlot = RootBox->AddChildToHorizontalBox(ColorButton))
+    {
+        ColorSlot->SetVerticalAlignment(VAlign_Center);
+        ColorSlot->SetPadding(FMargin(0.f, 0.f, 6.f, 0.f));
+    }
+
+    FavoriteButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("RI_PropertyRowFavoriteButton"));
+    RICompactUI::ConfigureButton(FavoriteButton, RICompactUI::ERIButtonVisualStyle::Secondary, false);
+    FavoriteButton->OnClicked.AddDynamic(this, &UInspectorPropertyRowWidget::HandleFavoriteClicked);
+    FavoriteText = RICompactUI::MakeText(WidgetTree, TEXT("*"), RICompactUI::GetLabelFontSize(), true, RI_PropertyMutedColor(), false);
+    FavoriteButton->AddChild(FavoriteText);
+    if (UHorizontalBoxSlot* FavoriteSlot = RootBox->AddChildToHorizontalBox(FavoriteButton))
+    {
+        FavoriteSlot->SetVerticalAlignment(VAlign_Center);
+    }
+
     WidgetTree->RootWidget = RootBorder;
 }
 
@@ -143,6 +193,8 @@ void UInspectorPropertyRowWidget::RefreshRow()
         if (ValueTextBox) ValueTextBox->SetVisibility(ESlateVisibility::Collapsed);
         if (BoolCheckBox) BoolCheckBox->SetVisibility(ESlateVisibility::Collapsed);
         if (EnumComboBox) EnumComboBox->SetVisibility(ESlateVisibility::Collapsed);
+        if (ColorButton) ColorButton->SetVisibility(ESlateVisibility::Collapsed);
+        if (FavoriteButton) FavoriteButton->SetVisibility(ESlateVisibility::Collapsed);
         return;
     }
 
@@ -154,11 +206,44 @@ void UInspectorPropertyRowWidget::RefreshRow()
     const FString CurrentValue = Item->GetValueText();
     const bool bEditable = Item->IsEditable();
     const EInspectorValueType ValueType = Item->GetValueType();
+    const bool bIsColorType = ValueType == EInspectorValueType::LinearColor || ValueType == EInspectorValueType::Color;
+
+    if (FavoriteButton)
+    {
+        FavoriteButton->SetVisibility(ESlateVisibility::Visible);
+    }
+    if (FavoriteText)
+    {
+        const bool bFavorited = Subsystem.IsValid() && Subsystem->IsFavoriteForItem(Item);
+        FavoriteText->SetColorAndOpacity(bFavorited ? RI_PropertyFavoriteActiveColor() : RI_PropertyMutedColor());
+    }
 
     if (ReadOnlyValueText) ReadOnlyValueText->SetVisibility(ESlateVisibility::Collapsed);
     if (ValueTextBox) ValueTextBox->SetVisibility(ESlateVisibility::Collapsed);
     if (BoolCheckBox) BoolCheckBox->SetVisibility(ESlateVisibility::Collapsed);
     if (EnumComboBox) EnumComboBox->SetVisibility(ESlateVisibility::Collapsed);
+    if (ColorButton) ColorButton->SetVisibility(ESlateVisibility::Collapsed);
+
+    if (bIsColorType && ColorButton && ColorSwatch)
+    {
+        FLinearColor SwatchColor = FLinearColor::Black;
+        bool bHasColor = false;
+        if (ValueType == EInspectorValueType::LinearColor)
+        {
+            bHasColor = Item->GetLinearColor(SwatchColor);
+        }
+        else
+        {
+            FColor SRGBColor = FColor::Black;
+            bHasColor = Item->GetColor(SRGBColor);
+            SwatchColor = FLinearColor::FromSRGBColor(SRGBColor);
+        }
+
+        ColorSwatch->SetBrushColor(bHasColor ? SwatchColor : FLinearColor::Black);
+        ColorButton->SetVisibility(ESlateVisibility::Visible);
+        ColorButton->SetIsEnabled(bEditable);
+        return;
+    }
 
     if (!bEditable)
     {
@@ -246,4 +331,29 @@ void UInspectorPropertyRowWidget::HandleEnumChanged(FString SelectedItem, ESelec
     }
 
     ApplyTextValue(SelectedItem);
+}
+
+void UInspectorPropertyRowWidget::HandleFavoriteClicked()
+{
+    UInspectorWorldSubsystem* InspectorSubsystem = Subsystem.Get();
+    UInspectorPropertyItem* Item = PropertyItem.Get();
+    if (!InspectorSubsystem || !Item)
+    {
+        return;
+    }
+
+    InspectorSubsystem->ToggleFavoriteForItem(Item);
+    RefreshRow();
+}
+
+void UInspectorPropertyRowWidget::HandleColorClicked()
+{
+    UInspectorWorldSubsystem* InspectorSubsystem = Subsystem.Get();
+    UInspectorPropertyItem* Item = PropertyItem.Get();
+    if (!InspectorSubsystem || !Item)
+    {
+        return;
+    }
+
+    InspectorSubsystem->OpenColorEditorForAnyItem(Item);
 }

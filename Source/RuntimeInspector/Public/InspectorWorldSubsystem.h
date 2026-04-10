@@ -50,6 +50,7 @@ class UInspectorTestPageWidget;
 class UPanelWidget;
 class UScrollBox;
 class USizeBox;
+class UHorizontalBox;
 class UVerticalBox;
 class UWidget;
 class UWidgetSwitcher;
@@ -703,6 +704,9 @@ public:
     UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Favorites")
     void ToggleFavoriteForItem(UInspectorPropertyItem* Item);
 
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|UI")
+    bool OpenColorEditorForAnyItem(UObject* ItemObject);
+
     // ===== Snapshot (Modified / Export / Import) =====
     UFUNCTION(BlueprintPure, Category = "RuntimeInspector|Snapshot")
     int32 GetModifiedCount() const { return ModifiedValueByKey.Num(); }
@@ -984,6 +988,7 @@ private:
     void RestoreFabScreenshotApplicationScale();
     bool ApplyFabScreenshotPanelTransform(FString& OutError);
     void RestoreFabScreenshotPanelTransform();
+    bool RunActorPageStructureSelfTest(FString& OutReport);
     bool RunFabScreenshotPageSelfTest(const FString& InPageName, ERIVisiblePage ExpectedPage, const FString& InTestLabel, FString& OutReport);
     AActor* ResolvePreferredFabScreenshotActor() const;
     void RefreshConfirmDialogBinding();
@@ -996,6 +1001,10 @@ private:
     void RefreshActiveConfirmDialogColor();
     bool TryParseConfirmDialogUnitFloat(const FText& InText, float CurrentValue, float& OutValue) const;
     bool TryParseConfirmDialogHexColor(const FText& InText, FLinearColor& OutColor) const;
+    bool TryGetInspectorItemColor(UObject* ItemObject, FLinearColor& OutColor) const;
+    bool ApplyInspectorItemColor(UObject* ItemObject, const FLinearColor& InColor, FString& OutError);
+    bool OpenColorEditorForItemInternal(UObject* ItemObject);
+    void ApplyActiveColorEditItemIfNeeded(const FLinearColor& InColor);
     void ApplyActiveConfirmDialogChannels();
     void HandleConfirmDialogNumericTextChanged(UEditableTextBox* SourceTextBox, int32 ChannelIndex, const FText& InText);
     void HandleConfirmDialogHexTextChanged(const FText& InText);
@@ -1027,6 +1036,7 @@ private:
 
     TWeakObjectPtr<UUserWidget> PanelWidget;
     TWeakObjectPtr<UUserWidget> ActiveConfirmDialogWidget;
+    TWeakObjectPtr<UObject> ActiveColorEditItem;
 
     TWeakObjectPtr<UEditableTextBox> ActiveConfirmDialogInputR;
     TWeakObjectPtr<UEditableTextBox> ActiveConfirmDialogInputG;
@@ -1495,6 +1505,9 @@ private:
         UPROPERTY(Transient)
         TObjectPtr<UInspectorFunctionsSectionWidget> ActorFunctionsSectionWidgetStrong = nullptr;
 
+        UPROPERTY(Transient)
+        TObjectPtr<UHorizontalBox> ActorPropertyFunctionHostBoxStrong = nullptr;
+
         TWeakObjectPtr<UInspectorFilePageWidget> FilePageWidget;
         TWeakObjectPtr<UInspectorSettingsPageWidget> SettingsPageWidget;
         TWeakObjectPtr<UInspectorTestPageWidget> TestPageWidget;
@@ -1503,6 +1516,7 @@ private:
         TWeakObjectPtr<UVerticalBox> ActorPinnedEntriesBox;
         TWeakObjectPtr<UInspectorPropertiesSectionWidget> ActorPropertiesSectionWidget;
         TWeakObjectPtr<UInspectorFunctionsSectionWidget> ActorFunctionsSectionWidget;
+        TWeakObjectPtr<UHorizontalBox> ActorPropertyFunctionHostBox;
         TArray<FRIHostPanelMountState> HostPanelMountStates;
         int32 SettingsPageIndex = INDEX_NONE;
         int32 TestPageIndex = INDEX_NONE;

@@ -1,8 +1,6 @@
 #include "InspectorPropertiesSectionWidget.h"
 
 #include "InspectorCompactWidgetUtils.h"
-#include "InspectorFunctionItem.h"
-#include "InspectorFunctionRowWidget.h"
 #include "InspectorGroupItem.h"
 #include "InspectorMaterialParamItem.h"
 #include "InspectorPropertyItem.h"
@@ -24,6 +22,11 @@ namespace
     static FLinearColor RI_PropertySectionMutedColor()
     {
         return RICompactUI::GetMutedTextColor();
+    }
+
+    static FLinearColor RI_PropertySectionColor()
+    {
+        return RICompactUI::GetSectionSurfaceBackgroundColor();
     }
 
     static UWidget* RI_CreateReadOnlyRow(UWidgetTree* WidgetTree, const FString& Name, const FString& Value)
@@ -98,26 +101,36 @@ void UInspectorPropertiesSectionWidget::BuildWidgetTree()
         return;
     }
 
+    RootBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("RI_ActorPropertiesBorder"));
+    RootBorder->SetPadding(FMargin(6.f, 5.f));
+    RootBorder->SetBrushColor(RI_PropertySectionColor());
+
     RootBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ActorPropertiesRoot"));
+    RootBorder->SetContent(RootBox);
+
+    if (UVerticalBoxSlot* HeaderSlot = RootBox->AddChildToVerticalBox(
+        RICompactUI::MakeSectionTitle(WidgetTree, TEXT("Property"), RICompactUI::ERISectionVisualStyle::Emphasis)))
+    {
+        HeaderSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+    }
 
     ScrollBox = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("RI_ActorPropertiesScroll"));
     USizeBox* SizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_ActorPropertiesSize"));
-    SizeBox->SetHeightOverride(240.f);
-    SizeBox->SetMaxDesiredHeight(240.f);
+    SizeBox->SetMaxDesiredHeight(320.f);
     SizeBox->SetContent(ScrollBox);
 
     EntriesBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ActorPropertiesEntries"));
     ScrollBox->AddChild(EntriesBox);
 
     RootBox->AddChildToVerticalBox(SizeBox);
-    WidgetTree->RootWidget = RootBox;
+    WidgetTree->RootWidget = RootBorder;
 }
 
 UWidget* UInspectorPropertiesSectionWidget::CreatePropertyRow(UObject* ItemObject)
 {
     if (UInspectorGroupItem* GroupItem = Cast<UInspectorGroupItem>(ItemObject))
     {
-        return CreateSectionTitle(GroupItem->DisplayName);
+        return RICompactUI::MakeSectionTitle(WidgetTree, GroupItem->DisplayName, RICompactUI::ERISectionVisualStyle::Emphasis);
     }
 
     if (UInspectorMaterialParamItem* MaterialItem = Cast<UInspectorMaterialParamItem>(ItemObject))
@@ -151,41 +164,6 @@ UWidget* UInspectorPropertiesSectionWidget::CreatePropertyRow(UObject* ItemObjec
     return Row;
 }
 
-UWidget* UInspectorPropertiesSectionWidget::CreateFunctionRow(UInspectorFunctionItem* ItemObject)
-{
-    if (!ItemObject)
-    {
-        return nullptr;
-    }
-
-    UInspectorFunctionRowWidget* Row = nullptr;
-    if (APlayerController* PC = GetOwningPlayer())
-    {
-        Row = CreateWidget<UInspectorFunctionRowWidget>(PC, UInspectorFunctionRowWidget::StaticClass());
-    }
-    else if (UWorld* World = GetWorld())
-    {
-        Row = CreateWidget<UInspectorFunctionRowWidget>(World, UInspectorFunctionRowWidget::StaticClass());
-    }
-
-    if (!Row)
-    {
-        return nullptr;
-    }
-
-    Row->SetInspectorSubsystem(Subsystem.Get());
-    Row->SetFunctionItem(ItemObject);
-    return Row;
-}
-
-UWidget* UInspectorPropertiesSectionWidget::CreateSectionTitle(const FString& InTitle)
-{
-    return RICompactUI::MakeSectionTitle(
-        WidgetTree,
-        InTitle,
-        RICompactUI::ERISectionVisualStyle::Emphasis);
-}
-
 void UInspectorPropertiesSectionWidget::RefreshFromSubsystem()
 {
     if (!EntriesBox || !WidgetTree)
@@ -207,14 +185,6 @@ void UInspectorPropertiesSectionWidget::RefreshFromSubsystem()
     InspectorSubsystem->GetPropertyItemsForSelectedEx(InspectorSubsystem->GetCurrentActorSearchText(), bOnlyModified, Items);
 
     int32 AddedRows = 0;
-    if (Items.Num() > 0)
-    {
-        if (UVerticalBoxSlot* TitleSlot = EntriesBox->AddChildToVerticalBox(CreateSectionTitle(TEXT("Properties"))))
-        {
-            TitleSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
-        }
-    }
-
     for (UObject* ItemObject : Items)
     {
         if (UWidget* RowWidget = CreatePropertyRow(ItemObject))
@@ -227,30 +197,9 @@ void UInspectorPropertiesSectionWidget::RefreshFromSubsystem()
         }
     }
 
-    TArray<UInspectorFunctionItem*> FunctionItems;
-    InspectorSubsystem->GetFunctionItemsForSelected(InspectorSubsystem->GetCurrentActorSearchText(), FunctionItems);
-    if (FunctionItems.Num() > 0)
-    {
-        if (UVerticalBoxSlot* TitleSlot = EntriesBox->AddChildToVerticalBox(CreateSectionTitle(TEXT("Functions"))))
-        {
-            TitleSlot->SetPadding(FMargin(0.f, AddedRows > 0 ? 8.f : 0.f, 0.f, 4.f));
-        }
-
-        for (UInspectorFunctionItem* FunctionItem : FunctionItems)
-        {
-            if (UWidget* RowWidget = CreateFunctionRow(FunctionItem))
-            {
-                if (UVerticalBoxSlot* EntrySlot = EntriesBox->AddChildToVerticalBox(RowWidget))
-                {
-                    EntrySlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
-                }
-            }
-        }
-    }
-
-    if (FunctionItems.Num() == 0 && AddedRows == 0)
+    if (AddedRows == 0)
     {
         EntriesBox->AddChildToVerticalBox(
-            RICompactUI::MakeText(WidgetTree, TEXT("No visible properties or callable functions match the current filter."), RICompactUI::GetMutedFontSize(), false, RI_PropertySectionMutedColor(), true));
+            RICompactUI::MakeText(WidgetTree, TEXT("No visible properties match the current selection."), RICompactUI::GetMutedFontSize(), false, RI_PropertySectionMutedColor(), true));
     }
 }

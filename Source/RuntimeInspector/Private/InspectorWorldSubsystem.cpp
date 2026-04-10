@@ -119,6 +119,7 @@ static const FName RI_SelfTestId_ContextStrip(TEXT("context_strip"));
 static const FName RI_SelfTestId_WorkflowPageView(TEXT("workflow_page_view"));
 static const FName RI_SelfTestId_TestPageLayout(TEXT("test_page_layout"));
 static const FName RI_SelfTestId_PanelInteraction(TEXT("panel_interaction"));
+static const FName RI_SelfTestId_ActorPageStructure(TEXT("actor_page_structure"));
 static const FName RI_SelfTestId_FileWorkflow(TEXT("file_workflow"));
 static const FName RI_SelfTestId_FilePromote(TEXT("file_promote_workflow"));
 static const FName RI_SelfTestId_FileCompare(TEXT("file_compare_view"));
@@ -3947,59 +3948,121 @@ void UInspectorWorldSubsystem::EnsureActorGroupsSectionInjected()
         return;
     }
 
-    USizeBox* GroupsHost = ActorGroupsSectionHostBox.Get();
-    if (!GroupsHost)
+    USizeBox* HostBox = ActorGroupsSectionHostBox.Get();
+    if (!HostBox)
     {
-        GroupsHost = Cast<USizeBox>(Panel->WidgetTree->FindWidget(TEXT("RI_ActorGroupsHost")));
-    }
+        HostBox = Panel->WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_ActorGroupsHost"));
+        HostBox->SetMinDesiredWidth(220.0f);
+        HostBox->SetMinDesiredHeight(540.0f);
+        HostBox->SetHeightOverride(540.0f);
 
-    if (!GroupsHost)
-    {
-        GroupsHost = Panel->WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_ActorGroupsHost"));
-        GroupsHost->SetMinDesiredWidth(220.0f);
-        GroupsHost->SetMinDesiredHeight(280.0f);
+        UVerticalBox* RootBox = Panel->WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ActorGroupsRoot"));
+        HostBox->SetContent(RootBox);
 
-        UScrollBox* GroupScroll = Panel->WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("RI_ActorGroupsScroll"));
-        UVerticalBox* GroupEntries = Panel->WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ActorGroupsEntries"));
-        GroupScroll->AddChild(GroupEntries);
-        GroupsHost->SetContent(GroupScroll);
-        GroupSwitcher->AddChild(GroupsHost);
+        UBorder* ComponentBorder = Panel->WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("RI_ActorGroupsComponentBorder"));
+        ComponentBorder->SetPadding(FMargin(6.f, 5.f));
+        ComponentBorder->SetBrushColor(RICompactUI::GetSectionSurfaceBackgroundColor());
 
-        ActorGroupsSectionHostBoxStrong = GroupsHost;
-        ActorGroupsSectionHostBox = GroupsHost;
-        ActorGroupsScrollBoxStrong = GroupScroll;
-        ActorGroupsEntriesBoxStrong = GroupEntries;
-    }
+        UVerticalBox* ComponentBox = Panel->WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ActorGroupsComponentBox"));
+        ComponentBorder->SetContent(ComponentBox);
 
-    if (!ActorGroupsScrollBoxStrong)
-    {
-        ActorGroupsScrollBoxStrong = Cast<UScrollBox>(Panel->WidgetTree->FindWidget(TEXT("RI_ActorGroupsScroll")));
-    }
-    if (!ActorGroupsEntriesBoxStrong)
-    {
-        ActorGroupsEntriesBoxStrong = Cast<UVerticalBox>(Panel->WidgetTree->FindWidget(TEXT("RI_ActorGroupsEntries")));
-    }
-
-    UListView* PinList = Cast<UListView>(Panel->WidgetTree->FindWidget(TEXT("LV_Pin")));
-    if (PinList)
-    {
-        if (UScrollBox* PinScroll = Cast<UScrollBox>(PinList->GetParent()))
+        if (UVerticalBoxSlot* HeaderSlot = ComponentBox->AddChildToVerticalBox(
+            RICompactUI::MakeSectionTitle(Panel->WidgetTree, TEXT("Component"), RICompactUI::ERISectionVisualStyle::Emphasis)))
         {
-            UVerticalBox* PinEntries = ActorPinnedEntriesBox.Get();
-            if (!PinEntries)
-            {
-                PinEntries = Cast<UVerticalBox>(Panel->WidgetTree->FindWidget(TEXT("RI_ActorPinnedEntries")));
-            }
-
-            if (!PinEntries)
-            {
-                PinEntries = Panel->WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ActorPinnedEntries"));
-                PinScroll->AddChild(PinEntries);
-            }
-
-            ActorPinnedEntriesBoxStrong = PinEntries;
-            ActorPinnedEntriesBox = PinEntries;
+            HeaderSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
         }
+
+        UScrollBox* GroupsScroll = Panel->WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("RI_ActorGroupsScroll"));
+        UVerticalBox* EntriesBox = Panel->WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ActorGroupsEntries"));
+        GroupsScroll->AddChild(EntriesBox);
+
+        USizeBox* ComponentBody = Panel->WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_ActorGroupsBody"));
+        ComponentBody->SetMinDesiredHeight(180.0f);
+        ComponentBody->SetHeightOverride(180.0f);
+        ComponentBody->SetContent(GroupsScroll);
+        if (UVerticalBoxSlot* BodySlot = ComponentBox->AddChildToVerticalBox(ComponentBody))
+        {
+            BodySlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
+        }
+
+        if (UVerticalBoxSlot* ComponentSlot = RootBox->AddChildToVerticalBox(ComponentBorder))
+        {
+            ComponentSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
+            ComponentSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 8.f));
+        }
+
+        UBorder* PinnedBorder = Panel->WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("RI_ActorPinnedBorder"));
+        PinnedBorder->SetPadding(FMargin(6.f, 5.f));
+        PinnedBorder->SetBrushColor(RICompactUI::GetSectionSurfaceBackgroundColor());
+
+        UVerticalBox* PinnedBox = Panel->WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ActorPinnedBox"));
+        PinnedBorder->SetContent(PinnedBox);
+
+        if (UVerticalBoxSlot* HeaderSlot = PinnedBox->AddChildToVerticalBox(
+            RICompactUI::MakeSectionTitle(Panel->WidgetTree, TEXT("Star"), RICompactUI::ERISectionVisualStyle::Emphasis)))
+        {
+            HeaderSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+        }
+
+        UVerticalBox* PinnedEntries = Panel->WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ActorPinnedEntries"));
+
+        USizeBox* PinnedBody = Panel->WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_ActorPinnedBody"));
+        PinnedBody->SetMinDesiredHeight(120.0f);
+        PinnedBody->SetHeightOverride(120.0f);
+        PinnedBody->SetContent(PinnedEntries);
+        if (UVerticalBoxSlot* BodySlot = PinnedBox->AddChildToVerticalBox(PinnedBody))
+        {
+            BodySlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
+        }
+
+        if (UVerticalBoxSlot* PinnedSlot = RootBox->AddChildToVerticalBox(PinnedBorder))
+        {
+            PinnedSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
+        }
+
+        ActorGroupsSectionHostBoxStrong = HostBox;
+        ActorGroupsSectionHostBox = HostBox;
+        ActorGroupsScrollBoxStrong = GroupsScroll;
+        ActorGroupsEntriesBoxStrong = EntriesBox;
+        ActorPinnedEntriesBoxStrong = PinnedEntries;
+    }
+
+    if (UPanelWidget* ExistingParent = Cast<UPanelWidget>(HostBox->GetParent()))
+    {
+        if (ExistingParent != GroupSwitcher)
+        {
+            ExistingParent->RemoveChild(HostBox);
+        }
+    }
+
+    if (HostBox->GetParent() != GroupSwitcher)
+    {
+        GroupSwitcher->AddChild(HostBox);
+    }
+
+    HostBox->SetVisibility(ESlateVisibility::Visible);
+    GroupSwitcher->SetActiveWidget(HostBox);
+    GroupSwitcher->ForceLayoutPrepass();
+
+    if (UWidget* GroupList = Panel->WidgetTree->FindWidget(TEXT("LV_Group")))
+    {
+        GroupList->SetVisibility(ESlateVisibility::Collapsed);
+    }
+    if (UWidget* TreeList = Panel->WidgetTree->FindWidget(TEXT("LV_TreeGroup")))
+    {
+        TreeList->SetVisibility(ESlateVisibility::Collapsed);
+    }
+    if (UWidget* PinList = Panel->WidgetTree->FindWidget(TEXT("LV_Pin")))
+    {
+        PinList->SetVisibility(ESlateVisibility::Collapsed);
+    }
+    if (UWidget* StarLabel = Panel->WidgetTree->FindWidget(TEXT("Txt_Star")))
+    {
+        StarLabel->SetVisibility(ESlateVisibility::Collapsed);
+    }
+    if (UWidget* StarLabelUpper = Panel->WidgetTree->FindWidget(TEXT("TXT_Star")))
+    {
+        StarLabelUpper->SetVisibility(ESlateVisibility::Collapsed);
     }
 #endif
 }
@@ -4013,20 +4076,19 @@ void UInspectorWorldSubsystem::RefreshActorGroupsSection()
         return;
     }
 
-    UWidgetSwitcher* GroupSwitcher = Cast<UWidgetSwitcher>(Panel->WidgetTree->FindWidget(TEXT("WS_Group")));
-    USizeBox* GroupsHost = ActorGroupsSectionHostBox.Get();
-    UVerticalBox* GroupEntries = ActorGroupsEntriesBoxStrong;
-    UVerticalBox* PinEntries = ActorPinnedEntriesBoxStrong;
-    if (!GroupSwitcher || !GroupsHost || !GroupEntries)
+    EnsureActorGroupsSectionInjected();
+
+    UVerticalBox* EntriesBox = ActorGroupsEntriesBoxStrong;
+    UVerticalBox* PinnedEntriesBox = ActorPinnedEntriesBoxStrong;
+    USizeBox* HostBox = ActorGroupsSectionHostBox.Get();
+    UScrollBox* GroupsScroll = ActorGroupsScrollBoxStrong;
+    if (!EntriesBox || !PinnedEntriesBox || !HostBox)
     {
         return;
     }
 
-    GroupEntries->ClearChildren();
-    if (PinEntries)
-    {
-        PinEntries->ClearChildren();
-    }
+    EntriesBox->ClearChildren();
+    PinnedEntriesBox->ClearChildren();
     ActorGroupsClickProxies.Reset();
     ActorPinnedClickProxies.Reset();
 
@@ -4038,23 +4100,24 @@ void UInspectorWorldSubsystem::RefreshActorGroupsSection()
     TArray<UInspectorGroupItem*> FlatItems;
     TFunction<void(UInspectorGroupItem*)> AppendItemRecursive = [&](UInspectorGroupItem* Item)
     {
-        if (!Item
-            || Item->StableKey == TEXT("PINNED_ROOT")
-            || Item->StableKey == TEXT("ROOT_PINNED")
-            || Item->StableKey == TEXT("ROOT_STAR"))
+        if (!Item)
         {
             return;
         }
 
-        FlatItems.Add(Item);
+        if (Item->StableKey != TEXT("PINNED_ROOT"))
+        {
+            FlatItems.Add(Item);
+        }
+
         if (!Item->bExpanded)
         {
             return;
         }
 
-        TArray<UObject*> Children;
-        GetGroupTreeChildrenForItem(Item, SearchText, Children);
-        for (UObject* ChildObject : Children)
+        TArray<UObject*> ChildObjects;
+        GetGroupTreeChildrenForItem(Item, SearchText, ChildObjects);
+        for (UObject* ChildObject : ChildObjects)
         {
             if (UInspectorGroupItem* ChildItem = Cast<UInspectorGroupItem>(ChildObject))
             {
@@ -4067,89 +4130,96 @@ void UInspectorWorldSubsystem::RefreshActorGroupsSection()
     {
         if (UInspectorGroupItem* RootItem = Cast<UInspectorGroupItem>(RootObject))
         {
+            if (RootItem->StableKey == TEXT("PINNED_ROOT"))
+            {
+                continue;
+            }
             AppendItemRecursive(RootItem);
-        }
-    }
-
-    for (UInspectorGroupItem* Item : FlatItems)
-    {
-        if (!Item)
-        {
-            continue;
-        }
-
-        UButton* RowButton = Panel->WidgetTree->ConstructWidget<UButton>(UButton::StaticClass());
-        UHorizontalBox* RowBox = Panel->WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
-        if (!RowButton || !RowBox)
-        {
-            continue;
-        }
-
-        RowButton->SetBackgroundColor(RICompactUI::GetRowSurfaceBackgroundColor());
-        RowButton->AddChild(RowBox);
-
-        const FString Expander = RI_GroupItemCanExpandForActorPanel(Item) ? (Item->bExpanded ? TEXT("v") : TEXT(">")) : TEXT(" ");
-        UTextBlock* ExpanderText = RICompactUI::MakeText(Panel->WidgetTree, Expander, RICompactUI::GetLabelFontSize(), true, RICompactUI::GetMutedTextColor(), false);
-        if (UHorizontalBoxSlot* ExpanderSlot = RowBox->AddChildToHorizontalBox(ExpanderText))
-        {
-            ExpanderSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
-            ExpanderSlot->SetVerticalAlignment(VAlign_Center);
-            ExpanderSlot->SetPadding(FMargin(0.f, 0.f, 6.f, 0.f));
-        }
-
-        UTextBlock* NameText = RICompactUI::MakeText(Panel->WidgetTree, Item->DisplayName, RICompactUI::GetLabelFontSize(), true, RICompactUI::GetStrongTextColor(), true);
-        if (UHorizontalBoxSlot* NameSlot = RowBox->AddChildToHorizontalBox(NameText))
-        {
-            NameSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-            NameSlot->SetVerticalAlignment(VAlign_Center);
-        }
-
-        if (UButtonSlot* ButtonSlot = Cast<UButtonSlot>(RowBox->Slot))
-        {
-            const float Indent = 6.0f + static_cast<float>(FMath::Max(0, Item->Depth)) * 12.0f;
-            ButtonSlot->SetPadding(FMargin(Indent, 4.f, 6.f, 4.f));
-            ButtonSlot->SetHorizontalAlignment(HAlign_Fill);
-            ButtonSlot->SetVerticalAlignment(VAlign_Fill);
-        }
-
-        UInspectorGroupButtonProxy* Proxy = NewObject<UInspectorGroupButtonProxy>(this);
-        Proxy->Initialize(this, Item);
-        RowButton->OnClicked.AddDynamic(Proxy, &UInspectorGroupButtonProxy::HandleClicked);
-        ActorGroupsClickProxies.Add(Proxy);
-
-        if (UVerticalBoxSlot* EntrySlot = GroupEntries->AddChildToVerticalBox(RowButton))
-        {
-            EntrySlot->SetPadding(FMargin(0.f, 0.f, 0.f, 2.f));
         }
     }
 
     if (FlatItems.Num() == 0)
     {
-        GroupEntries->AddChildToVerticalBox(
+        EntriesBox->AddChildToVerticalBox(
             RICompactUI::MakeText(Panel->WidgetTree, TEXT("No components available."), RICompactUI::GetMutedFontSize(), false, RICompactUI::GetMutedTextColor(), true));
     }
-
-    if (PinEntries)
+    else
     {
-        TArray<UObject*> PinnedItems;
-        GetPinnedItemsForSelected(SearchText, PinnedItems);
-        for (UObject* PinnedItem : PinnedItems)
+        for (UInspectorGroupItem* Item : FlatItems)
+        {
+            if (!Item)
+            {
+                continue;
+            }
+
+            UButton* RowButton = Panel->WidgetTree->ConstructWidget<UButton>(UButton::StaticClass());
+            UHorizontalBox* RowBox = Panel->WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
+            if (!RowButton || !RowBox)
+            {
+                continue;
+            }
+
+            RowButton->SetBackgroundColor(RICompactUI::GetRowSurfaceBackgroundColor());
+            RowButton->AddChild(RowBox);
+
+            const FString Expander = RI_GroupItemCanExpandForActorPanel(Item) ? (Item->bExpanded ? TEXT("v") : TEXT(">")) : TEXT(" ");
+            if (UHorizontalBoxSlot* ExpanderSlot = RowBox->AddChildToHorizontalBox(
+                RICompactUI::MakeText(Panel->WidgetTree, Expander, RICompactUI::GetLabelFontSize(), true, RICompactUI::GetMutedTextColor(), false)))
+            {
+                ExpanderSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
+                ExpanderSlot->SetVerticalAlignment(VAlign_Center);
+                ExpanderSlot->SetPadding(FMargin(0.f, 0.f, 6.f, 0.f));
+            }
+
+            if (UHorizontalBoxSlot* NameSlot = RowBox->AddChildToHorizontalBox(
+                RICompactUI::MakeText(Panel->WidgetTree, Item->DisplayName, RICompactUI::GetLabelFontSize(), true, RICompactUI::GetStrongTextColor(), true)))
+            {
+                NameSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+                NameSlot->SetVerticalAlignment(VAlign_Center);
+            }
+
+            if (UButtonSlot* ButtonSlot = Cast<UButtonSlot>(RowBox->Slot))
+            {
+                const float Indent = 6.0f + static_cast<float>(FMath::Max(0, Item->Depth)) * 12.0f;
+                ButtonSlot->SetPadding(FMargin(Indent, 4.f, 6.f, 4.f));
+                ButtonSlot->SetHorizontalAlignment(HAlign_Fill);
+                ButtonSlot->SetVerticalAlignment(VAlign_Fill);
+            }
+
+            UInspectorGroupButtonProxy* Proxy = NewObject<UInspectorGroupButtonProxy>(this);
+            Proxy->Initialize(this, Item);
+            RowButton->OnClicked.AddDynamic(Proxy, &UInspectorGroupButtonProxy::HandleClicked);
+            ActorGroupsClickProxies.Add(Proxy);
+
+            if (UVerticalBoxSlot* EntrySlot = EntriesBox->AddChildToVerticalBox(RowButton))
+            {
+                EntrySlot->SetPadding(FMargin(0.f, 0.f, 0.f, 2.f));
+            }
+        }
+    }
+
+    TArray<UObject*> PinnedItems;
+    GetPinnedItemsForSelected(SearchText, PinnedItems);
+    if (PinnedItems.Num() == 0)
+    {
+        PinnedEntriesBox->AddChildToVerticalBox(
+            RICompactUI::MakeText(Panel->WidgetTree, TEXT("No starred properties yet."), RICompactUI::GetMutedFontSize(), false, RICompactUI::GetMutedTextColor(), true));
+    }
+    else
+    {
+        for (UObject* ItemObject : PinnedItems)
         {
             FString Label = TEXT("Pinned");
             FString Value;
-            UObject* FocusTarget = nullptr;
-
-            if (UInspectorPropertyItem* PropertyItem = Cast<UInspectorPropertyItem>(PinnedItem))
+            if (UInspectorPropertyItem* PropertyItem = Cast<UInspectorPropertyItem>(ItemObject))
             {
                 Label = PropertyItem->GetPropertyName();
                 Value = PropertyItem->GetValueText();
-                FocusTarget = PropertyItem->GetTargetObject();
             }
-            else if (UInspectorMaterialParamItem* MaterialItem = Cast<UInspectorMaterialParamItem>(PinnedItem))
+            else if (UInspectorMaterialParamItem* MaterialItem = Cast<UInspectorMaterialParamItem>(ItemObject))
             {
                 Label = MaterialItem->GetPropertyName();
                 Value = MaterialItem->GetValueText();
-                FocusTarget = MaterialItem->GetMeshComponent();
             }
             else
             {
@@ -4158,8 +4228,7 @@ void UInspectorWorldSubsystem::RefreshActorGroupsSection()
 
             UButton* RowButton = Panel->WidgetTree->ConstructWidget<UButton>(UButton::StaticClass());
             UHorizontalBox* RowBox = Panel->WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
-            UVerticalBox* TextBox = Panel->WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
-            if (!RowButton || !RowBox || !TextBox)
+            if (!RowButton || !RowBox)
             {
                 continue;
             }
@@ -4167,27 +4236,22 @@ void UInspectorWorldSubsystem::RefreshActorGroupsSection()
             RowButton->SetBackgroundColor(RICompactUI::GetRowSurfaceBackgroundColor());
             RowButton->AddChild(RowBox);
 
-            UTextBlock* StarText = RICompactUI::MakeText(Panel->WidgetTree, TEXT("*"), RICompactUI::GetLabelFontSize(), true, RICompactUI::GetWarningTextColor(), false);
-            if (UHorizontalBoxSlot* StarSlot = RowBox->AddChildToHorizontalBox(StarText))
+            if (UHorizontalBoxSlot* StarSlot = RowBox->AddChildToHorizontalBox(
+                RICompactUI::MakeText(Panel->WidgetTree, TEXT("*"), RICompactUI::GetLabelFontSize(), true, RICompactUI::GetWarningTextColor(), false)))
             {
                 StarSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
                 StarSlot->SetVerticalAlignment(VAlign_Top);
                 StarSlot->SetPadding(FMargin(0.f, 1.f, 6.f, 0.f));
             }
 
-            if (UHorizontalBoxSlot* TextSlot = RowBox->AddChildToHorizontalBox(TextBox))
+            const FString DisplayText = Value.IsEmpty()
+                ? Label
+                : FString::Printf(TEXT("%s: %s"), *Label, *Value);
+            if (UHorizontalBoxSlot* TextSlot = RowBox->AddChildToHorizontalBox(
+                RICompactUI::MakeText(Panel->WidgetTree, DisplayText, RICompactUI::GetLabelFontSize(), true, RICompactUI::GetStrongTextColor(), true)))
             {
                 TextSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
                 TextSlot->SetVerticalAlignment(VAlign_Center);
-            }
-
-            TextBox->AddChildToVerticalBox(
-                RICompactUI::MakeText(Panel->WidgetTree, Label, RICompactUI::GetLabelFontSize(), true, RICompactUI::GetStrongTextColor(), true));
-
-            if (!Value.IsEmpty())
-            {
-                TextBox->AddChildToVerticalBox(
-                    RICompactUI::MakeText(Panel->WidgetTree, Value, RICompactUI::GetMutedFontSize(), false, RICompactUI::GetMutedTextColor(), true));
             }
 
             if (UButtonSlot* ButtonSlot = Cast<UButtonSlot>(RowBox->Slot))
@@ -4198,35 +4262,32 @@ void UInspectorWorldSubsystem::RefreshActorGroupsSection()
             }
 
             UInspectorPinnedItemButtonProxy* Proxy = NewObject<UInspectorPinnedItemButtonProxy>(this);
-            Proxy->Initialize(this, FocusTarget ? PinnedItem : nullptr);
+            Proxy->Initialize(this, ItemObject);
             RowButton->OnClicked.AddDynamic(Proxy, &UInspectorPinnedItemButtonProxy::HandleClicked);
             ActorPinnedClickProxies.Add(Proxy);
 
-            if (UVerticalBoxSlot* EntrySlot = PinEntries->AddChildToVerticalBox(RowButton))
+            if (UVerticalBoxSlot* EntrySlot = PinnedEntriesBox->AddChildToVerticalBox(RowButton))
             {
                 EntrySlot->SetPadding(FMargin(0.f, 0.f, 0.f, 2.f));
             }
         }
+    }
 
-        if (PinnedItems.Num() == 0)
+    EntriesBox->InvalidateLayoutAndVolatility();
+    PinnedEntriesBox->InvalidateLayoutAndVolatility();
+    if (GroupsScroll)
+    {
+        GroupsScroll->SetScrollOffset(0.0f);
+        if (EntriesBox->GetChildrenCount() > 0)
         {
-            PinEntries->AddChildToVerticalBox(
-                RICompactUI::MakeText(Panel->WidgetTree, TEXT("No starred properties yet."), RICompactUI::GetMutedFontSize(), false, RICompactUI::GetMutedTextColor(), true));
+            GroupsScroll->ScrollWidgetIntoView(EntriesBox->GetChildAt(0), true, EDescendantScrollDestination::TopOrLeft, 0.0f);
         }
+        GroupsScroll->InvalidateLayoutAndVolatility();
     }
-
-    if (UListView* PinList = Cast<UListView>(Panel->WidgetTree->FindWidget(TEXT("LV_Pin"))))
+    if (HostBox)
     {
-        PinList->SetVisibility(ESlateVisibility::Collapsed);
-    }
-
-    GroupsHost->SetVisibility(ESlateVisibility::Visible);
-    GroupSwitcher->SetActiveWidget(GroupsHost);
-    GroupSwitcher->ForceLayoutPrepass();
-    GroupEntries->ForceLayoutPrepass();
-    if (PinEntries)
-    {
-        PinEntries->ForceLayoutPrepass();
+        HostBox->InvalidateLayoutAndVolatility();
+        HostBox->ForceLayoutPrepass();
     }
 #endif
 }
@@ -4270,25 +4331,89 @@ void UInspectorWorldSubsystem::EnsureActorPropertiesSectionInjected()
         ActorPropertiesSectionWidget = SectionWidget;
     }
 
-    SectionWidget->SetInspectorSubsystem(this);
-
-    if (UContentWidget* ContentHost = Cast<UContentWidget>(DirectAnchorChild))
+    UInspectorFunctionsSectionWidget* FunctionWidget = ActorFunctionsSectionWidget.Get();
+    if (!FunctionWidget)
     {
-        if (UPanelWidget* ExistingParent = Cast<UPanelWidget>(SectionWidget->GetParent()))
+        if (APlayerController* PC = GetLocalPC())
         {
-            if (ExistingParent != ContentHost)
+            FunctionWidget = CreateWidget<UInspectorFunctionsSectionWidget>(PC, UInspectorFunctionsSectionWidget::StaticClass());
+        }
+        else if (UWorld* World = GetWorld())
+        {
+            FunctionWidget = CreateWidget<UInspectorFunctionsSectionWidget>(World, UInspectorFunctionsSectionWidget::StaticClass());
+        }
+
+        if (!FunctionWidget)
+        {
+            return;
+        }
+
+        ActorFunctionsSectionWidgetStrong = FunctionWidget;
+        ActorFunctionsSectionWidget = FunctionWidget;
+    }
+
+    UHorizontalBox* HostBox = ActorPropertyFunctionHostBox.Get();
+    if (!HostBox)
+    {
+        HostBox = Panel->WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_ActorPropertyFunctionHost"));
+        ActorPropertyFunctionHostBoxStrong = HostBox;
+        ActorPropertyFunctionHostBox = HostBox;
+    }
+
+    SectionWidget->SetInspectorSubsystem(this);
+    FunctionWidget->SetInspectorSubsystem(this);
+
+    auto AttachChildToHost = [HostBox, SectionWidget](UWidget* ChildWidget)
+    {
+        if (!HostBox || !ChildWidget)
+        {
+            return;
+        }
+
+        if (UPanelWidget* ExistingParent = Cast<UPanelWidget>(ChildWidget->GetParent()))
+        {
+            if (ExistingParent != HostBox)
             {
-                ExistingParent->RemoveChild(SectionWidget);
+                ExistingParent->RemoveChild(ChildWidget);
             }
         }
 
-        if (ContentHost->GetContent() != SectionWidget)
+        if (ChildWidget->GetParent() != HostBox)
         {
-            ContentHost->SetContent(SectionWidget);
+            HostBox->AddChildToHorizontalBox(ChildWidget);
+        }
+
+        if (UHorizontalBoxSlot* HorizontalSlot = Cast<UHorizontalBoxSlot>(ChildWidget->Slot))
+        {
+            HorizontalSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+            HorizontalSlot->SetHorizontalAlignment(HAlign_Fill);
+            HorizontalSlot->SetVerticalAlignment(VAlign_Fill);
+            HorizontalSlot->SetPadding(ChildWidget == SectionWidget ? FMargin(0.f, 0.f, 6.f, 0.f) : FMargin(6.f, 0.f, 0.f, 0.f));
+        }
+    };
+
+    AttachChildToHost(SectionWidget);
+    AttachChildToHost(FunctionWidget);
+
+    if (UContentWidget* ContentHost = Cast<UContentWidget>(DirectAnchorChild))
+    {
+        if (UPanelWidget* ExistingParent = Cast<UPanelWidget>(HostBox->GetParent()))
+        {
+            if (ExistingParent != ContentHost)
+            {
+                ExistingParent->RemoveChild(HostBox);
+            }
+        }
+
+        if (ContentHost->GetContent() != HostBox)
+        {
+            ContentHost->SetContent(HostBox);
         }
 
         ContentHost->SetVisibility(ESlateVisibility::Visible);
+        HostBox->SetVisibility(ESlateVisibility::Visible);
         SectionWidget->SetVisibility(ESlateVisibility::Visible);
+        FunctionWidget->SetVisibility(ESlateVisibility::Visible);
         return;
     }
 
@@ -4301,26 +4426,28 @@ void UInspectorWorldSubsystem::EnsureActorPropertiesSectionInjected()
         AnchorWidget->SetVisibility(ESlateVisibility::Collapsed);
     }
 
-    const bool bNeedsReparent = SectionWidget->GetParent() != HostPanel;
+    const bool bNeedsReparent = HostBox->GetParent() != HostPanel;
     const int32 DesiredIndex = DirectAnchorChild ? HostPanel->GetChildIndex(DirectAnchorChild) : HostPanel->GetChildrenCount();
-    const int32 CurrentIndex = HostPanel->GetChildIndex(SectionWidget);
+    const int32 CurrentIndex = HostPanel->GetChildIndex(HostBox);
 
     if (bNeedsReparent || (CurrentIndex != INDEX_NONE && CurrentIndex != DesiredIndex))
     {
-        if (UPanelWidget* ExistingParent = Cast<UPanelWidget>(SectionWidget->GetParent()))
+        if (UPanelWidget* ExistingParent = Cast<UPanelWidget>(HostBox->GetParent()))
         {
-            ExistingParent->RemoveChild(SectionWidget);
+            ExistingParent->RemoveChild(HostBox);
         }
 
-        HostPanel->InsertChildAt(DesiredIndex, SectionWidget);
-        if (UVerticalBoxSlot* VBoxSlot = Cast<UVerticalBoxSlot>(SectionWidget->Slot))
+        HostPanel->InsertChildAt(DesiredIndex, HostBox);
+        if (UVerticalBoxSlot* VBoxSlot = Cast<UVerticalBoxSlot>(HostBox->Slot))
         {
             VBoxSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
             VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 0.f));
         }
     }
 
+    HostBox->SetVisibility(ESlateVisibility::Visible);
     SectionWidget->SetVisibility(ESlateVisibility::Visible);
+    FunctionWidget->SetVisibility(ESlateVisibility::Visible);
 #endif
 }
 
@@ -4350,7 +4477,10 @@ void UInspectorWorldSubsystem::RefreshActorPropertiesSection()
 void UInspectorWorldSubsystem::RefreshActorFunctionsSection()
 {
 #if RUNTIME_INSPECTOR_ENABLED
-    return;
+    if (UInspectorFunctionsSectionWidget* SectionWidget = ActorFunctionsSectionWidget.Get())
+    {
+        SectionWidget->RefreshFromSubsystem();
+    }
 #endif
 }
 
@@ -5418,6 +5548,7 @@ void UInspectorWorldSubsystem::ClearConfirmDialogBinding()
     ActiveConfirmDialogInputB.Reset();
     ActiveConfirmDialogInputA.Reset();
     ActiveConfirmDialogInputHex.Reset();
+    ActiveColorEditItem.Reset();
     bUpdatingConfirmDialogText = false;
 #endif
 }
@@ -5770,6 +5901,161 @@ bool UInspectorWorldSubsystem::TryParseConfirmDialogHexColor(const FText& InText
     return true;
 }
 
+bool UInspectorWorldSubsystem::TryGetInspectorItemColor(UObject* ItemObject, FLinearColor& OutColor) const
+{
+#if !RUNTIME_INSPECTOR_ENABLED
+    return false;
+#else
+    OutColor = FLinearColor::Black;
+
+    if (const UInspectorPropertyItem* PropertyItem = Cast<UInspectorPropertyItem>(ItemObject))
+    {
+        if (PropertyItem->GetValueType() == EInspectorValueType::LinearColor)
+        {
+            return PropertyItem->GetLinearColor(OutColor);
+        }
+
+        if (PropertyItem->GetValueType() == EInspectorValueType::Color)
+        {
+            FColor SRGBColor = FColor::Black;
+            if (!PropertyItem->GetColor(SRGBColor))
+            {
+                return false;
+            }
+
+            OutColor = FLinearColor::FromSRGBColor(SRGBColor);
+            return true;
+        }
+
+        return false;
+    }
+
+    if (UInspectorMaterialParamItem* MaterialItem = Cast<UInspectorMaterialParamItem>(ItemObject))
+    {
+        FString Error;
+        return MaterialItem->GetVector(OutColor, Error);
+    }
+
+    return false;
+#endif
+}
+
+bool UInspectorWorldSubsystem::ApplyInspectorItemColor(UObject* ItemObject, const FLinearColor& InColor, FString& OutError)
+{
+    OutError.Reset();
+
+#if !RUNTIME_INSPECTOR_ENABLED
+    OutError = TEXT("RuntimeInspector disabled");
+    return false;
+#else
+    if (UInspectorPropertyItem* PropertyItem = Cast<UInspectorPropertyItem>(ItemObject))
+    {
+        if (PropertyItem->GetValueType() == EInspectorValueType::LinearColor)
+        {
+            return PropertyItem->SetLinearColor(InColor, OutError);
+        }
+
+        if (PropertyItem->GetValueType() == EInspectorValueType::Color)
+        {
+            return PropertyItem->SetColor(InColor.ToFColorSRGB(), OutError);
+        }
+
+        OutError = TEXT("Item is not a color property");
+        return false;
+    }
+
+    if (UInspectorMaterialParamItem* MaterialItem = Cast<UInspectorMaterialParamItem>(ItemObject))
+    {
+        return MaterialItem->SetVector(InColor, OutError);
+    }
+
+    OutError = TEXT("Unsupported color item");
+    return false;
+#endif
+}
+
+bool UInspectorWorldSubsystem::OpenColorEditorForItemInternal(UObject* ItemObject)
+{
+#if !RUNTIME_INSPECTOR_ENABLED
+    return false;
+#else
+    FLinearColor InitialColor = FLinearColor::Black;
+    if (!TryGetInspectorItemColor(ItemObject, InitialColor))
+    {
+        return false;
+    }
+
+    UWorld* World = GetWorld();
+    APlayerController* PC = GetLocalPC();
+    UClass* ConfirmDialogClass = ConfirmDialogWidgetClass.LoadSynchronous();
+    if (!World || !PC || !ConfirmDialogClass)
+    {
+        return false;
+    }
+
+    if (UUserWidget* ExistingDialog = ActiveConfirmDialogWidget.Get())
+    {
+        ExistingDialog->RemoveFromParent();
+        ClearConfirmDialogBinding();
+    }
+
+    UUserWidget* DialogWidget = CreateWidget<UUserWidget>(PC, ConfirmDialogClass);
+    if (!DialogWidget)
+    {
+        return false;
+    }
+
+    DialogWidget->AddToViewport(10001);
+
+    UFunction* InitDataFn = DialogWidget->FindFunction(TEXT("InitData"));
+    if (!InitDataFn)
+    {
+        DialogWidget->RemoveFromParent();
+        return false;
+    }
+
+    const FString HexText = InitialColor.ToFColorSRGB().ToHex();
+
+    struct FRIInitDataParams
+    {
+        FString Title;
+        FString Content;
+        FString Type;
+    };
+
+    FRIInitDataParams Params;
+    Params.Title = TEXT("Color");
+    Params.Content = HexText;
+    Params.Type = TEXT("Color");
+    DialogWidget->ProcessEvent(InitDataFn, &Params);
+
+    if (!TryBindActiveConfirmDialog(DialogWidget))
+    {
+        DialogWidget->RemoveFromParent();
+        return false;
+    }
+
+    ActiveColorEditItem = ItemObject;
+    ApplyActiveConfirmDialogColor(InitialColor);
+    RefreshActiveConfirmDialogColor();
+    return true;
+#endif
+}
+
+void UInspectorWorldSubsystem::ApplyActiveColorEditItemIfNeeded(const FLinearColor& InColor)
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    UObject* ItemObject = ActiveColorEditItem.Get();
+    if (!ItemObject)
+    {
+        return;
+    }
+
+    FString Error;
+    ApplyInspectorItemColor(ItemObject, InColor, Error);
+#endif
+}
+
 void UInspectorWorldSubsystem::ApplyActiveConfirmDialogChannels()
 {
 #if RUNTIME_INSPECTOR_ENABLED
@@ -5813,6 +6099,7 @@ void UInspectorWorldSubsystem::ApplyActiveConfirmDialogChannels()
     if (TrySetActiveConfirmDialogColor(FLinearColor(NewR, NewG, NewB, NewA)))
     {
         RefreshActiveConfirmDialogColor();
+        ApplyActiveColorEditItemIfNeeded(FLinearColor(NewR, NewG, NewB, NewA));
     }
 #endif
 }
@@ -5857,6 +6144,7 @@ void UInspectorWorldSubsystem::HandleConfirmDialogNumericTextChanged(UEditableTe
     }
 
     ApplyActiveConfirmDialogColor(CurrentColor);
+    ApplyActiveColorEditItemIfNeeded(CurrentColor);
 #endif
 }
 
@@ -5875,6 +6163,7 @@ void UInspectorWorldSubsystem::HandleConfirmDialogHexTextChanged(const FText& In
     }
 
     ApplyActiveConfirmDialogColor(ParsedColor);
+    ApplyActiveColorEditItemIfNeeded(ParsedColor);
 #endif
 }
 
@@ -6078,6 +6367,14 @@ TArray<FRISelfTestDefinition> UInspectorWorldSubsystem::GetAvailableSelfTests() 
         TEXT("Panel Interaction"),
         TEXT("UI"),
         TEXT("Verifies the RuntimeInspector panel can be dragged from the title bar and vertically resized from the bottom edge."),
+        true,
+        false);
+
+    AddDefinition(
+        RI_SelfTestId_ActorPageStructure,
+        TEXT("Actor Page Structure"),
+        TEXT("UI"),
+        TEXT("Verifies the Actor page shows the component tree, starred property list, component-focus property routing, and color swatch rows."),
         true,
         false);
 
@@ -6412,6 +6709,12 @@ bool UInspectorWorldSubsystem::ExecuteSelfTestByIdInternal(FName TestId, FString
     if (TestId == RI_SelfTestId_PanelInteraction)
     {
         bOutPassed = RunPanelInteractionSelfTest(OutReport);
+        return true;
+    }
+
+    if (TestId == RI_SelfTestId_ActorPageStructure)
+    {
+        bOutPassed = RunActorPageStructureSelfTest(OutReport);
         return true;
     }
 
@@ -8819,6 +9122,8 @@ bool UInspectorWorldSubsystem::RunFabScreenshotPageSelfTest(const FString& InPag
     int32 GroupDisplayedCount = INDEX_NONE;
     int32 TreeDisplayedCount = INDEX_NONE;
     int32 PinDisplayedCount = INDEX_NONE;
+    int32 SidebarGroupCount = INDEX_NONE;
+    int32 SidebarPinnedCount = INDEX_NONE;
     FString GroupListSize = TEXT("None");
     FString TreeListSize = TEXT("None");
     FString PinListSize = TEXT("None");
@@ -8853,6 +9158,12 @@ bool UInspectorWorldSubsystem::RunFabScreenshotPageSelfTest(const FString& InPag
                     {
                         GroupSwitcherActiveName = ActiveGroupChild->GetName();
                     }
+                }
+
+                if (UInspectorGroupsSectionWidget* GroupsSection = ActorGroupsSectionWidget.Get())
+                {
+                    SidebarGroupCount = GroupsSection->GetEntryWidgetCountForDebug();
+                    SidebarPinnedCount = GroupsSection->GetPinnedEntryWidgetCountForDebug();
                 }
 
                 if (USizeBox* GroupsHostBox = ActorGroupsSectionHostBox.Get())
@@ -8898,7 +9209,7 @@ bool UInspectorWorldSubsystem::RunFabScreenshotPageSelfTest(const FString& InPag
 
     const bool bPassed = bThemeOk && bSwitcherOk && bPageOk && bStagedClean && bActorCellHiddenOk;
     OutReport = FString::Printf(
-        TEXT("%s=%s | Requested=%s | Visible=%s | Switcher=%d | ActiveIndex=%d | ExpectedIndex=%d | Theme=%s | StagedClean=%d | ActorCellHidden=%d | GroupHost=%s | CustomGroups=%s/%d@%s | GroupList=%s/%d/%d@%s | TreeList=%s/%d/%d@%s | PinList=%s/%d/%d@%s | Summary=%s"),
+        TEXT("%s=%s | Requested=%s | Visible=%s | Switcher=%d | ActiveIndex=%d | ExpectedIndex=%d | Theme=%s | StagedClean=%d | ActorCellHidden=%d | GroupHost=%s | Sidebar=%d/%d | CustomGroups=%s/%d@%s | GroupList=%s/%d/%d@%s | TreeList=%s/%d/%d@%s | PinList=%s/%d/%d@%s | Summary=%s"),
         *InTestLabel,
         bPassed ? TEXT("PASS") : TEXT("FAIL"),
         *InPageName,
@@ -8910,6 +9221,8 @@ bool UInspectorWorldSubsystem::RunFabScreenshotPageSelfTest(const FString& InPag
         bStagedClean ? 1 : 0,
         bActorCellHiddenOk ? 1 : 0,
         *GroupSwitcherActiveName,
+        SidebarGroupCount,
+        SidebarPinnedCount,
         *CustomGroupsVisibility,
         CustomGroupsCount,
         *CustomGroupsSize,
@@ -10958,6 +11271,186 @@ FString UInspectorWorldSubsystem::RunPanelInteractionSelfTestSimple()
     FString Report;
     RunPanelInteractionSelfTest(Report);
     return Report;
+#endif
+}
+
+bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
+{
+    OutReport.Reset();
+
+#if !RUNTIME_INSPECTOR_ENABLED
+    OutReport = TEXT("ActorPageStructureSelfTest=BLOCKED | RuntimeInspector disabled");
+    return false;
+#else
+    if (!IsSelfTestPIEAvailable())
+    {
+        OutReport = TEXT("ActorPageStructureSelfTest=BLOCKED | PIE with local player required");
+        return false;
+    }
+
+    FString Summary;
+    FString Error;
+    if (!ApplyFabScreenshotFoundationState(Summary, Error))
+    {
+        OutReport = FString::Printf(TEXT("ActorPageStructureSelfTest=FAIL | Apply=%s"), *Error);
+        return false;
+    }
+
+    if (!SetVisiblePageByName(TEXT("Actor"), Error))
+    {
+        OutReport = FString::Printf(TEXT("ActorPageStructureSelfTest=FAIL | ShowPage=%s"), *Error);
+        return false;
+    }
+
+    if (bDeferredOpenActorRefreshScheduled)
+    {
+        HandleDeferredOpenActorRefreshTimerElapsed();
+    }
+
+    SetContentSwitcherIndex(0);
+    RefreshPanel(EInspectorRefreshReason::StructureChanged);
+
+    const int32 GroupCount = ActorGroupsEntriesBoxStrong ? ActorGroupsEntriesBoxStrong->GetChildrenCount() : 0;
+    const bool bPropertyBoxVisible = ActorPropertiesSectionWidget.IsValid()
+        && ActorPropertiesSectionWidget->GetVisibility() == ESlateVisibility::Visible;
+    const bool bFunctionBoxVisible = ActorFunctionsSectionWidget.IsValid()
+        && ActorFunctionsSectionWidget->GetVisibility() == ESlateVisibility::Visible;
+
+    TArray<UObject*> ActorItems;
+    GetPropertyItemsForSelectedEx(TEXT(""), false, ActorItems);
+
+    UInspectorPropertyItem* FavoriteCandidate = nullptr;
+    for (UObject* ItemObject : ActorItems)
+    {
+        if (UInspectorPropertyItem* PropertyItem = Cast<UInspectorPropertyItem>(ItemObject))
+        {
+            FavoriteCandidate = PropertyItem;
+            break;
+        }
+    }
+
+    int32 PinnedCount = 0;
+    bool bStarReady = false;
+    if (FavoriteCandidate)
+    {
+        if (!IsFavoriteForItem(FavoriteCandidate))
+        {
+            ToggleFavoriteForItem(FavoriteCandidate);
+        }
+
+        TArray<UObject*> PinnedItems;
+        GetPinnedItemsForSelected(TEXT(""), PinnedItems);
+        PinnedCount = PinnedItems.Num();
+        bStarReady = PinnedCount > 0;
+    }
+
+    AActor* ActorPtr = SelectedActor.Get();
+    bool bFocusedComponentOk = false;
+    bool bColorItemFound = false;
+    bool bSwatchVisible = false;
+    FString FocusedComponentName = TEXT("None");
+    FString ColorPropertyName = TEXT("None");
+
+    if (ActorPtr)
+    {
+        TArray<UActorComponent*> Components;
+        ActorPtr->GetComponents(Components);
+
+        for (UActorComponent* Component : Components)
+        {
+            if (!Component)
+            {
+                continue;
+            }
+
+            FString FocusError;
+            if (!FocusSelectedActorComponentByName(Component->GetName(), FocusError))
+            {
+                continue;
+            }
+
+            bFocusedComponentOk = GetFocusedInspectObject() == Component;
+
+            TArray<UObject*> ComponentItems;
+            GetPropertyItemsForSelectedEx(TEXT(""), false, ComponentItems);
+            for (UObject* ItemObject : ComponentItems)
+            {
+                UInspectorPropertyItem* PropertyItem = Cast<UInspectorPropertyItem>(ItemObject);
+                if (!PropertyItem)
+                {
+                    continue;
+                }
+
+                const EInspectorValueType ValueType = PropertyItem->GetValueType();
+                if (ValueType != EInspectorValueType::LinearColor && ValueType != EInspectorValueType::Color)
+                {
+                    continue;
+                }
+
+                UInspectorPropertyRowWidget* Row = nullptr;
+                if (APlayerController* PC = GetLocalPC())
+                {
+                    Row = CreateWidget<UInspectorPropertyRowWidget>(PC, UInspectorPropertyRowWidget::StaticClass());
+                }
+                else if (UWorld* World = GetWorld())
+                {
+                    Row = CreateWidget<UInspectorPropertyRowWidget>(World, UInspectorPropertyRowWidget::StaticClass());
+                }
+
+                if (!Row)
+                {
+                    continue;
+                }
+
+                Row->TakeWidget();
+                Row->SetInspectorSubsystem(this);
+                Row->SetPropertyItem(PropertyItem);
+
+                FocusedComponentName = Component->GetName();
+                ColorPropertyName = PropertyItem->GetPropertyName();
+                bColorItemFound = true;
+                bSwatchVisible = Row->IsColorSwatchVisibleForAutomation()
+                    && !Row->IsReadOnlyValueVisibleForAutomation()
+                    && !Row->IsValueTextBoxVisibleForAutomation();
+                break;
+            }
+
+            if (bColorItemFound)
+            {
+                break;
+            }
+        }
+    }
+
+    SelectedInspectObject = SelectedActor.Get();
+    SelectedGroupKey = TEXT("ROOT_ACTOR");
+    PropertyViewMode = ERIPropertyViewMode::Full;
+    ViewMeshComp = nullptr;
+    ViewMaterialSlot = INDEX_NONE;
+    RefreshPanel(EInspectorRefreshReason::StructureChanged);
+
+    const bool bPassed = GroupCount > 0
+        && bPropertyBoxVisible
+        && bFunctionBoxVisible
+        && bStarReady
+        && bFocusedComponentOk
+        && bColorItemFound
+        && bSwatchVisible;
+
+    OutReport = FString::Printf(
+        TEXT("ActorPageStructureSelfTest=%s | Groups=%d | Starred=%d | PropertyBox=%d | FunctionBox=%d | FocusedComponent=%s | FocusOk=%d | ColorProperty=%s | ColorItem=%d | Swatch=%d | Summary=%s"),
+        bPassed ? TEXT("PASS") : TEXT("FAIL"),
+        GroupCount,
+        PinnedCount,
+        bPropertyBoxVisible ? 1 : 0,
+        bFunctionBoxVisible ? 1 : 0,
+        *FocusedComponentName,
+        bFocusedComponentOk ? 1 : 0,
+        *ColorPropertyName,
+        bColorItemFound ? 1 : 0,
+        bSwatchVisible ? 1 : 0,
+        *Summary);
+    return bPassed;
 #endif
 }
 
@@ -13617,15 +14110,12 @@ void UInspectorWorldSubsystem::RefreshPanel(EInspectorRefreshReason Reason)
                 EInspectorRefreshReason Reason;
             };
             FParams Params{ Reason };
-        W->ProcessEvent(Fn, &Params);
-        RI_EnsureActorGroupTreeMode(W);
-        RefreshActorGroupsSection();
-        RI_RefreshPropertyList(W, Reason);
-        EnsureActorPropertiesSectionInjected();
-        RefreshActorPropertiesSection();
-        EnsureActorFunctionsSectionInjected();
-        RefreshActorFunctionsSection();
-        RI_ApplyLegacyActorHeaderVisibilityFix(W);
+            W->ProcessEvent(Fn, &Params);
+            RefreshActorGroupsSection();
+            EnsureActorPropertiesSectionInjected();
+            RefreshActorPropertiesSection();
+            RefreshActorFunctionsSection();
+            RI_ApplyLegacyActorHeaderVisibilityFix(W);
             RI_UpdateActorPropertyHeader(W, GetFocusedInspectObject());
             return;
         }
@@ -13637,12 +14127,9 @@ void UInspectorWorldSubsystem::RefreshPanel(EInspectorRefreshReason Reason)
             W->ProcessEvent(FnOld, nullptr);
         }
 
-        RI_EnsureActorGroupTreeMode(W);
         RefreshActorGroupsSection();
-        RI_RefreshPropertyList(W, Reason);
         EnsureActorPropertiesSectionInjected();
         RefreshActorPropertiesSection();
-        EnsureActorFunctionsSectionInjected();
         RefreshActorFunctionsSection();
         RI_ApplyLegacyActorHeaderVisibilityFix(W);
         RI_UpdateActorPropertyHeader(W, GetFocusedInspectObject());
@@ -15306,6 +15793,15 @@ void UInspectorWorldSubsystem::ToggleFavoriteForItem(UInspectorPropertyItem* Ite
 
     // 这里用你现有刷新机制：建议当作 UIStateChanged
     RefreshPanel(/*EInspectorRefreshReason::UIStateChanged*/);
+#endif
+}
+
+bool UInspectorWorldSubsystem::OpenColorEditorForAnyItem(UObject* ItemObject)
+{
+#if !RUNTIME_INSPECTOR_ENABLED
+    return false;
+#else
+    return OpenColorEditorForItemInternal(ItemObject);
 #endif
 }
 

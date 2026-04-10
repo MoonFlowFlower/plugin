@@ -12,6 +12,7 @@ class UHorizontalBox;
 class UInspectorPropertyItem;
 class UInspectorWorldSubsystem;
 class UTextBlock;
+class UButton;
 
 UCLASS()
 class RUNTIMEINSPECTOR_API UInspectorPropertyRowWidget : public UUserWidget
@@ -23,6 +24,9 @@ public:
 
     void SetInspectorSubsystem(UInspectorWorldSubsystem* InSubsystem);
     void SetPropertyItem(UInspectorPropertyItem* InItem);
+    bool IsColorSwatchVisibleForAutomation() const;
+    bool IsReadOnlyValueVisibleForAutomation() const;
+    bool IsValueTextBoxVisibleForAutomation() const;
 
 protected:
     virtual TSharedRef<SWidget> RebuildWidget() override;
@@ -41,6 +45,12 @@ private:
 
     UFUNCTION()
     void HandleEnumChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
+
+    UFUNCTION()
+    void HandleFavoriteClicked();
+
+    UFUNCTION()
+    void HandleColorClicked();
 
 private:
     UPROPERTY(Transient)
@@ -63,6 +73,18 @@ private:
 
     UPROPERTY(Transient)
     TObjectPtr<UComboBoxString> EnumComboBox = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UButton> FavoriteButton = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UTextBlock> FavoriteText = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UButton> ColorButton = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UBorder> ColorSwatch = nullptr;
 
     TWeakObjectPtr<UInspectorWorldSubsystem> Subsystem;
     TWeakObjectPtr<UInspectorPropertyItem> PropertyItem;

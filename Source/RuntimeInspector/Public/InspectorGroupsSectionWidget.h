@@ -13,6 +13,7 @@ class UInspectorWorldSubsystem;
 class USizeBox;
 class UVerticalBox;
 class UWidget;
+class UBorder;
 
 UCLASS()
 class RUNTIMEINSPECTOR_API UInspectorGroupButtonProxy : public UObject
@@ -57,6 +58,7 @@ public:
     void SetInspectorSubsystem(UInspectorWorldSubsystem* InSubsystem);
     void RefreshFromSubsystem();
     int32 GetEntryWidgetCountForDebug() const;
+    int32 GetPinnedEntryWidgetCountForDebug() const;
 
 protected:
     virtual TSharedRef<SWidget> RebuildWidget() override;
@@ -75,10 +77,22 @@ private:
     TObjectPtr<UVerticalBox> RootBox = nullptr;
 
     UPROPERTY(Transient)
-    TObjectPtr<UScrollBox> ScrollBox = nullptr;
+    TObjectPtr<UBorder> ComponentSectionBorder = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UScrollBox> ComponentScrollBox = nullptr;
 
     UPROPERTY(Transient)
     TObjectPtr<UVerticalBox> EntriesBox = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UBorder> PinnedSectionBorder = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UScrollBox> PinnedScrollBox = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UVerticalBox> PinnedEntriesBox = nullptr;
 
     UPROPERTY(Transient)
     TArray<TObjectPtr<UInspectorGroupButtonProxy>> ClickProxies;
@@ -87,6 +101,7 @@ private:
     TArray<TObjectPtr<UInspectorPinnedItemButtonProxy>> PinnedClickProxies;
 
     int32 LastEntryWidgetCount = 0;
+    int32 LastPinnedEntryWidgetCount = 0;
 
     TWeakObjectPtr<UInspectorWorldSubsystem> Subsystem;
 };

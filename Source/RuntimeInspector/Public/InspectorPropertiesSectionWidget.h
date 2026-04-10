@@ -5,9 +5,8 @@
 #include "InspectorPropertiesSectionWidget.generated.h"
 
 class UInspectorPropertyRowWidget;
-class UInspectorFunctionItem;
-class UInspectorFunctionRowWidget;
 class UInspectorWorldSubsystem;
+class UBorder;
 class UScrollBox;
 class UVerticalBox;
 
@@ -30,10 +29,11 @@ protected:
 private:
     void BuildWidgetTree();
     UWidget* CreatePropertyRow(UObject* ItemObject);
-    UWidget* CreateFunctionRow(UInspectorFunctionItem* ItemObject);
-    UWidget* CreateSectionTitle(const FString& InTitle);
 
 private:
+    UPROPERTY(Transient)
+    TObjectPtr<UBorder> RootBorder = nullptr;
+
     UPROPERTY(Transient)
     TObjectPtr<UVerticalBox> RootBox = nullptr;
 
