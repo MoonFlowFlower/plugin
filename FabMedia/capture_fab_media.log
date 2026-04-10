@@ -1,0 +1,52 @@
+﻿Fab media capture complete | OutputRoot=D:\project\game\ue\pluginmaker\Plugins\RuntimeInspector\FabMedia | Shots=7
+[
+    {
+        "file":  "cover.png",
+        "shot":  "foundation",
+        "page":  "Changes",
+        "testId":  "fab_screenshot_foundation",
+        "path":  "D:\\project\\game\\ue\\pluginmaker\\Plugins\\RuntimeInspector\\FabMedia\\cover.png"
+    },
+    {
+        "file":  "screenshot_01_actor_panel.png",
+        "shot":  "foundation",
+        "page":  "Actor",
+        "testId":  "fab_screenshot_actor_page",
+        "path":  "D:\\project\\game\\ue\\pluginmaker\\Plugins\\RuntimeInspector\\FabMedia\\screenshot_01_actor_panel.png"
+    },
+    {
+        "file":  "screenshot_02_changes_workflow.png",
+        "shot":  "foundation",
+        "page":  "Changes",
+        "testId":  "fab_screenshot_foundation",
+        "path":  "D:\\project\\game\\ue\\pluginmaker\\Plugins\\RuntimeInspector\\FabMedia\\screenshot_02_changes_workflow.png"
+    },
+    {
+        "file":  "screenshot_03_settings.png",
+        "shot":  "foundation",
+        "page":  "Settings",
+        "testId":  "fab_screenshot_settings_page",
+        "path":  "D:\\project\\game\\ue\\pluginmaker\\Plugins\\RuntimeInspector\\FabMedia\\screenshot_03_settings.png"
+    },
+    {
+        "file":  "screenshot_04_tools.png",
+        "shot":  "foundation",
+        "page":  "Tools",
+        "testId":  "fab_screenshot_tools_page",
+        "path":  "D:\\project\\game\\ue\\pluginmaker\\Plugins\\RuntimeInspector\\FabMedia\\screenshot_04_tools.png"
+    },
+    {
+        "file":  "screenshot_05_remote_session.png",
+        "shot":  "remote_session",
+        "page":  "Changes",
+        "testId":  "fab_screenshot_remote_session",
+        "path":  "D:\\project\\game\\ue\\pluginmaker\\Plugins\\RuntimeInspector\\FabMedia\\screenshot_05_remote_session.png"
+    },
+    {
+        "file":  "screenshot_06_promote_or_audit.png",
+        "shot":  "promote_or_audit",
+        "page":  "Changes",
+        "testId":  "fab_screenshot_promote_or_audit",
+        "path":  "D:\\project\\game\\ue\\pluginmaker\\Plugins\\RuntimeInspector\\FabMedia\\screenshot_06_promote_or_audit.png"
+    }
+]
