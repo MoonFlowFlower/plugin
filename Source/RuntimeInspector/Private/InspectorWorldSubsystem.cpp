@@ -3278,6 +3278,34 @@ void UInspectorWorldSubsystem::HandleDeferredOpenActorRefreshTimerElapsed()
         return;
     }
 
+    if (!SelectedActor.IsValid())
+    {
+        if (APlayerController* PC = GetLocalPC())
+        {
+            FVector CameraLocation = FVector::ZeroVector;
+            FRotator CameraRotation = FRotator::ZeroRotator;
+            PC->GetPlayerViewPoint(CameraLocation, CameraRotation);
+
+            const FVector TraceStart = CameraLocation;
+            const FVector TraceEnd = TraceStart + CameraRotation.Vector() * 100000.0f;
+
+            FHitResult Hit;
+            FCollisionQueryParams Params(SCENE_QUERY_STAT(RuntimeInspectorOpenFocusTrace), true);
+            Params.bReturnPhysicalMaterial = false;
+
+            if (UWorld* World = GetWorld())
+            {
+                if (World->LineTraceSingleByChannel(Hit, TraceStart, TraceEnd, ECC_Visibility, Params))
+                {
+                    if (AActor* HitActor = Hit.GetActor())
+                    {
+                        SetSelectedActor(HitActor);
+                    }
+                }
+            }
+        }
+    }
+
     if (bCaptureBaseline)
     {
         CaptureBaselineForSelection(/*bIncludeMaterialParams=*/ true);
@@ -5145,9 +5173,9 @@ void UInspectorWorldSubsystem::HandleActorTabClicked()
     RefreshActorPropertiesSection();
     RefreshActorFunctionsSection();
 
-    if (!bHasCompletedInitialActorPanelRefresh)
+    if (!bHasCompletedInitialActorPanelRefresh || !SelectedActor.IsValid())
     {
-        ScheduleDeferredOpenActorRefresh(true);
+        ScheduleDeferredOpenActorRefresh(!SelectedActor.IsValid());
     }
 #endif
 }
