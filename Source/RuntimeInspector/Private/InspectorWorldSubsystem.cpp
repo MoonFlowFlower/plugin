@@ -2308,6 +2308,45 @@ void UInspectorWorldSubsystem::CacheInitialPanelHeight()
 #endif
 }
 
+void UInspectorWorldSubsystem::CacheInitialPanelWidth()
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    if (PanelDefaultWidth > 0.0f)
+    {
+        return;
+    }
+
+    float ResolvedWidth = 0.0f;
+    if (USizeBox* SizeBox = PanelSizeBox.Get())
+    {
+        ResolvedWidth = SizeBox->GetWidthOverride();
+    }
+
+    if (ResolvedWidth <= 1.0f)
+    {
+        if (UUserWidget* Panel = PanelWidget.Get())
+        {
+            const float CachedWidth = Panel->GetCachedGeometry().GetLocalSize().X;
+            if (CachedWidth > 1.0f)
+            {
+                ResolvedWidth = CachedWidth;
+            }
+        }
+    }
+
+    if (ResolvedWidth <= 1.0f)
+    {
+        ResolvedWidth = 520.0f;
+    }
+
+    PanelDefaultWidth = ResolvedWidth;
+    if (PanelWidth <= 1.0f)
+    {
+        PanelWidth = FMath::Max(PanelDefaultWidth, 620.0f);
+    }
+#endif
+}
+
 void UInspectorWorldSubsystem::EnsurePanelInteractionInitialized()
 {
 #if RUNTIME_INSPECTOR_ENABLED
@@ -2343,6 +2382,7 @@ void UInspectorWorldSubsystem::EnsurePanelInteractionInitialized()
         }
     }
 
+    CacheInitialPanelWidth();
     CacheInitialPanelHeight();
     ApplyPanelInteractionPresentation();
     bPanelInteractionInitialized = PanelTitleBarWidget.IsValid() || PanelSizeBox.IsValid();
@@ -2361,7 +2401,9 @@ void UInspectorWorldSubsystem::ApplyPanelInteractionPresentation()
 
     if (USizeBox* SizeBox = PanelSizeBox.Get())
     {
+        CacheInitialPanelWidth();
         CacheInitialPanelHeight();
+        SizeBox->SetWidthOverride(PanelWidth > 1.0f ? PanelWidth : FMath::Max(PanelDefaultWidth, 620.0f));
         SizeBox->SetHeightOverride(PanelHeight > 1.0f ? PanelHeight : PanelDefaultHeight);
     }
 #endif
@@ -2684,7 +2726,6 @@ namespace
             }
         };
 
-        CollapseLegacyWidgetPair(TEXT("TXT_SelectedActor"), TEXT("TXT_SelectedName"));
         CollapseLegacyWidgetPair(TEXT("TXT_Log"), TEXT("TXT_Log_1"));
         CollapseLegacyWidgetPair(TEXT("BTN_CopyReport"), TEXT("BTN_ExportReport"));
         CollapseLegacyWidget(TEXT("Logger"));
@@ -2703,18 +2744,90 @@ static void RI_UpdateActorPropertyHeader(UUserWidget* PanelWidget, UObject* Focu
         return;
     }
 
-    const FString FocusLabel = FocusedObject ? FocusedObject->GetName() : TEXT("Actor");
+    auto MakeObjectDisplayLabel = [](UObject* Object) -> FString
+    {
+        if (!Object)
+        {
+            return TEXT("Actor");
+        }
+
+        if (const AActor* Actor = Cast<AActor>(Object))
+        {
+            return Actor->GetActorLabel();
+        }
+
+        if (const UActorComponent* Component = Cast<UActorComponent>(Object))
+        {
+            return Component->GetName();
+        }
+
+        return Object->GetName();
+    };
+
+    const FString FocusLabel = MakeObjectDisplayLabel(FocusedObject);
+    const AActor* FocusedActor = Cast<AActor>(FocusedObject);
+    const FString ActorLabel = FocusedActor ? FocusedActor->GetActorLabel() : FocusLabel;
+    const bool bShowSeparateFocus = !FocusLabel.IsEmpty() && FocusLabel != ActorLabel;
+
+    if (UWidget* HeaderValue = PanelWidget->WidgetTree->FindWidget(TEXT("TXT_SelectedActor")))
+    {
+        HeaderValue->SetVisibility(ESlateVisibility::Visible);
+    }
+    if (UWidget* HeaderLabel = PanelWidget->WidgetTree->FindWidget(TEXT("TXT_SelectedName")))
+    {
+        HeaderLabel->SetVisibility(ESlateVisibility::Visible);
+    }
+    if (UWidget* HeaderParent = PanelWidget->WidgetTree->FindWidget(TEXT("HorizontalBox_379")))
+    {
+        HeaderParent->SetVisibility(ESlateVisibility::Visible);
+    }
+
+    if (UTextBlock* HeaderLabelText = Cast<UTextBlock>(PanelWidget->WidgetTree->FindWidget(TEXT("TXT_SelectedName"))))
+    {
+        HeaderLabelText->SetText(FText::FromString(TEXT("SELECTION")));
+    }
+
+    if (UTextBlock* HeaderValueText = Cast<UTextBlock>(PanelWidget->WidgetTree->FindWidget(TEXT("TXT_SelectedActor"))))
+    {
+        HeaderValueText->SetAutoWrapText(true);
+        HeaderValueText->SetText(FText::FromString(ActorLabel));
+    }
 
     if (UTextBlock* FocusText = Cast<UTextBlock>(PanelWidget->WidgetTree->FindWidget(TEXT("TXT_SelectCompName"))))
     {
-        FocusText->SetText(FText::FromString(FocusLabel));
-        FocusText->SetVisibility(ESlateVisibility::Visible);
+        FocusText->SetAutoWrapText(true);
+        FocusText->SetText(FText::FromString(
+            bShowSeparateFocus
+                ? FString::Printf(TEXT("Focus: %s"), *FocusLabel)
+                : TEXT("")));
+        FocusText->SetVisibility(bShowSeparateFocus ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
     }
 
     if (UTextBlock* TitleText = Cast<UTextBlock>(PanelWidget->WidgetTree->FindWidget(TEXT("TXT_ToolName"))))
     {
         TitleText->SetText(FText::FromString(TEXT("RuntimeInspector")));
     }
+
+    auto ApplyFillRatio = [](UWidget* Widget, float FillWeight, const FMargin& Padding)
+    {
+        if (!Widget)
+        {
+            return;
+        }
+
+        if (UHorizontalBoxSlot* Slot = Cast<UHorizontalBoxSlot>(Widget->Slot))
+        {
+            FSlateChildSize SizeRule(ESlateSizeRule::Fill);
+            SizeRule.Value = FillWeight;
+            Slot->SetSize(SizeRule);
+            Slot->SetHorizontalAlignment(HAlign_Fill);
+            Slot->SetVerticalAlignment(VAlign_Fill);
+            Slot->SetPadding(Padding);
+        }
+    };
+
+    ApplyFillRatio(PanelWidget->WidgetTree->FindWidget(TEXT("Left")), 0.68f, FMargin(0.f, 0.f, 6.f, 0.f));
+    ApplyFillRatio(PanelWidget->WidgetTree->FindWidget(TEXT("Right")), 1.32f, FMargin(6.f, 0.f, 0.f, 0.f));
 }
 
 UWidgetSwitcher* UInspectorWorldSubsystem::FindContentSwitcher() const
@@ -4370,10 +4483,10 @@ void UInspectorWorldSubsystem::EnsureActorPropertiesSectionInjected()
         ActorFunctionsSectionWidget = FunctionWidget;
     }
 
-    UHorizontalBox* HostBox = ActorPropertyFunctionHostBox.Get();
+    UVerticalBox* HostBox = ActorPropertyFunctionHostBox.Get();
     if (!HostBox)
     {
-        HostBox = Panel->WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_ActorPropertyFunctionHost"));
+        HostBox = Panel->WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ActorPropertyFunctionHost"));
         ActorPropertyFunctionHostBoxStrong = HostBox;
         ActorPropertyFunctionHostBox = HostBox;
     }
@@ -4381,7 +4494,7 @@ void UInspectorWorldSubsystem::EnsureActorPropertiesSectionInjected()
     SectionWidget->SetInspectorSubsystem(this);
     FunctionWidget->SetInspectorSubsystem(this);
 
-    auto AttachChildToHost = [HostBox, SectionWidget](UWidget* ChildWidget)
+    auto AttachChildToHost = [HostBox, SectionWidget, FunctionWidget](UWidget* ChildWidget)
     {
         if (!HostBox || !ChildWidget)
         {
@@ -4398,15 +4511,17 @@ void UInspectorWorldSubsystem::EnsureActorPropertiesSectionInjected()
 
         if (ChildWidget->GetParent() != HostBox)
         {
-            HostBox->AddChildToHorizontalBox(ChildWidget);
+            HostBox->AddChildToVerticalBox(ChildWidget);
         }
 
-        if (UHorizontalBoxSlot* HorizontalSlot = Cast<UHorizontalBoxSlot>(ChildWidget->Slot))
+        if (UVerticalBoxSlot* VerticalSlot = Cast<UVerticalBoxSlot>(ChildWidget->Slot))
         {
-            HorizontalSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-            HorizontalSlot->SetHorizontalAlignment(HAlign_Fill);
-            HorizontalSlot->SetVerticalAlignment(VAlign_Fill);
-            HorizontalSlot->SetPadding(ChildWidget == SectionWidget ? FMargin(0.f, 0.f, 6.f, 0.f) : FMargin(6.f, 0.f, 0.f, 0.f));
+            FSlateChildSize SizeRule(ESlateSizeRule::Fill);
+            SizeRule.Value = ChildWidget == SectionWidget ? 1.35f : 0.85f;
+            VerticalSlot->SetSize(SizeRule);
+            VerticalSlot->SetHorizontalAlignment(HAlign_Fill);
+            VerticalSlot->SetVerticalAlignment(VAlign_Fill);
+            VerticalSlot->SetPadding(ChildWidget == SectionWidget ? FMargin(0.f, 0.f, 0.f, 8.f) : FMargin(0.f));
         }
     };
 
@@ -8737,10 +8852,17 @@ bool UInspectorWorldSubsystem::ApplyFabScreenshotPanelTransform(FString& OutErro
         SavedFabScreenshotPanelHeight = SizeBox->GetHeightOverride();
         bFabScreenshotPanelHeightCaptured = true;
     }
+    if (USizeBox* SizeBox = PanelSizeBox.Get(); SizeBox && !bFabScreenshotPanelWidthCaptured)
+    {
+        SavedFabScreenshotPanelWidth = SizeBox->GetWidthOverride();
+        bFabScreenshotPanelWidthCaptured = true;
+    }
 
+    CacheInitialPanelWidth();
     CacheInitialPanelHeight();
     if (USizeBox* SizeBox = PanelSizeBox.Get())
     {
+        SizeBox->SetWidthOverride(FMath::Max(PanelDefaultWidth, 620.0f));
         SizeBox->SetHeightOverride(PanelDefaultHeight > 1.0f ? PanelDefaultHeight : 720.0f);
     }
 
@@ -8777,11 +8899,24 @@ void UInspectorWorldSubsystem::RestoreFabScreenshotPanelTransform()
             SizeBox->ClearHeightOverride();
         }
     }
+    if (USizeBox* SizeBox = PanelSizeBox.Get(); SizeBox && bFabScreenshotPanelWidthCaptured)
+    {
+        if (SavedFabScreenshotPanelWidth > 1.0f)
+        {
+            SizeBox->SetWidthOverride(SavedFabScreenshotPanelWidth);
+        }
+        else
+        {
+            SizeBox->ClearWidthOverride();
+        }
+    }
 
     bFabScreenshotPanelTransformCaptured = false;
     SavedFabScreenshotPanelTranslation = FVector2D::ZeroVector;
     bFabScreenshotPanelHeightCaptured = false;
     SavedFabScreenshotPanelHeight = 0.0f;
+    bFabScreenshotPanelWidthCaptured = false;
+    SavedFabScreenshotPanelWidth = 0.0f;
 #endif
 }
 

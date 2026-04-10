@@ -202,10 +202,7 @@ void UInspectorPropertiesSectionWidget::BuildWidgetTree()
             RICompactUI::GetContextStatusCellBackgroundColor()),
         0.9f);
 
-    if (UVerticalBoxSlot* HeaderSlot = RootBox->AddChildToVerticalBox(HeaderBorder))
-    {
-        HeaderSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 8.f));
-    }
+    HeaderBorder->SetVisibility(ESlateVisibility::Collapsed);
 
     if (UVerticalBoxSlot* HeaderSlot = RootBox->AddChildToVerticalBox(
         RICompactUI::MakeSectionTitle(WidgetTree, TEXT("Property"), RICompactUI::ERISectionVisualStyle::Emphasis)))
@@ -214,14 +211,14 @@ void UInspectorPropertiesSectionWidget::BuildWidgetTree()
     }
 
     ScrollBox = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("RI_ActorPropertiesScroll"));
-    USizeBox* SizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_ActorPropertiesSize"));
-    SizeBox->SetMaxDesiredHeight(320.f);
-    SizeBox->SetContent(ScrollBox);
-
     EntriesBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ActorPropertiesEntries"));
     ScrollBox->AddChild(EntriesBox);
 
-    RootBox->AddChildToVerticalBox(SizeBox);
+    if (UVerticalBoxSlot* BodySlot = RootBox->AddChildToVerticalBox(ScrollBox))
+    {
+        BodySlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+        BodySlot->SetPadding(FMargin(0.f, 0.f, 0.f, 0.f));
+    }
     WidgetTree->RootWidget = RootBorder;
 }
 

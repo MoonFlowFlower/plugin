@@ -1506,7 +1506,7 @@ private:
         TObjectPtr<UInspectorFunctionsSectionWidget> ActorFunctionsSectionWidgetStrong = nullptr;
 
         UPROPERTY(Transient)
-        TObjectPtr<UHorizontalBox> ActorPropertyFunctionHostBoxStrong = nullptr;
+        TObjectPtr<UVerticalBox> ActorPropertyFunctionHostBoxStrong = nullptr;
 
         TWeakObjectPtr<UInspectorFilePageWidget> FilePageWidget;
         TWeakObjectPtr<UInspectorSettingsPageWidget> SettingsPageWidget;
@@ -1516,7 +1516,7 @@ private:
         TWeakObjectPtr<UVerticalBox> ActorPinnedEntriesBox;
         TWeakObjectPtr<UInspectorPropertiesSectionWidget> ActorPropertiesSectionWidget;
         TWeakObjectPtr<UInspectorFunctionsSectionWidget> ActorFunctionsSectionWidget;
-        TWeakObjectPtr<UHorizontalBox> ActorPropertyFunctionHostBox;
+        TWeakObjectPtr<UVerticalBox> ActorPropertyFunctionHostBox;
         TArray<FRIHostPanelMountState> HostPanelMountStates;
         int32 SettingsPageIndex = INDEX_NONE;
         int32 TestPageIndex = INDEX_NONE;
@@ -1536,12 +1536,16 @@ private:
         FVector2D SavedFabScreenshotPanelTranslation = FVector2D::ZeroVector;
         bool bFabScreenshotPanelHeightCaptured = false;
         float SavedFabScreenshotPanelHeight = 0.0f;
+        bool bFabScreenshotPanelWidthCaptured = false;
+        float SavedFabScreenshotPanelWidth = 0.0f;
         bool bPanelInteractionInitialized = false;
         bool bDraggingPanel = false;
         bool bResizingPanelVertically = false;
         FVector2D PanelTranslation = FVector2D::ZeroVector;
         FVector2D PanelInteractionStartCursor = FVector2D::ZeroVector;
         FVector2D PanelInteractionStartTranslation = FVector2D::ZeroVector;
+        float PanelWidth = 0.0f;
+        float PanelDefaultWidth = 0.0f;
         float PanelHeight = 0.0f;
         float PanelDefaultHeight = 0.0f;
         float PanelInteractionStartHeight = 0.0f;
@@ -1552,6 +1556,7 @@ private:
         bool EnsureCustomDepthStencilEnabled();
         void EnsurePanelInteractionInitialized();
         void ApplyPanelInteractionPresentation();
+        void CacheInitialPanelWidth();
         void CacheInitialPanelHeight();
         bool HandlePanelPointerDownAt(const FVector2D& Cursor);
         bool HandlePanelPointerMoveTo(const FVector2D& Cursor);

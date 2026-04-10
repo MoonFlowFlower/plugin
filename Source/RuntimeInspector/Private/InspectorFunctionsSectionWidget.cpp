@@ -80,22 +80,21 @@ void UInspectorFunctionsSectionWidget::BuildWidgetTree()
     }
 
     FocusSummaryText = RICompactUI::MakeText(WidgetTree, TEXT("Focused object"), RICompactUI::GetMutedFontSize(), false, RI_FunctionMutedColor(), true);
+    FocusSummaryText->SetVisibility(ESlateVisibility::Collapsed);
     if (UVerticalBoxSlot* SummarySlot = RootBox->AddChildToVerticalBox(FocusSummaryText))
     {
         SummarySlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
     }
 
     UScrollBox* ScrollBox = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("RI_ActorFunctionsScroll"));
-    USizeBox* SizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_ActorFunctionsSize"));
-    SizeBox->SetMaxDesiredHeight(280.f);
-    SizeBox->SetContent(ScrollBox);
 
     FunctionsEntriesBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ActorFunctionsEntriesBox"));
     ScrollBox->AddChild(FunctionsEntriesBox);
     FunctionsScrollBox = ScrollBox;
 
-    if (UVerticalBoxSlot* BodySlot = RootBox->AddChildToVerticalBox(SizeBox))
+    if (UVerticalBoxSlot* BodySlot = RootBox->AddChildToVerticalBox(ScrollBox))
     {
+        BodySlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
         BodySlot->SetPadding(FMargin(0.f, 0.f, 0.f, 0.f));
     }
 
@@ -150,15 +149,6 @@ void UInspectorFunctionsSectionWidget::RefreshFromSubsystem()
 
     TArray<UInspectorFunctionItem*> Items;
     InspectorSubsystem->GetFunctionItemsForSelected(InspectorSubsystem->GetCurrentActorSearchText(), Items);
-
-    if (FocusSummaryText)
-    {
-        const UObject* FocusedObject = InspectorSubsystem->GetFocusedInspectObject();
-        const FString FocusLabel = FocusedObject
-            ? FString::Printf(TEXT("Focused object: %s"), *FocusedObject->GetName())
-            : TEXT("Focused object: None");
-        FocusSummaryText->SetText(FText::FromString(FocusLabel));
-    }
 
     if (Items.Num() == 0)
     {

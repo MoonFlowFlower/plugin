@@ -95,13 +95,14 @@ void UInspectorFunctionRowWidget::BuildWidgetTree()
     }
 
     OwnerText = RICompactUI::MakeText(WidgetTree, TEXT(""), RICompactUI::GetMutedFontSize(), false, RI_FunctionRowMutedColor(), true);
+    OwnerText->SetVisibility(ESlateVisibility::Collapsed);
     if (UHorizontalBoxSlot* OwnerSlot = HeaderRow->AddChildToHorizontalBox(OwnerText))
     {
         OwnerSlot->SetPadding(FMargin(8.f, 0.f, 8.f, 0.f));
         OwnerSlot->SetVerticalAlignment(VAlign_Center);
     }
 
-    InvokeButton = RICompactUI::MakeLabeledButton(WidgetTree, TEXT("BTN_InvokeFunction"), TEXT("Run"), RICompactUI::ERIButtonVisualStyle::Primary, 56.f);
+    InvokeButton = RICompactUI::MakeLabeledButton(WidgetTree, TEXT("BTN_InvokeFunction"), TEXT("Run"), RICompactUI::ERIButtonVisualStyle::Primary, 44.f);
     InvokeButton->OnClicked.AddDynamic(this, &UInspectorFunctionRowWidget::HandleInvokeClicked);
     if (UHorizontalBoxSlot* ButtonSlot = HeaderRow->AddChildToHorizontalBox(InvokeButton))
     {
@@ -157,7 +158,8 @@ void UInspectorFunctionRowWidget::RefreshRow()
 
     if (OwnerText)
     {
-        OwnerText->SetText(FText::FromString(Item->GetOwnerPrefix()));
+        OwnerText->SetText(FText::GetEmpty());
+        OwnerText->SetVisibility(ESlateVisibility::Collapsed);
     }
 
     if (InvokeButton)
@@ -232,11 +234,7 @@ void UInspectorFunctionRowWidget::RefreshRow()
         }
     }
 
-    if (ParameterWidgets.Num() == 0)
-    {
-        UTextBlock* Empty = RICompactUI::MakeText(WidgetTree, TEXT("No parameters"), RICompactUI::GetMutedFontSize(), false, RI_FunctionRowMutedColor(), true);
-        ParametersBox->AddChildToVerticalBox(Empty);
-    }
+    ParametersBox->SetVisibility(ParameterWidgets.Num() > 0 ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 }
 
 TArray<FString> UInspectorFunctionRowWidget::CollectArgumentTexts() const
