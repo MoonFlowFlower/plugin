@@ -30,7 +30,7 @@ public:
     UPROPERTY(BlueprintReadOnly, Category = "Snapshot")
     FString ActorShortName;
 
-    // ”√”⁄≈≈–Ú£®Unix √Î£©
+    // Used for sorting (Unix seconds).
     UPROPERTY(BlueprintReadOnly, Category = "Snapshot")
     int64 CreatedAtUnixSeconds = 0;
 };

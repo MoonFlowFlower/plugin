@@ -5,6 +5,7 @@ param(
     [string]$ValidationRoot = "",
     [switch]$PackageFirst,
     [int]$EditorQuitTimeoutSeconds = 120,
+    [int]$PostQuitGracePeriodSeconds = 10,
     [switch]$KeepValidationProject
 )
 
@@ -112,7 +113,8 @@ $EditorProcess = Start-Process `
     -RedirectStandardOutput $ValidationStdOutLogPath `
     -RedirectStandardError $ValidationStdErrLogPath
 
-$TimedOutAfterQuit = $false
+$ForcedShutdownAfterQuit = $false
+$QuitObservedAt = $null
 $Deadline = (Get-Date).AddSeconds($EditorQuitTimeoutSeconds)
 while ($true) {
     $EditorProcess.Refresh()
@@ -126,9 +128,18 @@ while ($true) {
     $ObservedQuitBeforeTimeout = $ProjectLogSnapshot -match "Cmd:\s+QUIT"
 
     if ($MountedBeforeTimeout -and $ObservedQuitBeforeTimeout) {
-        Stop-Process -Id $EditorProcess.Id -Force -ErrorAction SilentlyContinue
-        $TimedOutAfterQuit = $true
-        break
+        if ($null -eq $QuitObservedAt) {
+            $QuitObservedAt = Get-Date
+        }
+
+        if ((Get-Date) -ge $QuitObservedAt.AddSeconds($PostQuitGracePeriodSeconds)) {
+            Stop-Process -Id $EditorProcess.Id -Force -ErrorAction SilentlyContinue
+            $ForcedShutdownAfterQuit = $true
+            break
+        }
+
+        Start-Sleep -Milliseconds 500
+        continue
     }
 
     if ((Get-Date) -ge $Deadline) {
@@ -139,7 +150,7 @@ while ($true) {
 
         if ($MountedBeforeTimeout -and $ObservedQuitBeforeTimeout) {
             Stop-Process -Id $EditorProcess.Id -Force -ErrorAction SilentlyContinue
-            $TimedOutAfterQuit = $true
+            $ForcedShutdownAfterQuit = $true
             break
         }
 
@@ -172,7 +183,7 @@ Append-ValidationLog -SourcePath $ValidationProjectLogPath -DestinationPath $Val
 Append-ValidationLog -SourcePath $ValidationStdOutLogPath -DestinationPath $ValidationLogPath
 Append-ValidationLog -SourcePath $ValidationStdErrLogPath -DestinationPath $ValidationLogPath
 
-if (($EditorProcess.ExitCode -ne 0) -and (-not $TimedOutAfterQuit)) {
+if (($EditorProcess.ExitCode -ne 0) -and (-not $ForcedShutdownAfterQuit)) {
     throw "Blank project validation failed. See log: $ValidationLogPath"
 }
 
@@ -210,8 +221,8 @@ Write-Host "Blank project validation passed."
 Write-Host "Project: $ValidationProjectFile"
 Write-Host "Plugin:  $ValidationPluginRoot"
 Write-Host "Log:     $ValidationLogPath"
-if ($TimedOutAfterQuit) {
-    Write-Warning "UnrealEditor-Cmd required forced shutdown after observing plugin mount + QUIT, but the package load validation still passed."
+if ($ForcedShutdownAfterQuit) {
+    Write-Host "Editor stayed alive after QUIT; performed controlled shutdown after $PostQuitGracePeriodSeconds second grace period."
 }
 
 if (-not $KeepValidationProject) {

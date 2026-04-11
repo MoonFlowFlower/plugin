@@ -14,7 +14,7 @@ static bool TryParseFloat(const FString& S, float& Out)
 
 static bool TryParseLinearColor(const FString& S, FLinearColor& Out)
 {
-    // 支持 "R,G,B,A" 或 "R G B A"
+    // Supports both "R,G,B,A" and "R G B A".
     TArray<FString> Parts;
     S.Replace(TEXT(" "), TEXT(",")).ParseIntoArray(Parts, TEXT(","), true);
     if (Parts.Num() < 3) return false;
@@ -48,11 +48,11 @@ FString UInspectorMaterialParamItem::GetValueText()
     UMeshComponent* MeshComp = TargetComp.Get();
     if (!MeshComp) return TEXT("");
 
-    // 读值必须无副作用：只读 Slot 上“当前材质”（可能是 MID / MIC / Material）
+    // Read the current material value without creating or mutating anything.
     UMaterialInterface* Mat = MeshComp->GetMaterial(SlotIndex);
     if (!Mat) return TEXT("");
 
-    // 优先从 MID 读（Undo/Redo/Apply 都在改 MID）
+    // Prefer MID reads because Undo/Redo/Apply all mutate the MID.
     if (UMaterialInstanceDynamic* MID = Cast<UMaterialInstanceDynamic>(Mat))
     {
         if (ParamType == EInspectorMatParamType::Scalar)
@@ -67,7 +67,7 @@ FString UInspectorMaterialParamItem::GetValueText()
         }
     }
 
-    // 非 MID：尝试从 MaterialInterface 读默认值（有些材质/实例也能读到）
+    // Non-MID fallback: read the default value from the material interface.
     const FMaterialParameterInfo Info(ParamName);
 
     if (ParamType == EInspectorMatParamType::Scalar)
@@ -121,10 +121,10 @@ bool UInspectorMaterialParamItem::ApplyFromText(const FString& NewText, FString&
         return false;
     }
 
-    // 旧值（无副作用）
+    // Capture the old value before mutating anything.
     const FString OldText = GetValueText();
 
-    // 写值：这里才允许创建/复用 MID
+    // Writes are the only place where creating or reusing a MID is allowed.
     UMaterialInstanceDynamic* MID = Sub->GetOrCreateMID(PrimComp, SlotIndex);
     if (!MID)
     {
@@ -155,7 +155,7 @@ bool UInspectorMaterialParamItem::ApplyFromText(const FString& NewText, FString&
 
     PrimComp->MarkRenderStateDirty();
 
-    // 记录 Undo/Redo：用“材质专用 change”，不要再伪造 PropertyName
+    // Record a dedicated material change for Undo/Redo instead of faking a property name.
     if (!Sub->IsApplyingHistory())
     {
         FInspectorChange Change;
@@ -168,7 +168,7 @@ bool UInspectorMaterialParamItem::ApplyFromText(const FString& NewText, FString&
         if (ParamType == EInspectorMatParamType::Scalar)
         {
             Change.ChangeType = EInspectorChangeType::MaterialScalar;
-            // 旧/新数值直接从文本取（旧值 OldText 里是 float）
+            // Old/new scalar values can be read directly from the serialized text.
             TryParseFloat(OldText, Change.OldScalar);
             Change.NewScalar = MID->K2_GetScalarParameterValue(ParamName);
         }

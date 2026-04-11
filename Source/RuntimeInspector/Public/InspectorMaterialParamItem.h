@@ -68,7 +68,7 @@ private:
 
 public:
     UFUNCTION(BlueprintPure, Category = "RuntimeInspector")
-    UMeshComponent* GetMeshComponent() const { return TargetComp.Get(); }  // 下面变量名按你自己的改
+    UMeshComponent* GetMeshComponent() const { return TargetComp.Get(); }
 
     UFUNCTION(BlueprintPure, Category = "RuntimeInspector")
     int32 GetSlotIndex() const { return SlotIndex; }

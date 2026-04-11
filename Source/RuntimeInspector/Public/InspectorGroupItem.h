@@ -17,9 +17,9 @@ enum class EInspectorGroupKind : uint8
 };
 
 /**
- * ListView 的“分组标题行”Item（可折叠）
- * - RootActor / RootComponents：根组
- * - Component：某个白名单组件的组
+ * Collapsible group row model used by the navigator ListView.
+ * - RootActor / RootComponents are logical roots.
+ * - Component rows represent a whitelisted component group.
  */
 UCLASS(BlueprintType)
 class RUNTIMEINSPECTOR_API UInspectorGroupItem : public UObject
@@ -37,14 +37,14 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "RuntimeInspector")
 	FString DisplayName;
 
-	/** 用于保存折叠状态（Stable） */
+	/** Stable key used to persist expand/collapse state. */
 	UPROPERTY(BlueprintReadOnly, Category = "RuntimeInspector")
 	FString StableKey;
 
 	UPROPERTY(BlueprintReadOnly, Category = "RuntimeInspector")
 	bool bExpanded = true;
 
-	/** Component 组才会有（指向 UActorComponent） */
+	/** Backing object for component groups, typically a UActorComponent. */
 	UPROPERTY(BlueprintReadOnly, Category = "RuntimeInspector")
 	TObjectPtr<UObject> TargetObject = nullptr;
 
