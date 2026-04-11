@@ -13896,10 +13896,16 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
     bool bMaterialScalarRowOk = false;
     bool bMaterialVectorRowOk = false;
     bool bMaterialFavoriteVisible = false;
+    bool bMaterialTreeFound = false;
+    bool bMaterialTreeExpandedOk = false;
+    bool bMaterialSlotVisible = false;
+    bool bMaterialSlotSelectionOk = false;
     FString FocusedComponentName = TEXT("None");
     FString ColorPropertyName = TEXT("None");
     FString MaterialScalarName = TEXT("None");
     FString MaterialVectorName = TEXT("None");
+    FString MaterialTreeComponentName = TEXT("None");
+    FString MaterialSlotLabel = TEXT("None");
 
     if (ActorPtr)
     {
@@ -14076,6 +14082,107 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
                 break;
             }
         }
+
+        for (UActorComponent* Component : Components)
+        {
+            UStaticMeshComponent* MeshComponent = Cast<UStaticMeshComponent>(Component);
+            if (!MeshComponent || MeshComponent->GetNumMaterials() <= 0)
+            {
+                continue;
+            }
+
+            MaterialTreeComponentName = MeshComponent->GetName();
+            SetGroupExpanded(TEXT("ROOT_COMPONENTS"), true);
+
+            const FString ComponentKey = MakeComponentKey(ActorPtr, MeshComponent);
+            SetGroupExpanded(ComponentKey, true);
+
+            UInspectorGroupItem* ComponentGroup = GetOrCreateGroupItem(ComponentKey);
+            ComponentGroup->Kind = EInspectorGroupKind::Component;
+            ComponentGroup->TargetObject = MeshComponent;
+            ComponentGroup->DisplayName = FString::Printf(TEXT("%s (%s)"), *MeshComponent->GetName(), *MeshComponent->GetClass()->GetName());
+            ComponentGroup->StableKey = ComponentKey;
+            ComponentGroup->Depth = 1;
+            ComponentGroup->bExpanded = true;
+
+            TArray<UObject*> ComponentChildren;
+            GetGroupTreeChildrenForItem(ComponentGroup, TEXT(""), ComponentChildren);
+
+            UInspectorGroupItem* MaterialsRootItem = nullptr;
+            for (UObject* ChildObject : ComponentChildren)
+            {
+                UInspectorGroupItem* GroupItem = Cast<UInspectorGroupItem>(ChildObject);
+                if (GroupItem && GroupItem->IsMaterialsRoot())
+                {
+                    MaterialsRootItem = GroupItem;
+                    break;
+                }
+            }
+
+            bMaterialTreeFound = MaterialsRootItem != nullptr;
+            if (!MaterialsRootItem)
+            {
+                continue;
+            }
+
+            SetGroupExpanded(MaterialsRootItem->StableKey, true);
+            RefreshPanel(EInspectorRefreshReason::StructureChanged);
+
+            ComponentChildren.Reset();
+            GetGroupTreeChildrenForItem(ComponentGroup, TEXT(""), ComponentChildren);
+            for (UObject* ChildObject : ComponentChildren)
+            {
+                UInspectorGroupItem* GroupItem = Cast<UInspectorGroupItem>(ChildObject);
+                if (GroupItem && GroupItem->StableKey == MaterialsRootItem->StableKey)
+                {
+                    MaterialsRootItem = GroupItem;
+                    break;
+                }
+            }
+
+            bMaterialTreeExpandedOk = MaterialsRootItem && MaterialsRootItem->bExpanded;
+            if (!MaterialsRootItem || !MaterialsRootItem->bExpanded)
+            {
+                continue;
+            }
+
+            TArray<UObject*> MaterialSlotChildren;
+            GetGroupTreeChildrenForItem(MaterialsRootItem, TEXT(""), MaterialSlotChildren);
+            UInspectorGroupItem* MaterialSlotItem = nullptr;
+            for (UObject* ChildObject : MaterialSlotChildren)
+            {
+                UInspectorGroupItem* GroupItem = Cast<UInspectorGroupItem>(ChildObject);
+                if (GroupItem && GroupItem->MaterialSlotIndex != INDEX_NONE)
+                {
+                    MaterialSlotItem = GroupItem;
+                    break;
+                }
+            }
+
+            bMaterialSlotVisible = MaterialSlotItem != nullptr;
+            if (!MaterialSlotItem)
+            {
+                continue;
+            }
+
+            MaterialSlotLabel = MaterialSlotItem->DisplayName;
+            SetSelectedGroupItem(MaterialSlotItem);
+            RequestActorPageRefresh();
+
+            TArray<UObject*> MaterialOnlyItems;
+            GetPropertyItemsForSelectedEx(TEXT(""), false, MaterialOnlyItems);
+            const bool bHasMaterialParams = MaterialOnlyItems.ContainsByPredicate([](UObject* ItemObject)
+            {
+                return Cast<UInspectorMaterialParamItem>(ItemObject) != nullptr;
+            });
+
+            bMaterialSlotSelectionOk =
+                PropertyViewMode == ERIPropertyViewMode::MaterialOnly &&
+                ViewMeshComp.Get() == MeshComponent &&
+                ViewMaterialSlot == MaterialSlotItem->MaterialSlotIndex &&
+                bHasMaterialParams;
+            break;
+        }
     }
 
     SelectedInspectObject = SelectedActor.Get();
@@ -14108,10 +14215,14 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
         && bMaterialScalarRowOk
         && bMaterialVectorRowOk
         && bMaterialFavoriteVisible
-        && bSwatchVisible;
+        && bSwatchVisible
+        && bMaterialTreeFound
+        && bMaterialTreeExpandedOk
+        && bMaterialSlotVisible
+        && bMaterialSlotSelectionOk;
 
     OutReport = FString::Printf(
-        TEXT("ActorPageStructureSelfTest=%s | Groups=%d | Sidebar=%d/%d Workspace=%d/%d Selection=%d/%d Footer=%d VisibleLegacy=%d | PropertyBox=%d Scroll=%d | FunctionBox=%d Scroll=%d Summary=%d | Columns=%d Left=%.2f Right=%.2f | Vertical=%d Property=%.2f Function=%.2f Dominant=%d | Starred=%d | FocusedComponent=%s | FocusOk=%d | ColorProperty=%s | ColorItem=%d | Swatch=%d | MaterialScalar=%d(%s) MaterialVector=%d(%s) MaterialStar=%d | Summary=%s"),
+        TEXT("ActorPageStructureSelfTest=%s | Groups=%d | Sidebar=%d/%d Workspace=%d/%d Selection=%d/%d Footer=%d VisibleLegacy=%d | PropertyBox=%d Scroll=%d | FunctionBox=%d Scroll=%d Summary=%d | Columns=%d Left=%.2f Right=%.2f | Vertical=%d Property=%.2f Function=%.2f Dominant=%d | Starred=%d | FocusedComponent=%s | FocusOk=%d | ColorProperty=%s | ColorItem=%d | Swatch=%d | MaterialScalar=%d(%s) MaterialVector=%d(%s) MaterialStar=%d | MaterialTree=%d/%d/%d/%d Component=%s Slot=%s | Summary=%s"),
         bPassed ? TEXT("PASS") : TEXT("FAIL"),
         GroupCount,
         bSidebarHostOk ? 1 : 0,
@@ -14145,6 +14256,12 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
         bMaterialVectorRowOk ? 1 : 0,
         *MaterialVectorName,
         bMaterialFavoriteVisible ? 1 : 0,
+        bMaterialTreeFound ? 1 : 0,
+        bMaterialTreeExpandedOk ? 1 : 0,
+        bMaterialSlotVisible ? 1 : 0,
+        bMaterialSlotSelectionOk ? 1 : 0,
+        *MaterialTreeComponentName,
+        *MaterialSlotLabel,
         *Summary);
     return bPassed;
 #endif
@@ -16845,6 +16962,13 @@ void UInspectorWorldSubsystem::SetGroupExpanded(const FString& GroupKey, bool bE
 {
 #if RUNTIME_INSPECTOR_ENABLED
     GroupExpandedMap.Add(GroupKey, bExpanded);
+    if (TObjectPtr<UObject>* Found = ItemPool.Find(GroupKey))
+    {
+        if (UInspectorGroupItem* GroupItem = Cast<UInspectorGroupItem>(*Found))
+        {
+            GroupItem->bExpanded = bExpanded;
+        }
+    }
 #endif
 }
 void UInspectorWorldSubsystem::GetGroupTreeRootsForSelected(const FString& SearchText, TArray<UObject*>& OutRoots)
@@ -16943,6 +17067,7 @@ void UInspectorWorldSubsystem::GetGroupTreeChildrenForItem(
             SlotGroup->DisplayName = FString::Printf(TEXT("Element %d: %s"), Slot, *GetNameSafe(Mat));
             SlotGroup->StableKey = SlotKey;
             SlotGroup->MaterialSlotIndex = Slot;
+            SlotGroup->bExpanded = bSearchMode ? true : GetGroupExpanded(SlotKey, false);
 
             OutChildren.Add(SlotGroup);
 
@@ -16961,6 +17086,7 @@ void UInspectorWorldSubsystem::GetGroupTreeChildrenForItem(
         MatRoot->DisplayName = TEXT("Materials");
         MatRoot->StableKey = MatRootKey;
         MatRoot->Depth = Parent->Depth + 1;
+        MatRoot->bExpanded = bSearchMode ? true : GetGroupExpanded(MatRootKey, false);
         OutChildren.Add(MatRoot);
 
         UE_CLOG(RI_IsDebugLogEnabled(), LogRuntimeInspector, Warning, TEXT("[RI] -> children=%d"), OutChildren.Num());
