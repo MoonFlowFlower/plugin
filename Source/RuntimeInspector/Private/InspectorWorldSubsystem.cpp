@@ -7457,6 +7457,11 @@ bool UInspectorWorldSubsystem::IsConfirmDialogColorPageActive(UUserWidget* Dialo
 void UInspectorWorldSubsystem::RefreshConfirmDialogBinding()
 {
 #if RUNTIME_INSPECTOR_ENABLED
+    if (!ActiveConfirmDialogWidget.IsValid() && !ActiveColorEditItem.IsValid())
+    {
+        return;
+    }
+
     UWorld* World = GetWorld();
     if (!World)
     {
@@ -10124,6 +10129,8 @@ bool UInspectorWorldSubsystem::RunConfirmDialogColorInputSelfTest(FString& OutRe
     bool bMaterialDialogOpened = false;
     bool bMaterialColorPageOk = false;
     bool bMaterialModalOk = false;
+    bool bMaterialModalClearedOk = false;
+    bool bMaterialPanelEnabledOk = false;
     bool bMaterialSwatchOk = false;
     bool bMaterialPreviewOk = false;
     bool bMaterialApplyOk = false;
@@ -10443,6 +10450,9 @@ bool UInspectorWorldSubsystem::RunConfirmDialogColorInputSelfTest(FString& OutRe
 
                     FLinearColor AppliedColor = FLinearColor::Black;
                     bMaterialApplyOk = TestMaterialItem->GetVector(AppliedColor, MaterialError) && ColorNear(AppliedColor, UpdatedMaterialColor, 0.02f);
+                    HandleActiveConfirmDialogAccepted();
+                    bMaterialModalClearedOk = !ActiveConfirmDialogModalBlockerWidget.IsValid();
+                    bMaterialPanelEnabledOk = !PanelWidget.IsValid() || PanelWidget->GetIsEnabled();
 
                     FString RestoreError;
                     TestMaterialItem->SetVector(OriginalMaterialColor, RestoreError);
@@ -10451,10 +10461,20 @@ bool UInspectorWorldSubsystem::RunConfirmDialogColorInputSelfTest(FString& OutRe
         }
     }
 
-    bOverallSuccess = bPassR && bPassHex && bDirectColorPageOk && bMaterialDialogOpened && bMaterialColorPageOk && bMaterialModalOk && bMaterialSwatchOk && bMaterialPreviewOk && bMaterialApplyOk;
+    bOverallSuccess = bPassR
+        && bPassHex
+        && bDirectColorPageOk
+        && bMaterialDialogOpened
+        && bMaterialColorPageOk
+        && bMaterialModalOk
+        && bMaterialModalClearedOk
+        && bMaterialPanelEnabledOk
+        && bMaterialSwatchOk
+        && bMaterialPreviewOk
+        && bMaterialApplyOk;
 
     OutReport = FString::Printf(
-        TEXT("ConfirmDialogColorInputSelfTest=%s | DirectPage=%d | InitialUI=(%.3f, %.3f, %.3f, %.3f) | AfterRUI=%.3f HexAfterR=%s | AfterHexUI=(%.3f, %.3f, %.3f, %.3f) GAfterHex=%s HexAfterHex=%s | MaterialDialog=%d Page=%d Modal=%d Swatch=%d Preview=%d Apply=%d InjectedRow=%d InjectedSwatch=%d InjectedColor=(%.3f,%.3f,%.3f,%.3f) LegacyEntry=%d LegacyButton=%d LegacyColor=(%.3f,%.3f,%.3f,%.3f) Item=%s Hex=%s"),
+        TEXT("ConfirmDialogColorInputSelfTest=%s | DirectPage=%d | InitialUI=(%.3f, %.3f, %.3f, %.3f) | AfterRUI=%.3f HexAfterR=%s | AfterHexUI=(%.3f, %.3f, %.3f, %.3f) GAfterHex=%s HexAfterHex=%s | MaterialDialog=%d Page=%d Modal=%d ModalCleared=%d PanelEnabled=%d Swatch=%d Preview=%d Apply=%d InjectedRow=%d InjectedSwatch=%d InjectedColor=(%.3f,%.3f,%.3f,%.3f) LegacyEntry=%d LegacyButton=%d LegacyColor=(%.3f,%.3f,%.3f,%.3f) Item=%s Hex=%s"),
         bOverallSuccess ? TEXT("PASS") : TEXT("FAIL"),
         bDirectColorPageOk ? 1 : 0,
         InitialR, InitialG, InitialB, InitialA,
@@ -10466,6 +10486,8 @@ bool UInspectorWorldSubsystem::RunConfirmDialogColorInputSelfTest(FString& OutRe
         bMaterialDialogOpened ? 1 : 0,
         bMaterialColorPageOk ? 1 : 0,
         bMaterialModalOk ? 1 : 0,
+        bMaterialModalClearedOk ? 1 : 0,
+        bMaterialPanelEnabledOk ? 1 : 0,
         bMaterialSwatchOk ? 1 : 0,
         bMaterialPreviewOk ? 1 : 0,
         bMaterialApplyOk ? 1 : 0,
