@@ -9,6 +9,7 @@ class UButton;
 class UHorizontalBox;
 class UInspectorMaterialParamItem;
 class UInspectorWorldSubsystem;
+class USizeBox;
 class UTextBlock;
 
 UCLASS()
@@ -28,6 +29,9 @@ public:
     bool IsScalarValueVisibleForAutomation() const;
     bool HasFavoriteButtonForAutomation() const;
     bool TryGetDisplayedColorSwatchForAutomation(FLinearColor& OutColor) const;
+    float GetValueControlHeightForAutomation() const;
+    float GetFavoriteButtonHeightForAutomation() const;
+    float GetColorButtonHeightForAutomation() const;
 
 protected:
     virtual TSharedRef<SWidget> RebuildWidget() override;
@@ -58,13 +62,22 @@ private:
     TObjectPtr<UTextBlock> FavoriteText = nullptr;
 
     UPROPERTY(Transient)
+    TObjectPtr<USizeBox> FavoriteSizeBox = nullptr;
+
+    UPROPERTY(Transient)
     TObjectPtr<UTextBlock> NameText = nullptr;
 
     UPROPERTY(Transient)
     TObjectPtr<UTextBlock> ReadOnlyValueText = nullptr;
 
     UPROPERTY(Transient)
+    TObjectPtr<USizeBox> ReadOnlyValueSizeBox = nullptr;
+
+    UPROPERTY(Transient)
     TObjectPtr<UButton> ColorButton = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<USizeBox> ColorSizeBox = nullptr;
 
     UPROPERTY(Transient)
     TObjectPtr<UBorder> ColorSwatch = nullptr;

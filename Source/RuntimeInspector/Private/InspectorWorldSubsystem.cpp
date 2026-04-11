@@ -11548,7 +11548,7 @@ bool UInspectorWorldSubsystem::SetVisiblePageByName(const FString& InPageName, F
 
     if (PageName == TEXT("settings"))
     {
-        ShowFilePage();
+        ShowSettingsPage();
         return true;
     }
 
@@ -11829,7 +11829,7 @@ FString UInspectorWorldSubsystem::RunFabScreenshotActorPageSelfTestSimple()
 
 bool UInspectorWorldSubsystem::RunFabScreenshotSettingsPageSelfTest(FString& OutReport)
 {
-    return RunFabScreenshotPageSelfTest(TEXT("Snapshot"), ERIVisiblePage::Changes, TEXT("FabScreenshotSettingsPageSelfTest"), OutReport);
+    return RunFabScreenshotPageSelfTest(TEXT("Settings"), ERIVisiblePage::Settings, TEXT("FabScreenshotSettingsPageSelfTest"), OutReport);
 }
 
 FString UInspectorWorldSubsystem::RunFabScreenshotSettingsPageSelfTestSimple()
@@ -14078,6 +14078,8 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
     AActor* ActorPtr = SelectedActor.Get();
     bool bFocusedComponentOk = false;
     bool bColorItemFound = false;
+    bool bTextInputItemFound = false;
+    bool bBoolItemFound = false;
     bool bSwatchVisible = false;
     bool bMaterialScalarRowOk = false;
     bool bMaterialVectorRowOk = false;
@@ -14090,10 +14092,23 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
     FString MaterialTreeVisibleKeys = TEXT("None");
     FString FocusedComponentName = TEXT("None");
     FString ColorPropertyName = TEXT("None");
+    FString TextInputPropertyName = TEXT("None");
+    FString BoolPropertyName = TEXT("None");
     FString MaterialScalarName = TEXT("None");
     FString MaterialVectorName = TEXT("None");
     FString MaterialTreeComponentName = TEXT("None");
     FString MaterialSlotLabel = TEXT("None");
+    float PropertyTextInputHeight = 0.f;
+    float PropertyBoolHeight = 0.f;
+    float PropertyColorHeight = 0.f;
+    float PropertyFavoriteHeight = 0.f;
+    float MaterialScalarHeight = 0.f;
+    float MaterialVectorHeight = 0.f;
+    float MaterialFavoriteHeight = 0.f;
+    const float ExpectedValueControlHeight = RICompactUI::GetInputHeight();
+    const float HeightTolerance = 0.25f;
+    bool bValueHeightContractOk = false;
+    bool bTouchHeightContractOk = false;
 
     if (ActorPtr)
     {
@@ -14126,11 +14141,6 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
                 }
 
                 const EInspectorValueType ValueType = PropertyItem->GetValueType();
-                if (ValueType != EInspectorValueType::LinearColor && ValueType != EInspectorValueType::Color)
-                {
-                    continue;
-                }
-
                 UInspectorPropertyRowWidget* Row = nullptr;
                 if (APlayerController* PC = GetLocalPC())
                 {
@@ -14150,16 +14160,37 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
                 Row->SetInspectorSubsystem(this);
                 Row->SetPropertyItem(PropertyItem);
 
-                FocusedComponentName = Component->GetName();
-                ColorPropertyName = PropertyItem->GetPropertyName();
-                bColorItemFound = true;
-                bSwatchVisible = Row->IsColorSwatchVisibleForAutomation()
-                    && !Row->IsReadOnlyValueVisibleForAutomation()
-                    && !Row->IsValueTextBoxVisibleForAutomation();
-                break;
+                if (!bColorItemFound && (ValueType == EInspectorValueType::LinearColor || ValueType == EInspectorValueType::Color))
+                {
+                    FocusedComponentName = Component->GetName();
+                    ColorPropertyName = PropertyItem->GetPropertyName();
+                    bColorItemFound = true;
+                    bSwatchVisible = Row->IsColorSwatchVisibleForAutomation()
+                        && !Row->IsReadOnlyValueVisibleForAutomation()
+                        && !Row->IsValueTextBoxVisibleForAutomation();
+                    PropertyColorHeight = Row->GetColorButtonHeightForAutomation();
+                    PropertyFavoriteHeight = Row->GetFavoriteButtonHeightForAutomation();
+                }
+                else if (!bBoolItemFound && PropertyItem->IsEditable() && ValueType == EInspectorValueType::Bool)
+                {
+                    BoolPropertyName = PropertyItem->GetPropertyName();
+                    bBoolItemFound = true;
+                    PropertyBoolHeight = Row->GetValueControlHeightForAutomation();
+                }
+                else if (!bTextInputItemFound
+                    && PropertyItem->IsEditable()
+                    && ValueType != EInspectorValueType::Bool
+                    && ValueType != EInspectorValueType::Enum
+                    && ValueType != EInspectorValueType::LinearColor
+                    && ValueType != EInspectorValueType::Color)
+                {
+                    TextInputPropertyName = PropertyItem->GetPropertyName();
+                    bTextInputItemFound = Row->IsValueTextBoxVisibleForAutomation();
+                    PropertyTextInputHeight = Row->GetValueControlHeightForAutomation();
+                }
             }
 
-            if (bColorItemFound)
+            if (bColorItemFound && bTextInputItemFound && bBoolItemFound)
             {
                 break;
             }
@@ -14251,6 +14282,8 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
                     && !ScalarRow->IsColorSwatchVisibleForAutomation()
                     && ScalarRow->HasFavoriteButtonForAutomation();
                 bMaterialFavoriteVisible |= ScalarRow->HasFavoriteButtonForAutomation();
+                MaterialScalarHeight = ScalarRow->GetValueControlHeightForAutomation();
+                MaterialFavoriteHeight = ScalarRow->GetFavoriteButtonHeightForAutomation();
             }
 
             if (VectorRow && VectorItem)
@@ -14263,6 +14296,8 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
                     && VectorRow->IsColorSwatchVisibleForAutomation()
                     && VectorRow->HasFavoriteButtonForAutomation();
                 bMaterialFavoriteVisible |= VectorRow->HasFavoriteButtonForAutomation();
+                MaterialVectorHeight = VectorRow->GetColorButtonHeightForAutomation();
+                MaterialFavoriteHeight = FMath::Max(MaterialFavoriteHeight, VectorRow->GetFavoriteButtonHeightForAutomation());
             }
 
             if (bMaterialScalarRowOk || bMaterialVectorRowOk)
@@ -14407,6 +14442,28 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
     ViewMaterialSlot = INDEX_NONE;
     RefreshPanel(EInspectorRefreshReason::StructureChanged);
 
+    bValueHeightContractOk =
+        bTextInputItemFound
+        && bBoolItemFound
+        && bColorItemFound
+        && bMaterialScalarRowOk
+        && bMaterialVectorRowOk
+        && FMath::Abs(PropertyTextInputHeight - ExpectedValueControlHeight) <= HeightTolerance
+        && FMath::Abs(PropertyBoolHeight - ExpectedValueControlHeight) <= HeightTolerance
+        && FMath::Abs(PropertyColorHeight - ExpectedValueControlHeight) <= HeightTolerance
+        && FMath::Abs(MaterialScalarHeight - ExpectedValueControlHeight) <= HeightTolerance
+        && FMath::Abs(MaterialVectorHeight - ExpectedValueControlHeight) <= HeightTolerance;
+
+    bTouchHeightContractOk =
+        PropertyFavoriteHeight > 0.f
+        && MaterialFavoriteHeight > 0.f
+        && PropertyColorHeight > 0.f
+        && MaterialVectorHeight > 0.f
+        && FMath::Abs(PropertyFavoriteHeight - ExpectedValueControlHeight) <= HeightTolerance
+        && FMath::Abs(MaterialFavoriteHeight - ExpectedValueControlHeight) <= HeightTolerance
+        && FMath::Abs(PropertyColorHeight - ExpectedValueControlHeight) <= HeightTolerance
+        && FMath::Abs(MaterialVectorHeight - ExpectedValueControlHeight) <= HeightTolerance;
+
     const bool bPassed = GroupCount > 0
         && bSidebarHostOk
         && bWorkspaceHostOk
@@ -14431,6 +14488,8 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
         && bMaterialVectorRowOk
         && bMaterialFavoriteVisible
         && bSwatchVisible
+        && bValueHeightContractOk
+        && bTouchHeightContractOk
         && bMaterialSingleClickExpandOk
         && bMaterialTreeFound
         && bMaterialTreeExpandedOk
@@ -14438,7 +14497,7 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
         && bMaterialSlotSelectionOk;
 
     OutReport = FString::Printf(
-        TEXT("ActorPageStructureSelfTest=%s | Groups=%d | Sidebar=%d/%d Workspace=%d/%d Selection=%d/%d Footer=%d VisibleLegacy=%d | PropertyBox=%d Scroll=%d | FunctionBox=%d Scroll=%d Summary=%d | Columns=%d Left=%.2f Right=%.2f | Vertical=%d Property=%.2f Function=%.2f Dominant=%d | Starred=%d | FocusedComponent=%s | FocusOk=%d | ColorProperty=%s | ColorItem=%d | Swatch=%d | MaterialScalar=%d(%s) MaterialVector=%d(%s) MaterialStar=%d | MaterialTree=%d/%d/%d/%d/%d Component=%s Slot=%s Keys=%s | Summary=%s"),
+        TEXT("ActorPageStructureSelfTest=%s | Groups=%d | Sidebar=%d/%d Workspace=%d/%d Selection=%d/%d Footer=%d VisibleLegacy=%d | PropertyBox=%d Scroll=%d | FunctionBox=%d Scroll=%d Summary=%d | Columns=%d Left=%.2f Right=%.2f | Vertical=%d Property=%.2f Function=%.2f Dominant=%d | Starred=%d | FocusedComponent=%s | FocusOk=%d | ColorProperty=%s | ColorItem=%d | Swatch=%d | ValueHeights=%d Text=%s:%.1f Bool=%s:%.1f Color=%.1f MaterialScalar=%d(%s:%.1f) MaterialVector=%d(%s:%.1f) Touch=%d Favorite=%.1f/%.1f | MaterialStar=%d | MaterialTree=%d/%d/%d/%d/%d Component=%s Slot=%s Keys=%s | Summary=%s"),
         bPassed ? TEXT("PASS") : TEXT("FAIL"),
         GroupCount,
         bSidebarHostOk ? 1 : 0,
@@ -14467,10 +14526,21 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
         *ColorPropertyName,
         bColorItemFound ? 1 : 0,
         bSwatchVisible ? 1 : 0,
+        bValueHeightContractOk ? 1 : 0,
+        *TextInputPropertyName,
+        PropertyTextInputHeight,
+        *BoolPropertyName,
+        PropertyBoolHeight,
+        PropertyColorHeight,
         bMaterialScalarRowOk ? 1 : 0,
         *MaterialScalarName,
+        MaterialScalarHeight,
         bMaterialVectorRowOk ? 1 : 0,
         *MaterialVectorName,
+        MaterialVectorHeight,
+        bTouchHeightContractOk ? 1 : 0,
+        PropertyFavoriteHeight,
+        MaterialFavoriteHeight,
         bMaterialFavoriteVisible ? 1 : 0,
         bMaterialSingleClickExpandOk ? 1 : 0,
         bMaterialTreeFound ? 1 : 0,

@@ -72,6 +72,32 @@ void UInspectorMaterialParamRowWidget::RefreshDisplay()
     RefreshRow();
 }
 
+float UInspectorMaterialParamRowWidget::GetValueControlHeightForAutomation() const
+{
+    if (ColorSizeBox && ColorButton && ColorButton->GetVisibility() == ESlateVisibility::Visible)
+    {
+        return ColorSizeBox->GetHeightOverride();
+    }
+    if (ReadOnlyValueSizeBox && ReadOnlyValueText && ReadOnlyValueText->GetVisibility() == ESlateVisibility::Visible)
+    {
+        return ReadOnlyValueSizeBox->GetHeightOverride();
+    }
+
+    return 0.f;
+}
+
+float UInspectorMaterialParamRowWidget::GetFavoriteButtonHeightForAutomation() const
+{
+    return FavoriteSizeBox ? FavoriteSizeBox->GetHeightOverride() : 0.f;
+}
+
+float UInspectorMaterialParamRowWidget::GetColorButtonHeightForAutomation() const
+{
+    return (ColorSizeBox && ColorButton && ColorButton->GetVisibility() == ESlateVisibility::Visible)
+        ? ColorSizeBox->GetHeightOverride()
+        : 0.f;
+}
+
 bool UInspectorMaterialParamRowWidget::IsColorSwatchVisibleForAutomation() const
 {
     return ColorButton && ColorButton->GetVisibility() == ESlateVisibility::Visible;
@@ -162,9 +188,9 @@ void UInspectorMaterialParamRowWidget::BuildWidgetTree()
 
     FavoriteButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("RI_MaterialParamFavoriteButton"));
     RICompactUI::ConfigureButton(FavoriteButton, RICompactUI::ERIButtonVisualStyle::Secondary, false);
-    USizeBox* FavoriteSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_MaterialParamFavoriteSize"));
+    FavoriteSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_MaterialParamFavoriteSize"));
     FavoriteSizeBox->SetWidthOverride(24.f);
-    FavoriteSizeBox->SetHeightOverride(24.f);
+    FavoriteSizeBox->SetHeightOverride(RICompactUI::GetInputHeight());
     FavoriteText = RICompactUI::MakeText(WidgetTree, TEXT("☆"), RICompactUI::GetValueFontSize(), true, RI_MaterialMutedColor(), false);
     FavoriteText->SetJustification(ETextJustify::Center);
     FavoriteSizeBox->SetContent(FavoriteText);
@@ -180,17 +206,18 @@ void UInspectorMaterialParamRowWidget::BuildWidgetTree()
     if (UHorizontalBoxSlot* NameSlot = RootBox->AddChildToHorizontalBox(NameText))
     {
         FSlateChildSize SizeRule(ESlateSizeRule::Fill);
-        SizeRule.Value = 0.92f;
+        SizeRule.Value = 0.90f;
         NameSlot->SetSize(SizeRule);
         NameSlot->SetVerticalAlignment(VAlign_Center);
         NameSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
     }
 
     ReadOnlyValueText = RICompactUI::MakeText(WidgetTree, TEXT(""), RICompactUI::GetValueFontSize(), false, RI_MaterialMutedColor(), true);
-    if (UHorizontalBoxSlot* ValueSlot = RootBox->AddChildToHorizontalBox(ReadOnlyValueText))
+    ReadOnlyValueSizeBox = RICompactUI::WrapValueControl(WidgetTree, ReadOnlyValueText, 120.f);
+    if (UHorizontalBoxSlot* ValueSlot = RootBox->AddChildToHorizontalBox(ReadOnlyValueSizeBox))
     {
         FSlateChildSize SizeRule(ESlateSizeRule::Fill);
-        SizeRule.Value = 1.08f;
+        SizeRule.Value = 1.10f;
         ValueSlot->SetSize(SizeRule);
         ValueSlot->SetVerticalAlignment(VAlign_Center);
     }
@@ -198,11 +225,11 @@ void UInspectorMaterialParamRowWidget::BuildWidgetTree()
     ColorButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("RI_MaterialParamColorButton"));
     RICompactUI::ConfigureButton(ColorButton, RICompactUI::ERIButtonVisualStyle::Subtle, false);
     ColorButton->OnClicked.AddDynamic(this, &UInspectorMaterialParamRowWidget::HandleColorClicked);
-    USizeBox* ColorSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_MaterialParamColorSize"));
+    ColorSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_MaterialParamColorSize"));
     ColorSizeBox->SetWidthOverride(34.f);
-    ColorSizeBox->SetHeightOverride(20.f);
+    ColorSizeBox->SetHeightOverride(RICompactUI::GetInputHeight());
     ColorSwatch = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("RI_MaterialParamColorSwatch"));
-    ColorSwatch->SetPadding(FMargin(0.f));
+    ColorSwatch->SetPadding(FMargin(0.f, 3.f));
     ColorSwatch->SetBrushColor(FLinearColor::Black);
     ColorSizeBox->SetContent(ColorSwatch);
     ColorButton->AddChild(ColorSizeBox);

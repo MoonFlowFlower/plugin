@@ -870,6 +870,27 @@ namespace RICompactUI
         return SizeBox;
     }
 
+    inline USizeBox* WrapValueControl(
+        UWidgetTree* WidgetTree,
+        UWidget* Child,
+        float MinWidth = 0.f,
+        float WidthOverride = 0.f,
+        float HeightOverride = 0.f)
+    {
+        USizeBox* SizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+        if (WidthOverride > 0.f)
+        {
+            SizeBox->SetWidthOverride(WidthOverride);
+        }
+        else if (MinWidth > 0.f)
+        {
+            SizeBox->SetMinDesiredWidth(MinWidth);
+        }
+        SizeBox->SetHeightOverride(HeightOverride > 0.f ? HeightOverride : GetInputHeight());
+        SizeBox->SetContent(Child);
+        return SizeBox;
+    }
+
     inline USizeBox* WrapMinHeight(UWidgetTree* WidgetTree, UWidget* Child, float MinHeight)
     {
         USizeBox* SizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());

@@ -11,6 +11,7 @@ class UEditableTextBox;
 class UHorizontalBox;
 class UInspectorPropertyItem;
 class UInspectorWorldSubsystem;
+class USizeBox;
 class UTextBlock;
 class UButton;
 
@@ -30,6 +31,9 @@ public:
     bool IsReadOnlyValueVisibleForAutomation() const;
     bool IsValueTextBoxVisibleForAutomation() const;
     bool TryGetDisplayedColorSwatchForAutomation(FLinearColor& OutColor) const;
+    float GetValueControlHeightForAutomation() const;
+    float GetFavoriteButtonHeightForAutomation() const;
+    float GetColorButtonHeightForAutomation() const;
 
 protected:
     virtual TSharedRef<SWidget> RebuildWidget() override;
@@ -84,10 +88,28 @@ private:
     TObjectPtr<UTextBlock> FavoriteText = nullptr;
 
     UPROPERTY(Transient)
+    TObjectPtr<USizeBox> FavoriteSizeBox = nullptr;
+
+    UPROPERTY(Transient)
     TObjectPtr<UButton> ColorButton = nullptr;
 
     UPROPERTY(Transient)
+    TObjectPtr<USizeBox> ColorSizeBox = nullptr;
+
+    UPROPERTY(Transient)
     TObjectPtr<UBorder> ColorSwatch = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<USizeBox> ReadOnlyValueSizeBox = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<USizeBox> ValueTextBoxSizeBox = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<USizeBox> BoolCheckBoxSizeBox = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<USizeBox> EnumComboBoxSizeBox = nullptr;
 
     TWeakObjectPtr<UInspectorWorldSubsystem> Subsystem;
     TWeakObjectPtr<UInspectorPropertyItem> PropertyItem;

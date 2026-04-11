@@ -74,6 +74,44 @@ void UInspectorPropertyRowWidget::RefreshDisplay()
     RefreshRow();
 }
 
+float UInspectorPropertyRowWidget::GetValueControlHeightForAutomation() const
+{
+    if (ValueTextBoxSizeBox && ValueTextBox && ValueTextBox->GetVisibility() == ESlateVisibility::Visible)
+    {
+        return ValueTextBoxSizeBox->GetHeightOverride();
+    }
+    if (EnumComboBoxSizeBox && EnumComboBox && EnumComboBox->GetVisibility() == ESlateVisibility::Visible)
+    {
+        return EnumComboBoxSizeBox->GetHeightOverride();
+    }
+    if (BoolCheckBoxSizeBox && BoolCheckBox && BoolCheckBox->GetVisibility() == ESlateVisibility::Visible)
+    {
+        return BoolCheckBoxSizeBox->GetHeightOverride();
+    }
+    if (ColorSizeBox && ColorButton && ColorButton->GetVisibility() == ESlateVisibility::Visible)
+    {
+        return ColorSizeBox->GetHeightOverride();
+    }
+    if (ReadOnlyValueSizeBox && ReadOnlyValueText && ReadOnlyValueText->GetVisibility() == ESlateVisibility::Visible)
+    {
+        return ReadOnlyValueSizeBox->GetHeightOverride();
+    }
+
+    return 0.f;
+}
+
+float UInspectorPropertyRowWidget::GetFavoriteButtonHeightForAutomation() const
+{
+    return FavoriteSizeBox ? FavoriteSizeBox->GetHeightOverride() : 0.f;
+}
+
+float UInspectorPropertyRowWidget::GetColorButtonHeightForAutomation() const
+{
+    return (ColorSizeBox && ColorButton && ColorButton->GetVisibility() == ESlateVisibility::Visible)
+        ? ColorSizeBox->GetHeightOverride()
+        : 0.f;
+}
+
 bool UInspectorPropertyRowWidget::IsColorSwatchVisibleForAutomation() const
 {
     return ColorButton && ColorButton->GetVisibility() == ESlateVisibility::Visible;
@@ -133,9 +171,9 @@ void UInspectorPropertyRowWidget::BuildWidgetTree()
 
     FavoriteButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("RI_PropertyRowFavoriteButton"));
     RICompactUI::ConfigureButton(FavoriteButton, RICompactUI::ERIButtonVisualStyle::Secondary, false);
-    USizeBox* FavoriteSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_PropertyRowFavoriteSize"));
+    FavoriteSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_PropertyRowFavoriteSize"));
     FavoriteSizeBox->SetWidthOverride(24.f);
-    FavoriteSizeBox->SetHeightOverride(24.f);
+    FavoriteSizeBox->SetHeightOverride(RICompactUI::GetInputHeight());
     FavoriteText = RICompactUI::MakeText(WidgetTree, TEXT("☆"), RICompactUI::GetValueFontSize(), true, RI_PropertyMutedColor(), false);
     FavoriteText->SetJustification(ETextJustify::Center);
     FavoriteSizeBox->SetContent(FavoriteText);
@@ -151,17 +189,18 @@ void UInspectorPropertyRowWidget::BuildWidgetTree()
     if (UHorizontalBoxSlot* NameSlot = RootBox->AddChildToHorizontalBox(NameText))
     {
         FSlateChildSize SizeRule(ESlateSizeRule::Fill);
-        SizeRule.Value = 0.72f;
+        SizeRule.Value = 0.90f;
         NameSlot->SetSize(SizeRule);
         NameSlot->SetVerticalAlignment(VAlign_Center);
         NameSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
     }
 
     ReadOnlyValueText = RICompactUI::MakeText(WidgetTree, TEXT(""), RICompactUI::GetValueFontSize(), false, RI_PropertyMutedColor(), true);
-    if (UHorizontalBoxSlot* ValueSlot = RootBox->AddChildToHorizontalBox(ReadOnlyValueText))
+    ReadOnlyValueSizeBox = RICompactUI::WrapValueControl(WidgetTree, ReadOnlyValueText, 120.f);
+    if (UHorizontalBoxSlot* ValueSlot = RootBox->AddChildToHorizontalBox(ReadOnlyValueSizeBox))
     {
         FSlateChildSize SizeRule(ESlateSizeRule::Fill);
-        SizeRule.Value = 1.28f;
+        SizeRule.Value = 1.10f;
         ValueSlot->SetSize(SizeRule);
         ValueSlot->SetVerticalAlignment(VAlign_Center);
     }
@@ -169,17 +208,19 @@ void UInspectorPropertyRowWidget::BuildWidgetTree()
     ValueTextBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("RI_PropertyRowTextBox"));
     RICompactUI::ConfigureEditableTextBox(ValueTextBox, RI_PropertyTextColor());
     ValueTextBox->OnTextCommitted.AddDynamic(this, &UInspectorPropertyRowWidget::HandleValueCommitted);
-    if (UHorizontalBoxSlot* TextBoxSlot = RootBox->AddChildToHorizontalBox(ValueTextBox))
+    ValueTextBoxSizeBox = RICompactUI::WrapValueControl(WidgetTree, ValueTextBox, 120.f);
+    if (UHorizontalBoxSlot* TextBoxSlot = RootBox->AddChildToHorizontalBox(ValueTextBoxSizeBox))
     {
         FSlateChildSize SizeRule(ESlateSizeRule::Fill);
-        SizeRule.Value = 1.28f;
+        SizeRule.Value = 1.10f;
         TextBoxSlot->SetSize(SizeRule);
         TextBoxSlot->SetVerticalAlignment(VAlign_Center);
     }
 
     BoolCheckBox = WidgetTree->ConstructWidget<UCheckBox>(UCheckBox::StaticClass(), TEXT("RI_PropertyRowBool"));
     BoolCheckBox->OnCheckStateChanged.AddDynamic(this, &UInspectorPropertyRowWidget::HandleBoolChanged);
-    if (UHorizontalBoxSlot* BoolSlot = RootBox->AddChildToHorizontalBox(BoolCheckBox))
+    BoolCheckBoxSizeBox = RICompactUI::WrapValueControl(WidgetTree, BoolCheckBox, 0.f, RICompactUI::GetInputHeight(), RICompactUI::GetInputHeight());
+    if (UHorizontalBoxSlot* BoolSlot = RootBox->AddChildToHorizontalBox(BoolCheckBoxSizeBox))
     {
         BoolSlot->SetVerticalAlignment(VAlign_Center);
     }
@@ -187,10 +228,11 @@ void UInspectorPropertyRowWidget::BuildWidgetTree()
     EnumComboBox = WidgetTree->ConstructWidget<UComboBoxString>(UComboBoxString::StaticClass(), TEXT("RI_PropertyRowEnum"));
     RICompactUI::ConfigureComboBoxString(EnumComboBox, RI_PropertyTextColor());
     EnumComboBox->OnSelectionChanged.AddDynamic(this, &UInspectorPropertyRowWidget::HandleEnumChanged);
-    if (UHorizontalBoxSlot* EnumSlot = RootBox->AddChildToHorizontalBox(EnumComboBox))
+    EnumComboBoxSizeBox = RICompactUI::WrapValueControl(WidgetTree, EnumComboBox, 120.f);
+    if (UHorizontalBoxSlot* EnumSlot = RootBox->AddChildToHorizontalBox(EnumComboBoxSizeBox))
     {
         FSlateChildSize SizeRule(ESlateSizeRule::Fill);
-        SizeRule.Value = 1.28f;
+        SizeRule.Value = 1.10f;
         EnumSlot->SetSize(SizeRule);
         EnumSlot->SetVerticalAlignment(VAlign_Center);
     }
@@ -198,11 +240,11 @@ void UInspectorPropertyRowWidget::BuildWidgetTree()
     ColorButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("RI_PropertyRowColorButton"));
     RICompactUI::ConfigureButton(ColorButton, RICompactUI::ERIButtonVisualStyle::Subtle, false);
     ColorButton->OnClicked.AddDynamic(this, &UInspectorPropertyRowWidget::HandleColorClicked);
-    USizeBox* ColorSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_PropertyRowColorSize"));
+    ColorSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_PropertyRowColorSize"));
     ColorSizeBox->SetWidthOverride(34.f);
-    ColorSizeBox->SetHeightOverride(20.f);
+    ColorSizeBox->SetHeightOverride(RICompactUI::GetInputHeight());
     ColorSwatch = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("RI_PropertyRowColorSwatch"));
-    ColorSwatch->SetPadding(FMargin(0.f));
+    ColorSwatch->SetPadding(FMargin(0.f, 3.f));
     ColorSwatch->SetBrushColor(FLinearColor::Black);
     ColorSizeBox->SetContent(ColorSwatch);
     ColorButton->AddChild(ColorSizeBox);
