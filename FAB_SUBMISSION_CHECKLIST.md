@@ -6,6 +6,15 @@ For implementation rules and development workflow authority, use `Docs/AGENT_DEV
 
 Use this checklist when preparing the UE 5.5 Fab submission package.
 
+## Current RC Status
+
+- Release-candidate baseline must stay fixed while preparing package, screenshots, manual smoke evidence, and demo media.
+- Remaining pre-submit items are intentionally narrow:
+  - Re-run the packaged-install manual smoke path on the preserved blank host project.
+  - Record the short demo video or GIF.
+  - Fill `MarketplaceURL` after the Fab listing exists.
+- Package output, media output, and manual-smoke evidence must all come from the same RC branch/commit.
+
 ## Package
 
 - [x] `RuntimeInspector.uplugin` has release metadata for UE 5.5.

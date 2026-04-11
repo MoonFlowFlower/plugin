@@ -10,30 +10,29 @@ Runtime Inspector
 
 ## Short Description
 
-Inspect runtime actors, edit properties, capture patch bundles, audit runtime-to-source differences, and run promote workflows in Unreal Engine 5.5.
+Inspect live actors in PIE, review staged runtime changes, and move approved patch data back through controlled editor workflows in Unreal Engine 5.5.
 
 ## One-Line Positioning
 
-Runtime-state inspection and controlled patch-to-source workflows for Unreal Engine projects that need fast in-editor verification.
+Runtime-state inspection and controlled review workflows for Unreal Engine teams that need fast in-editor verification without losing source authority.
 
 ## Feature Highlights
 
-- Inspect live actors and supported runtime properties during PIE
-- Capture snapshots, staged patches, exported patch bundles, and presets
-- Audit runtime changes against source defaults before applying them
-- Preview and run supported promote-to-source workflows from the editor
-- Use built-in self-tests, verification profiles, and curated workflows
-- Pull runtime patch changes back from loopback packaged sessions into the editor authority flow
+- Inspect selected live actors and supported runtime properties during PIE
+- Stage runtime edits into reviewable patch data instead of relying on ad hoc debugging
+- Compare runtime state against source defaults before previewing or applying approved updates
+- Run built-in self-tests, verification profiles, and curated workflows inside the same tool
+- Pull patch data back from supported loopback packaged-runtime sessions into the editor review flow
 
 ## Long Description
 
-Runtime Inspector is a UE 5.5 plugin focused on one core job: make runtime changes observable, reviewable, and recoverable.
+Runtime Inspector is a UE 5.5 plugin for teams that need to inspect live gameplay state, make controlled runtime edits, and keep review authority in the editor.
 
-Inside PIE, the plugin lets you inspect supported actor properties, apply edits, capture staged patches, save presets, and build audit views that show how runtime state differs from the source baseline. When a change is approved, editor-side promote workflows can preview or apply supported source updates without leaving the review loop.
+Inside PIE, you can select a live actor, inspect supported properties, apply edits, stage those edits into patch data, and audit runtime state against the source baseline before moving forward. The workflow is designed for verification and review, not blind mutation.
 
-The plugin also includes built-in self-tests and workflow runners so teams can validate their inspection and patch pipeline instead of treating it as an ad hoc debugging tool.
+Runtime Inspector also includes built-in self-tests, verification profiles, and guided workflows so teams can validate the tool and the surrounding inspection pipeline instead of relying on one-off editor debugging habits.
 
-For advanced editor-authority setups, Runtime Inspector can discover loopback packaged runtime sessions, query targets, pull patch bundles back into the editor, and continue the same staged audit workflow there. Source authority remains in the editor.
+For advanced setups, the plugin can discover supported loopback packaged-runtime sessions, query patch targets, pull runtime patch data back into the editor, and continue the same staged audit process there. Source authority remains in the editor workflow.
 
 ## Supported Release Scope
 
@@ -48,6 +47,7 @@ For advanced editor-authority setups, Runtime Inspector can discover loopback pa
 - Multi-machine runtime discovery
 - LAN session discovery
 - Direct source promote from packaged runtime
+- General-purpose remote debugging
 
 ## Listing Media Shot List
 
