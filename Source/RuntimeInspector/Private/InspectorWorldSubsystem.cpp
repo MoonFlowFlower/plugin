@@ -14407,7 +14407,7 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
                 ScalarRow->SetInspectorSubsystem(this);
                 ScalarRow->SetMaterialItem(ScalarItem);
                 MaterialScalarName = ScalarItem->GetPropertyName();
-                bMaterialScalarRowOk = ScalarRow->IsScalarValueVisibleForAutomation()
+                bMaterialScalarRowOk = ScalarRow->IsScalarTextBoxVisibleForAutomation()
                     && !ScalarRow->IsColorSwatchVisibleForAutomation()
                     && ScalarRow->HasFavoriteButtonForAutomation();
                 bMaterialFavoriteVisible |= ScalarRow->HasFavoriteButtonForAutomation();
@@ -23571,6 +23571,261 @@ bool UInspectorWorldSubsystem::FocusSelectedActorComponentByName(const FString& 
     ViewMaterialSlot = INDEX_NONE;
     RefreshPanel(EInspectorRefreshReason::StructureChanged);
     return true;
+#endif
+}
+
+bool UInspectorWorldSubsystem::NavigateToPinnedItem(UObject* ItemObject, FString& OutError)
+{
+    OutError.Reset();
+
+#if !RUNTIME_INSPECTOR_ENABLED
+    OutError = TEXT("RuntimeInspector disabled");
+    return false;
+#else
+    if (!ItemObject)
+    {
+        OutError = TEXT("Pinned target no longer exists");
+        return false;
+    }
+
+    FString ShowPageError;
+    if (!SetVisiblePageByName(TEXT("Actor"), ShowPageError))
+    {
+        OutError = ShowPageError.IsEmpty() ? TEXT("Failed to show Actor page") : ShowPageError;
+        return false;
+    }
+
+    if (PanelWidget.IsValid() && PanelWidget->WidgetTree)
+    {
+        if (UEditableTextBox* SearchBox = Cast<UEditableTextBox>(PanelWidget->WidgetTree->FindWidget(TEXT("ETB_Search"))))
+        {
+            SearchBox->SetText(FText::GetEmpty());
+        }
+        if (UCheckBox* OnlyModifyToggle = Cast<UCheckBox>(PanelWidget->WidgetTree->FindWidget(TEXT("Toggle_OnModify"))))
+        {
+            OnlyModifyToggle->SetIsChecked(false);
+        }
+    }
+    CurrentActorSearchText.Reset();
+
+    auto ResolveActorFromTarget = [](UObject* TargetObject) -> AActor*
+    {
+        if (AActor* Actor = Cast<AActor>(TargetObject))
+        {
+            return Actor;
+        }
+        if (UActorComponent* Component = Cast<UActorComponent>(TargetObject))
+        {
+            return Component->GetOwner();
+        }
+        return nullptr;
+    };
+
+    auto ScrollToResolvedItem = [this](UObject* ResolvedItem) -> bool
+    {
+        if (!ResolvedItem)
+        {
+            return false;
+        }
+
+        if (UInspectorPropertiesSectionWidget* SectionWidget = ActorPropertiesSectionWidget.Get())
+        {
+            SectionWidget->RefreshFromSubsystem();
+            return SectionWidget->ScrollToItemForAutomation(ResolvedItem);
+        }
+
+        return false;
+    };
+
+    auto FindResolvedPropertyItem = [this](UObject* TargetObject, FName PropertyName) -> UInspectorPropertyItem*
+    {
+        TArray<UObject*> Items;
+        GetPropertyItemsForSelectedEx(TEXT(""), false, Items);
+        for (UObject* Candidate : Items)
+        {
+            if (UInspectorPropertyItem* PropertyItem = Cast<UInspectorPropertyItem>(Candidate))
+            {
+                if (PropertyItem->GetTargetObject() == TargetObject && PropertyItem->GetPropertyFName() == PropertyName)
+                {
+                    return PropertyItem;
+                }
+            }
+        }
+        return nullptr;
+    };
+
+    auto FindResolvedMaterialItem = [this](UMeshComponent* MeshComponent, int32 SlotIndex, FName ParamName, EInspectorMatParamType ParamType) -> UInspectorMaterialParamItem*
+    {
+        TArray<UObject*> Items;
+        GetPropertyItemsForSelectedEx(TEXT(""), false, Items);
+        for (UObject* Candidate : Items)
+        {
+            if (UInspectorMaterialParamItem* MaterialItem = Cast<UInspectorMaterialParamItem>(Candidate))
+            {
+                if (MaterialItem->GetMeshComponent() == MeshComponent
+                    && MaterialItem->GetSlotIndex() == SlotIndex
+                    && MaterialItem->GetParamName() == ParamName
+                    && MaterialItem->GetParamType() == ParamType)
+                {
+                    return MaterialItem;
+                }
+            }
+        }
+        return nullptr;
+    };
+
+    if (UInspectorPropertyItem* PropertyItem = Cast<UInspectorPropertyItem>(ItemObject))
+    {
+        UObject* TargetObject = PropertyItem->GetTargetObject();
+        AActor* TargetActor = ResolveActorFromTarget(TargetObject);
+        if (!TargetActor)
+        {
+            OutError = TEXT("Pinned property target actor is unavailable");
+            return false;
+        }
+
+        if (SelectedActor.Get() != TargetActor)
+        {
+            SetSelectedActor(TargetActor);
+        }
+
+        if (UActorComponent* Component = Cast<UActorComponent>(TargetObject))
+        {
+            if (!FocusSelectedActorComponentByName(Component->GetName(), OutError))
+            {
+                return false;
+            }
+        }
+        else
+        {
+            SelectedInspectObject = TargetActor;
+            SelectedGroupKey = TEXT("ROOT_ACTOR");
+            SelectedMaterialSlotIndex = INDEX_NONE;
+            PropertyViewMode = ERIPropertyViewMode::Full;
+            ViewMeshComp = nullptr;
+            ViewMaterialSlot = INDEX_NONE;
+            RefreshPanel(EInspectorRefreshReason::StructureChanged);
+        }
+
+        if (UInspectorPropertyItem* ResolvedPropertyItem = FindResolvedPropertyItem(TargetObject, PropertyItem->GetPropertyFName()))
+        {
+            if (ScrollToResolvedItem(ResolvedPropertyItem))
+            {
+                return true;
+            }
+        }
+
+        OutError = FString::Printf(TEXT("Property row not found: %s"), *PropertyItem->GetPropertyName());
+        return false;
+    }
+
+    if (UInspectorMaterialParamItem* MaterialItem = Cast<UInspectorMaterialParamItem>(ItemObject))
+    {
+        UMeshComponent* MeshComponent = MaterialItem->GetMeshComponent();
+        AActor* TargetActor = MeshComponent ? MeshComponent->GetOwner() : nullptr;
+        if (!MeshComponent || !TargetActor)
+        {
+            OutError = TEXT("Pinned material target is unavailable");
+            return false;
+        }
+
+        if (SelectedActor.Get() != TargetActor)
+        {
+            SetSelectedActor(TargetActor);
+        }
+
+        if (!FocusSelectedActorComponentByName(MeshComponent->GetName(), OutError))
+        {
+            return false;
+        }
+
+        SetGroupExpanded(TEXT("ROOT_COMPONENTS"), true);
+        const FString ComponentKey = MakeComponentKey(TargetActor, MeshComponent);
+        SetGroupExpanded(ComponentKey, true);
+        RefreshPanel(EInspectorRefreshReason::StructureChanged);
+
+        UInspectorGroupItem* ComponentGroup = GetOrCreateGroupItem(ComponentKey);
+        if (!ComponentGroup)
+        {
+            OutError = TEXT("Failed to resolve component group");
+            return false;
+        }
+
+        ComponentGroup->Kind = EInspectorGroupKind::Component;
+        ComponentGroup->TargetObject = MeshComponent;
+        ComponentGroup->DisplayName = FString::Printf(TEXT("%s (%s)"), *MeshComponent->GetName(), *MeshComponent->GetClass()->GetName());
+        ComponentGroup->StableKey = ComponentKey;
+        ComponentGroup->Depth = 1;
+        ComponentGroup->bExpanded = true;
+
+        TArray<UObject*> ComponentChildren;
+        GetGroupTreeChildrenForItem(ComponentGroup, TEXT(""), ComponentChildren);
+
+        UInspectorGroupItem* MaterialsRootItem = nullptr;
+        for (UObject* ChildObject : ComponentChildren)
+        {
+            if (UInspectorGroupItem* GroupItem = Cast<UInspectorGroupItem>(ChildObject))
+            {
+                if (GroupItem->IsMaterialsRoot())
+                {
+                    MaterialsRootItem = GroupItem;
+                    break;
+                }
+            }
+        }
+
+        if (!MaterialsRootItem)
+        {
+            OutError = TEXT("Materials node not found");
+            return false;
+        }
+
+        SetGroupExpanded(MaterialsRootItem->StableKey, true);
+        RefreshPanel(EInspectorRefreshReason::StructureChanged);
+
+        TArray<UObject*> MaterialSlotChildren;
+        GetGroupTreeChildrenForItem(MaterialsRootItem, TEXT(""), MaterialSlotChildren);
+
+        UInspectorGroupItem* MaterialSlotItem = nullptr;
+        for (UObject* ChildObject : MaterialSlotChildren)
+        {
+            if (UInspectorGroupItem* GroupItem = Cast<UInspectorGroupItem>(ChildObject))
+            {
+                if (GroupItem->MaterialSlotIndex == MaterialItem->GetSlotIndex())
+                {
+                    MaterialSlotItem = GroupItem;
+                    break;
+                }
+            }
+        }
+
+        if (!MaterialSlotItem)
+        {
+            OutError = TEXT("Material slot node not found");
+            return false;
+        }
+
+        SetSelectedGroupItem(MaterialSlotItem);
+        RequestActorPageRefresh();
+
+        if (UInspectorMaterialParamItem* ResolvedMaterialItem = FindResolvedMaterialItem(
+            MeshComponent,
+            MaterialItem->GetSlotIndex(),
+            MaterialItem->GetParamName(),
+            MaterialItem->GetParamType()))
+        {
+            if (ScrollToResolvedItem(ResolvedMaterialItem))
+            {
+                return true;
+            }
+        }
+
+        OutError = FString::Printf(TEXT("Material parameter row not found: %s"), *MaterialItem->GetPropertyName());
+        return false;
+    }
+
+    OutError = TEXT("Pinned item type is not navigable");
+    return false;
 #endif
 }
 

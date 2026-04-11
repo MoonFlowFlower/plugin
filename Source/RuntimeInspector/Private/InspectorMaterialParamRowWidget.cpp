@@ -7,6 +7,7 @@
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
 #include "Components/Button.h"
+#include "Components/EditableTextBox.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
 #include "Components/SizeBox.h"
@@ -78,6 +79,10 @@ float UInspectorMaterialParamRowWidget::GetValueControlHeightForAutomation() con
     {
         return ColorSizeBox->GetHeightOverride();
     }
+    if (ScalarValueTextBoxSizeBox && ScalarValueTextBox && ScalarValueTextBox->GetVisibility() == ESlateVisibility::Visible)
+    {
+        return ScalarValueTextBoxSizeBox->GetHeightOverride();
+    }
     if (ReadOnlyValueSizeBox && ReadOnlyValueText && ReadOnlyValueText->GetVisibility() == ESlateVisibility::Visible)
     {
         return ReadOnlyValueSizeBox->GetHeightOverride();
@@ -105,7 +110,13 @@ bool UInspectorMaterialParamRowWidget::IsColorSwatchVisibleForAutomation() const
 
 bool UInspectorMaterialParamRowWidget::IsScalarValueVisibleForAutomation() const
 {
-    return ReadOnlyValueText && ReadOnlyValueText->GetVisibility() == ESlateVisibility::Visible;
+    return (ScalarValueTextBox && ScalarValueTextBox->GetVisibility() == ESlateVisibility::Visible)
+        || (ReadOnlyValueText && ReadOnlyValueText->GetVisibility() == ESlateVisibility::Visible);
+}
+
+bool UInspectorMaterialParamRowWidget::IsScalarTextBoxVisibleForAutomation() const
+{
+    return ScalarValueTextBox && ScalarValueTextBox->GetVisibility() == ESlateVisibility::Visible;
 }
 
 bool UInspectorMaterialParamRowWidget::HasFavoriteButtonForAutomation() const
@@ -222,6 +233,18 @@ void UInspectorMaterialParamRowWidget::BuildWidgetTree()
         ValueSlot->SetVerticalAlignment(VAlign_Center);
     }
 
+    ScalarValueTextBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("RI_MaterialParamScalarTextBox"));
+    RICompactUI::ConfigureEditableTextBox(ScalarValueTextBox, RI_MaterialTextColor());
+    ScalarValueTextBox->OnTextCommitted.AddDynamic(this, &UInspectorMaterialParamRowWidget::HandleScalarCommitted);
+    ScalarValueTextBoxSizeBox = RICompactUI::WrapValueControl(WidgetTree, ScalarValueTextBox, 120.f);
+    if (UHorizontalBoxSlot* ValueSlot = RootBox->AddChildToHorizontalBox(ScalarValueTextBoxSizeBox))
+    {
+        FSlateChildSize SizeRule(ESlateSizeRule::Fill);
+        SizeRule.Value = 1.10f;
+        ValueSlot->SetSize(SizeRule);
+        ValueSlot->SetVerticalAlignment(VAlign_Center);
+    }
+
     ColorButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("RI_MaterialParamColorButton"));
     RICompactUI::ConfigureButton(ColorButton, RICompactUI::ERIButtonVisualStyle::Subtle, false);
     ColorButton->OnClicked.AddDynamic(this, &UInspectorMaterialParamRowWidget::HandleColorClicked);
@@ -264,6 +287,10 @@ void UInspectorMaterialParamRowWidget::RefreshRow()
         {
             FavoriteButton->SetVisibility(ESlateVisibility::Collapsed);
         }
+        if (ScalarValueTextBox)
+        {
+            ScalarValueTextBox->SetVisibility(ESlateVisibility::Collapsed);
+        }
         if (ColorButton)
         {
             ColorButton->SetVisibility(ESlateVisibility::Collapsed);
@@ -292,6 +319,10 @@ void UInspectorMaterialParamRowWidget::RefreshRow()
     {
         ReadOnlyValueText->SetVisibility(ESlateVisibility::Collapsed);
     }
+    if (ScalarValueTextBox)
+    {
+        ScalarValueTextBox->SetVisibility(ESlateVisibility::Collapsed);
+    }
     if (ColorButton)
     {
         ColorButton->SetVisibility(ESlateVisibility::Collapsed);
@@ -317,9 +348,35 @@ void UInspectorMaterialParamRowWidget::RefreshRow()
     {
         float ScalarValue = 0.f;
         const bool bHasScalar = Item->GetScalar(ScalarValue, Error);
-        ReadOnlyValueText->SetText(FText::FromString(bHasScalar ? FString::SanitizeFloat(ScalarValue) : Item->GetValueText()));
-        ReadOnlyValueText->SetVisibility(ESlateVisibility::Visible);
+        const FString DisplayValue = bHasScalar ? FString::SanitizeFloat(ScalarValue) : Item->GetValueText();
+        if (ScalarValueTextBox)
+        {
+            ScalarValueTextBox->SetVisibility(ESlateVisibility::Visible);
+            ScalarValueTextBox->SetText(FText::FromString(DisplayValue));
+        }
+        else
+        {
+            ReadOnlyValueText->SetText(FText::FromString(DisplayValue));
+            ReadOnlyValueText->SetVisibility(ESlateVisibility::Visible);
+        }
     }
+}
+
+bool UInspectorMaterialParamRowWidget::ApplyScalarValue(const FString& InValue)
+{
+    UInspectorMaterialParamItem* Item = MaterialItem.Get();
+    if (!Item || Item->GetParamType() != EInspectorMatParamType::Scalar)
+    {
+        return false;
+    }
+
+    FString Error;
+    const bool bApplied = Item->ApplyFromText(InValue, Error);
+    if (bApplied)
+    {
+        RefreshRow();
+    }
+    return bApplied;
 }
 
 void UInspectorMaterialParamRowWidget::HandleFavoriteClicked()
@@ -345,4 +402,14 @@ void UInspectorMaterialParamRowWidget::HandleColorClicked()
     }
 
     InspectorSubsystem->OpenColorEditorForAnyItem(Item);
+}
+
+void UInspectorMaterialParamRowWidget::HandleScalarCommitted(const FText& InText, ETextCommit::Type CommitMethod)
+{
+    if (CommitMethod == ETextCommit::Default)
+    {
+        return;
+    }
+
+    ApplyScalarValue(InText.ToString());
 }

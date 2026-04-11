@@ -227,6 +227,7 @@ void UInspectorPropertyRowWidget::BuildWidgetTree()
 
     EnumComboBox = WidgetTree->ConstructWidget<UComboBoxString>(UComboBoxString::StaticClass(), TEXT("RI_PropertyRowEnum"));
     RICompactUI::ConfigureComboBoxString(EnumComboBox, RI_PropertyTextColor());
+    EnumComboBox->OnGenerateWidgetEvent.BindDynamic(this, &UInspectorPropertyRowWidget::HandleGenerateEnumOptionWidget);
     EnumComboBox->OnSelectionChanged.AddDynamic(this, &UInspectorPropertyRowWidget::HandleEnumChanged);
     EnumComboBoxSizeBox = RICompactUI::WrapValueControl(WidgetTree, EnumComboBox, 120.f);
     if (UHorizontalBoxSlot* EnumSlot = RootBox->AddChildToHorizontalBox(EnumComboBoxSizeBox))
@@ -395,6 +396,16 @@ bool UInspectorPropertyRowWidget::ApplyTextValue(const FString& InValue)
     return bApplied;
 }
 
+UWidget* UInspectorPropertyRowWidget::CreateEnumOptionWidget(const FString& InItemText) const
+{
+    if (!WidgetTree)
+    {
+        return nullptr;
+    }
+
+    return RICompactUI::MakeComboBoxItemText(WidgetTree, InItemText, RI_PropertyTextColor());
+}
+
 void UInspectorPropertyRowWidget::HandleValueCommitted(const FText& InText, ETextCommit::Type CommitMethod)
 {
     if (CommitMethod == ETextCommit::Default)
@@ -418,6 +429,11 @@ void UInspectorPropertyRowWidget::HandleEnumChanged(FString SelectedItem, ESelec
     }
 
     ApplyTextValue(SelectedItem);
+}
+
+UWidget* UInspectorPropertyRowWidget::HandleGenerateEnumOptionWidget(FString InItemText)
+{
+    return CreateEnumOptionWidget(InItemText);
 }
 
 void UInspectorPropertyRowWidget::HandleFavoriteClicked()

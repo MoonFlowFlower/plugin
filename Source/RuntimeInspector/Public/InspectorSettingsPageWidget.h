@@ -120,6 +120,9 @@ private:
     void HandleThemePresetSelectionChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
 
     UFUNCTION()
+    UWidget* HandleGenerateThemePresetOptionWidget(FString InItemText);
+
+    UFUNCTION()
     void HandleSaveClicked();
 
     UFUNCTION()

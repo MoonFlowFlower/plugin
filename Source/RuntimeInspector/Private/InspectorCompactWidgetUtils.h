@@ -988,4 +988,19 @@ namespace RICompactUI
         ComboBox->WidgetStyle = ComboBoxStyle;
         PRAGMA_ENABLE_DEPRECATION_WARNINGS
     }
+
+    inline UTextBlock* MakeComboBoxItemText(
+        UWidgetTree* WidgetTree,
+        const FString& ItemText,
+        const FLinearColor& TextColor,
+        int32 FontSize = 0)
+    {
+        return MakeText(
+            WidgetTree,
+            ItemText,
+            FontSize > 0 ? FontSize : GetValueFontSize(),
+            false,
+            TextColor,
+            false);
+    }
 }

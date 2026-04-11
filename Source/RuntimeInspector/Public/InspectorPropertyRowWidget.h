@@ -43,6 +43,7 @@ private:
     void BuildWidgetTree();
     void RefreshRow();
     bool ApplyTextValue(const FString& InValue);
+    UWidget* CreateEnumOptionWidget(const FString& InItemText) const;
 
     UFUNCTION()
     void HandleValueCommitted(const FText& InText, ETextCommit::Type CommitMethod);
@@ -52,6 +53,9 @@ private:
 
     UFUNCTION()
     void HandleEnumChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
+
+    UFUNCTION()
+    UWidget* HandleGenerateEnumOptionWidget(FString InItemText);
 
     UFUNCTION()
     void HandleFavoriteClicked();

@@ -30,7 +30,9 @@ public:
     int32 GetEntryWidgetCountForAutomation() const;
     bool HasSummaryHeader() const { return HeaderBorder != nullptr; }
     bool HasPropertyScrollRoot() const { return ScrollBox != nullptr; }
+    UInspectorPropertyRowWidget* FindPropertyRowForAutomation(const UInspectorPropertyItem* Item) const;
     UInspectorMaterialParamRowWidget* FindMaterialRowForAutomation(const UInspectorMaterialParamItem* Item) const;
+    bool ScrollToItemForAutomation(UObject* ItemObject);
 
 protected:
     virtual TSharedRef<SWidget> RebuildWidget() override;

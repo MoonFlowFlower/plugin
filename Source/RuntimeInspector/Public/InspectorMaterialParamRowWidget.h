@@ -6,6 +6,7 @@
 
 class UBorder;
 class UButton;
+class UEditableTextBox;
 class UHorizontalBox;
 class UInspectorMaterialParamItem;
 class UInspectorWorldSubsystem;
@@ -27,6 +28,7 @@ public:
 
     bool IsColorSwatchVisibleForAutomation() const;
     bool IsScalarValueVisibleForAutomation() const;
+    bool IsScalarTextBoxVisibleForAutomation() const;
     bool HasFavoriteButtonForAutomation() const;
     bool TryGetDisplayedColorSwatchForAutomation(FLinearColor& OutColor) const;
     float GetValueControlHeightForAutomation() const;
@@ -42,11 +44,16 @@ private:
     void BuildWidgetTree();
     void RefreshRow();
 
+    bool ApplyScalarValue(const FString& InValue);
+
     UFUNCTION()
     void HandleFavoriteClicked();
 
     UFUNCTION()
     void HandleColorClicked();
+
+    UFUNCTION()
+    void HandleScalarCommitted(const FText& InText, ETextCommit::Type CommitMethod);
 
 private:
     UPROPERTY(Transient)
@@ -72,6 +79,12 @@ private:
 
     UPROPERTY(Transient)
     TObjectPtr<USizeBox> ReadOnlyValueSizeBox = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UEditableTextBox> ScalarValueTextBox = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<USizeBox> ScalarValueTextBoxSizeBox = nullptr;
 
     UPROPERTY(Transient)
     TObjectPtr<UButton> ColorButton = nullptr;

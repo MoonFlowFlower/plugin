@@ -13,6 +13,7 @@ class UEditableTextBox;
 class UInspectorFunctionItem;
 class UInspectorWorldSubsystem;
 class UHorizontalBox;
+class USizeBox;
 class UTextBlock;
 class UVerticalBox;
 
@@ -44,9 +45,13 @@ private:
     void RefreshRow();
     void ClearParameterWidgets();
     TArray<FString> CollectArgumentTexts() const;
+    UWidget* CreateParameterComboItemWidget(const FString& InItemText) const;
 
     UFUNCTION()
     void HandleInvokeClicked();
+
+    UFUNCTION()
+    UWidget* HandleGenerateParameterComboItem(FString InItemText);
 
 private:
     TWeakObjectPtr<UInspectorWorldSubsystem> Subsystem;

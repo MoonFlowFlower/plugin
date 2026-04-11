@@ -945,6 +945,9 @@ public:
     UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Selection")
     bool FocusSelectedActorComponentByName(const FString& ComponentName, FString& OutError);
 
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Selection")
+    bool NavigateToPinnedItem(UObject* ItemObject, FString& OutError);
+
     UFUNCTION(BlueprintPure, Category = "RuntimeInspector")
     FString GetCurrentActorSearchText() const { return CurrentActorSearchText; }
 

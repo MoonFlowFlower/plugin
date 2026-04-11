@@ -639,16 +639,11 @@ void UInspectorFilePageWidget::BuildWidgetTree()
 
     if (UVerticalBoxSlot* VBoxSlot = MainBox->AddChildToVerticalBox(RI_MakeText(
         WidgetTree,
-        TEXT("Review runtime edits, stage them intentionally, preview source impact, then apply only when the result is clear."),
+        TEXT("See runtime edits, review the diff, then apply or export only when the result is clear."),
         RICompactUI::GetMutedFontSize(),
         false,
         RI_FileMutedColor(),
         true)))
-    {
-        VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, RICompactUI::GetSectionGap()));
-    }
-
-    if (UVerticalBoxSlot* VBoxSlot = MainBox->AddChildToVerticalBox(CreateSelectionContextSection()))
     {
         VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, RICompactUI::GetSectionGap()));
     }
@@ -659,6 +654,11 @@ void UInspectorFilePageWidget::BuildWidgetTree()
     }
 
     if (UVerticalBoxSlot* VBoxSlot = MainBox->AddChildToVerticalBox(CreateStatusSection()))
+    {
+        VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, RICompactUI::GetSectionGap()));
+    }
+
+    if (UVerticalBoxSlot* VBoxSlot = MainBox->AddChildToVerticalBox(CreateSelectionContextSection()))
     {
         VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, RICompactUI::GetSectionGap()));
     }
@@ -859,8 +859,8 @@ UWidget* UInspectorFilePageWidget::CreateMainActionsSection()
     IntroBorder->SetBrushColor(RI_FileRowColor());
     IntroBorder->SetContent(RI_MakeText(
         WidgetTree,
-        TEXT("Work from left to right: stage the live edit, review the source preview, then apply only when the change review is clear."),
-        6,
+        TEXT("Stage the runtime edit, review the diff, then apply or export."),
+        RICompactUI::GetMutedFontSize(),
         false,
         RI_FileMutedColor(),
         true));
@@ -905,12 +905,12 @@ UWidget* UInspectorFilePageWidget::CreateMainActionsSection()
         CardBorder->SetContent(CardBox);
 
         const FString StepTitle = FString::Printf(TEXT("%s  %s"), *Step, *Title);
-        if (UVerticalBoxSlot* VBoxSlot = CardBox->AddChildToVerticalBox(RI_MakeText(WidgetTree, StepTitle, 7, true, TitleColor, true)))
+        if (UVerticalBoxSlot* VBoxSlot = CardBox->AddChildToVerticalBox(RI_MakeText(WidgetTree, StepTitle, RICompactUI::GetLabelFontSize(), true, TitleColor, true)))
         {
             VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 2.f));
         }
 
-        if (UVerticalBoxSlot* VBoxSlot = CardBox->AddChildToVerticalBox(RI_MakeText(WidgetTree, Description, 6, false, RI_FileMutedColor(), true)))
+        if (UVerticalBoxSlot* VBoxSlot = CardBox->AddChildToVerticalBox(RI_MakeText(WidgetTree, Description, RICompactUI::GetMutedFontSize(), false, RI_FileMutedColor(), true)))
         {
             VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
         }
@@ -933,8 +933,8 @@ UWidget* UInspectorFilePageWidget::CreateMainActionsSection()
     AddCard(
         RowA,
         TEXT("Step 1"),
-        TEXT("Stage Runtime Changes"),
-        TEXT("Capture the current runtime edits into a staged patch bundle for review."),
+        TEXT("Stage Runtime Edit"),
+        TEXT("Capture the current runtime edits into a staged patch."),
         TEXT("BTN_FileStagePatch"),
         TEXT("RI_FileActionCard_Stage"),
         StagePatchButton,
@@ -949,8 +949,8 @@ UWidget* UInspectorFilePageWidget::CreateMainActionsSection()
     AddCard(
         RowA,
         TEXT("Step 2"),
-        TEXT("Preview Source Changes"),
-        TEXT("See the source-side preview before writing anything back."),
+        TEXT("Review Source Diff"),
+        TEXT("Preview source-side impact before writing anything back."),
         TEXT("BTN_FilePreviewPromote"),
         TEXT("RI_FileActionCard_Preview"),
         PreviewPromoteButton,
@@ -967,7 +967,7 @@ UWidget* UInspectorFilePageWidget::CreateMainActionsSection()
         RowB,
         TEXT("Step 3"),
         TEXT("Apply To Source"),
-        TEXT("Write the staged patch back to source settings or assets."),
+        TEXT("Write the staged patch back to source when review is clear."),
         TEXT("BTN_FilePromoteApply"),
         TEXT("RI_FileActionCard_Apply"),
         PromoteApplyButton,
@@ -984,7 +984,7 @@ UWidget* UInspectorFilePageWidget::CreateMainActionsSection()
         RowC,
         TEXT("Optional"),
         TEXT("Discard Staged Patch"),
-        TEXT("Clear the staged patch without changing source content."),
+        TEXT("Clear the staged patch without touching source content."),
         TEXT("BTN_FileClearStaged"),
         TEXT("RI_FileActionCard_Clear"),
         ClearStagedButton,
@@ -1043,7 +1043,7 @@ UWidget* UInspectorFilePageWidget::CreateInfoRow(const FString& Label, TObjectPt
 UWidget* UInspectorFilePageWidget::CreateStatusSection()
 {
     UVerticalBox* Outer = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
-    if (UVerticalBoxSlot* VBoxSlot = Outer->AddChildToVerticalBox(CreateSectionTitle(TEXT("Current Change State"), true)))
+    if (UVerticalBoxSlot* VBoxSlot = Outer->AddChildToVerticalBox(CreateSectionTitle(TEXT("Staged Status"), true)))
     {
         VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
     }
@@ -1098,7 +1098,7 @@ UWidget* UInspectorFilePageWidget::CreateStatusSection()
 UWidget* UInspectorFilePageWidget::CreateAuditsSection()
 {
     UVerticalBox* Outer = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
-    UWidget* Header = CreateCollapsibleSectionHeader(TEXT("Audits & Comparisons"), AuditsSectionToggleText, TEXT("BTN_FileToggleAudits"));
+    UWidget* Header = CreateCollapsibleSectionHeader(TEXT("Review Details"), AuditsSectionToggleText, TEXT("BTN_FileToggleAudits"));
     if (UButton* HeaderButton = Cast<UButton>(Header))
     {
         HeaderButton->OnClicked.AddDynamic(this, &UInspectorFilePageWidget::HandleToggleAuditsSectionClicked);
@@ -1238,7 +1238,7 @@ UWidget* UInspectorFilePageWidget::CreateAuditsSection()
 UWidget* UInspectorFilePageWidget::CreatePresetsSection()
 {
     UVerticalBox* Outer = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
-    UWidget* Header = CreateCollapsibleSectionHeader(TEXT("Presets & Export"), PresetsSectionToggleText, TEXT("BTN_FileTogglePresets"));
+    UWidget* Header = CreateCollapsibleSectionHeader(TEXT("Advanced"), PresetsSectionToggleText, TEXT("BTN_FileTogglePresets"));
     if (UButton* HeaderButton = Cast<UButton>(Header))
     {
         HeaderButton->OnClicked.AddDynamic(this, &UInspectorFilePageWidget::HandleTogglePresetsSectionClicked);

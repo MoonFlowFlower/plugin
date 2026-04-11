@@ -12,6 +12,7 @@
 #include "Components/EditableTextBox.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
+#include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
@@ -75,7 +76,7 @@ void UInspectorFunctionRowWidget::BuildWidgetTree()
     }
 
     RootBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("RI_FunctionRowBorder"));
-    RootBorder->SetPadding(FMargin(6.f, 5.f));
+    RootBorder->SetPadding(RICompactUI::GetSurfaceCardPadding(true));
     RootBorder->SetBrushColor(RI_FunctionRowColor());
 
     RootBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_FunctionRowBox"));
@@ -84,7 +85,7 @@ void UInspectorFunctionRowWidget::BuildWidgetTree()
     UHorizontalBox* HeaderRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_FunctionRowHeader"));
     if (UVerticalBoxSlot* HeaderSlot = RootBox->AddChildToVerticalBox(HeaderRow))
     {
-        HeaderSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+        HeaderSlot->SetPadding(FMargin(0.f, 0.f, 0.f, RICompactUI::GetInlineGap()));
     }
 
     TitleText = RICompactUI::MakeText(WidgetTree, TEXT("Function"), RICompactUI::GetLabelFontSize(), true, RI_FunctionRowTextColor(), true);
@@ -102,7 +103,7 @@ void UInspectorFunctionRowWidget::BuildWidgetTree()
         OwnerSlot->SetVerticalAlignment(VAlign_Center);
     }
 
-    InvokeButton = RICompactUI::MakeLabeledButton(WidgetTree, TEXT("BTN_InvokeFunction"), TEXT("Run"), RICompactUI::ERIButtonVisualStyle::Primary, 44.f);
+    InvokeButton = RICompactUI::MakeLabeledButton(WidgetTree, TEXT("BTN_InvokeFunction"), TEXT("Run"), RICompactUI::ERIButtonVisualStyle::Primary, 40.f);
     InvokeButton->OnClicked.AddDynamic(this, &UInspectorFunctionRowWidget::HandleInvokeClicked);
     if (UHorizontalBoxSlot* ButtonSlot = HeaderRow->AddChildToHorizontalBox(InvokeButton))
     {
@@ -171,14 +172,14 @@ void UInspectorFunctionRowWidget::RefreshRow()
     for (const FRIFunctionParameterSpec& Param : Params)
     {
         UBorder* ParamBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
-        ParamBorder->SetPadding(FMargin(4.f, 3.f));
+        ParamBorder->SetPadding(FMargin(4.f, 2.f));
         ParamBorder->SetBrushColor(RICompactUI::GetCellSurfaceBackgroundColor());
 
         UHorizontalBox* ParamRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
         ParamBorder->SetContent(ParamRow);
 
         const FString LabelText = FString::Printf(TEXT("%s (%s)"), *Param.DisplayName, *Param.TypeLabel);
-        UTextBlock* Label = RICompactUI::MakeText(WidgetTree, LabelText, RICompactUI::GetMutedFontSize(), true, RI_FunctionRowMutedColor(), true);
+        UTextBlock* Label = RICompactUI::MakeText(WidgetTree, LabelText, RICompactUI::GetValueFontSize(), true, RI_FunctionRowMutedColor(), true);
         if (UHorizontalBoxSlot* LabelSlot = ParamRow->AddChildToHorizontalBox(Label))
         {
             LabelSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
@@ -186,9 +187,12 @@ void UInspectorFunctionRowWidget::RefreshRow()
         }
 
         UWidget* Control = nullptr;
+        UWidget* WrappedControl = nullptr;
         if (Param.bIsEnum && Param.EnumOptions.Num() > 0)
         {
             UComboBoxString* Combo = WidgetTree->ConstructWidget<UComboBoxString>(UComboBoxString::StaticClass());
+            RICompactUI::ConfigureComboBoxString(Combo, RI_FunctionRowTextColor(), 180.0f, RICompactUI::ERIInputVisualStyle::Strong);
+            Combo->OnGenerateWidgetEvent.BindDynamic(this, &UInspectorFunctionRowWidget::HandleGenerateParameterComboItem);
             for (const FString& Opt : Param.EnumOptions)
             {
                 Combo->AddOption(Opt);
@@ -202,6 +206,7 @@ void UInspectorFunctionRowWidget::RefreshRow()
                 Combo->SetSelectedOption(Param.EnumOptions[0]);
             }
             Control = Combo;
+            WrappedControl = RICompactUI::WrapValueControl(WidgetTree, Combo, 112.f);
         }
         else if (Param.TypeLabel.Equals(TEXT("bool"), ESearchCase::IgnoreCase))
         {
@@ -209,28 +214,32 @@ void UInspectorFunctionRowWidget::RefreshRow()
             const bool bChecked = Param.DefaultText.Equals(TEXT("True"), ESearchCase::IgnoreCase) || Param.DefaultText == TEXT("1");
             CheckBox->SetIsChecked(bChecked);
             Control = CheckBox;
+            WrappedControl = RICompactUI::WrapValueControl(WidgetTree, CheckBox, 0.f, RICompactUI::GetInputHeight(), RICompactUI::GetInputHeight());
         }
         else
         {
             UEditableTextBox* TextBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass());
+            RICompactUI::ConfigureEditableTextBox(TextBox, RI_FunctionRowTextColor(), RICompactUI::GetValueFontSize(), RICompactUI::ERIInputVisualStyle::Strong);
             TextBox->SetText(FText::FromString(Param.DefaultText));
             Control = TextBox;
+            WrappedControl = RICompactUI::WrapValueControl(WidgetTree, TextBox, 112.f);
         }
 
         if (Control)
         {
-            if (UHorizontalBoxSlot* ControlSlot = ParamRow->AddChildToHorizontalBox(Control))
+            if (UHorizontalBoxSlot* ControlSlot = ParamRow->AddChildToHorizontalBox(WrappedControl ? WrappedControl : Control))
             {
                 ControlSlot->SetPadding(FMargin(8.f, 0.f, 0.f, 0.f));
                 ControlSlot->SetHorizontalAlignment(HAlign_Fill);
                 ControlSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+                ControlSlot->SetVerticalAlignment(VAlign_Center);
             }
             ParameterWidgets.Add(Control);
         }
 
         if (UVerticalBoxSlot* VBoxSlot = ParametersBox->AddChildToVerticalBox(ParamBorder))
         {
-            VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+            VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, RICompactUI::GetInlineGap()));
         }
     }
 
@@ -280,6 +289,16 @@ TArray<FString> UInspectorFunctionRowWidget::CollectArgumentTexts() const
     return Args;
 }
 
+UWidget* UInspectorFunctionRowWidget::CreateParameterComboItemWidget(const FString& InItemText) const
+{
+    if (!WidgetTree)
+    {
+        return nullptr;
+    }
+
+    return RICompactUI::MakeComboBoxItemText(WidgetTree, InItemText, RI_FunctionRowTextColor());
+}
+
 bool UInspectorFunctionRowWidget::InvokeForAutomation(FString& OutError)
 {
     OutError.Reset();
@@ -317,6 +336,11 @@ FString UInspectorFunctionRowWidget::GetFunctionTitleForAutomation() const
     }
 
     return FString();
+}
+
+UWidget* UInspectorFunctionRowWidget::HandleGenerateParameterComboItem(FString InItemText)
+{
+    return CreateParameterComboItemWidget(InItemText);
 }
 
 void UInspectorFunctionRowWidget::HandleInvokeClicked()

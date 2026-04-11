@@ -569,6 +569,7 @@ UWidget* UInspectorTestPageWidget::CreateRemoteSessionSection()
 
     RemoteSessionComboBox = WidgetTree->ConstructWidget<UComboBoxString>(UComboBoxString::StaticClass(), TEXT("RI_RemoteSessionCombo"));
     RICompactUI::ConfigureComboBoxString(RemoteSessionComboBox, RI_TestTextColor(), 220.0f, RICompactUI::ERIInputVisualStyle::Strong);
+    RemoteSessionComboBox->OnGenerateWidgetEvent.BindDynamic(this, &UInspectorTestPageWidget::HandleGenerateRemoteSessionOptionWidget);
     if (UHorizontalBoxSlot* HBoxSlot = PickerRow->AddChildToHorizontalBox(RICompactUI::WrapFixedHeight(WidgetTree, RemoteSessionComboBox, RICompactUI::GetInputHeight())))
     {
         HBoxSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
@@ -679,6 +680,13 @@ UWidget* UInspectorTestPageWidget::CreateRemoteSessionSection()
     }
 
     return Outer;
+}
+
+UWidget* UInspectorTestPageWidget::HandleGenerateRemoteSessionOptionWidget(FString InItemText)
+{
+    return WidgetTree
+        ? RICompactUI::MakeComboBoxItemText(WidgetTree, InItemText, RI_TestTextColor())
+        : nullptr;
 }
 
 UWidget* UInspectorTestPageWidget::CreateDiagnosticsSection()

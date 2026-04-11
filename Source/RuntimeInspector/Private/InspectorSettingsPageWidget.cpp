@@ -590,6 +590,7 @@ UWidget* UInspectorSettingsPageWidget::CreateThemePresetRow(const FString& InLab
     OutComboBox->AddOption(RI_GetThemePresetLabel(ERuntimeInspectorThemePreset::StudioSlate));
     OutComboBox->AddOption(RI_GetThemePresetLabel(ERuntimeInspectorThemePreset::SoftContrast));
     RICompactUI::ConfigureComboBoxString(OutComboBox, RI_SettingsTextColor(), 180.0f, RICompactUI::ERIInputVisualStyle::Strong);
+    OutComboBox->OnGenerateWidgetEvent.BindDynamic(this, &UInspectorSettingsPageWidget::HandleGenerateThemePresetOptionWidget);
     if (UHorizontalBoxSlot* ValueSlot = Row->AddChildToHorizontalBox(RICompactUI::WrapFixedHeight(WidgetTree, OutComboBox, RICompactUI::GetInputHeight())))
     {
         ValueSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
@@ -657,6 +658,13 @@ void UInspectorSettingsPageWidget::RefreshFromSubsystem()
 
     CancelHotkeyCapture(false);
     UpdateUIFromState();
+}
+
+UWidget* UInspectorSettingsPageWidget::HandleGenerateThemePresetOptionWidget(FString InItemText)
+{
+    return WidgetTree
+        ? RICompactUI::MakeComboBoxItemText(WidgetTree, InItemText, RI_SettingsTextColor())
+        : nullptr;
 }
 
 void UInspectorSettingsPageWidget::UpdateUIFromState()

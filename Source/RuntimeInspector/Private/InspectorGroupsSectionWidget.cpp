@@ -100,35 +100,20 @@ void UInspectorPinnedItemButtonProxy::HandleClicked()
         return;
     }
 
-    UObject* FocusTarget = nullptr;
-    if (UInspectorPropertyItem* PropertyItem = Cast<UInspectorPropertyItem>(Item.Get()))
-    {
-        FocusTarget = PropertyItem->GetTargetObject();
-    }
-    else if (UInspectorMaterialParamItem* MaterialItem = Cast<UInspectorMaterialParamItem>(Item.Get()))
-    {
-        FocusTarget = MaterialItem->GetMeshComponent();
-    }
-
-    if (!FocusTarget)
+    UObject* TargetItem = Item.Get();
+    if (!TargetItem)
     {
         return;
     }
 
-    if (UActorComponent* Component = Cast<UActorComponent>(FocusTarget))
+    FString Error;
+    if (!InspectorSubsystem->NavigateToPinnedItem(TargetItem, Error))
     {
-        FString Error;
-        InspectorSubsystem->FocusSelectedActorComponentByName(Component->GetName(), Error);
-        return;
+        InspectorSubsystem->PushToast(
+            ERIToastType::Warning,
+            Error.IsEmpty() ? TEXT("Pinned target is no longer available.") : Error,
+            2.0f);
     }
-
-    if (AActor* Actor = Cast<AActor>(FocusTarget))
-    {
-        InspectorSubsystem->SetSelectedActor(Actor);
-        return;
-    }
-
-    InspectorSubsystem->RequestActorPageRefresh();
 }
 
 UInspectorGroupsSectionWidget::UInspectorGroupsSectionWidget(const FObjectInitializer& ObjectInitializer)

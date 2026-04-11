@@ -73,6 +73,9 @@ public:
     UFUNCTION()
     void HandleRemoteSessionSelectionChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
 
+    UFUNCTION()
+    UWidget* HandleGenerateRemoteSessionOptionWidget(FString InItemText);
+
 protected:
     virtual TSharedRef<SWidget> RebuildWidget() override;
     virtual void NativeConstruct() override;

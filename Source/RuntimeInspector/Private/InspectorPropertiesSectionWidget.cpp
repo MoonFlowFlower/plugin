@@ -347,6 +347,54 @@ UInspectorMaterialParamRowWidget* UInspectorPropertiesSectionWidget::FindMateria
     return nullptr;
 }
 
+UInspectorPropertyRowWidget* UInspectorPropertiesSectionWidget::FindPropertyRowForAutomation(const UInspectorPropertyItem* Item) const
+{
+    if (!EntriesBox || !Item)
+    {
+        return nullptr;
+    }
+
+    for (int32 ChildIndex = 0; ChildIndex < EntriesBox->GetChildrenCount(); ++ChildIndex)
+    {
+        if (UInspectorPropertyRowWidget* Row = Cast<UInspectorPropertyRowWidget>(EntriesBox->GetChildAt(ChildIndex)))
+        {
+            if (Row->IsDisplayingItem(Item))
+            {
+                return Row;
+            }
+        }
+    }
+
+    return nullptr;
+}
+
+bool UInspectorPropertiesSectionWidget::ScrollToItemForAutomation(UObject* ItemObject)
+{
+    if (!ScrollBox || !ItemObject)
+    {
+        return false;
+    }
+
+    if (UInspectorPropertyItem* PropertyItem = Cast<UInspectorPropertyItem>(ItemObject))
+    {
+        if (UInspectorPropertyRowWidget* Row = FindPropertyRowForAutomation(PropertyItem))
+        {
+            ScrollBox->ScrollWidgetIntoView(Row, true, EDescendantScrollDestination::Center, 0.0f);
+            return true;
+        }
+    }
+    else if (UInspectorMaterialParamItem* MaterialItem = Cast<UInspectorMaterialParamItem>(ItemObject))
+    {
+        if (UInspectorMaterialParamRowWidget* Row = FindMaterialRowForAutomation(MaterialItem))
+        {
+            ScrollBox->ScrollWidgetIntoView(Row, true, EDescendantScrollDestination::Center, 0.0f);
+            return true;
+        }
+    }
+
+    return false;
+}
+
 void UInspectorPropertiesSectionWidget::RefreshHeaderFromSubsystem()
 {
     UInspectorWorldSubsystem* InspectorSubsystem = Subsystem.Get();
