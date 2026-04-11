@@ -45,6 +45,7 @@ class UInspectorFilePageWidget;
 class UInspectorFunctionItem;
 class UInspectorFunctionsSectionWidget;
 class UInspectorGroupsSectionWidget;
+class UInspectorModalBlockerWidget;
 class UInspectorPropertiesSectionWidget;
 class UInspectorSettingsPageWidget;
 class UInspectorTestPageWidget;
@@ -1019,6 +1020,8 @@ private:
     void RefreshConfirmDialogBinding();
     void ClearConfirmDialogBinding();
     bool TryBindActiveConfirmDialog(UUserWidget* DialogWidget);
+    void ActivateConfirmDialogModalState(UUserWidget* DialogWidget);
+    void DeactivateConfirmDialogModalState();
     bool TryActivateConfirmDialogColorPage(UUserWidget* DialogWidget) const;
     bool IsConfirmDialogColorPageActive(UUserWidget* DialogWidget) const;
     bool TryGetActiveConfirmDialogColor(FLinearColor& OutColor) const;
@@ -1072,6 +1075,7 @@ private:
 
     TWeakObjectPtr<UUserWidget> PanelWidget;
     TWeakObjectPtr<UUserWidget> ActiveConfirmDialogWidget;
+    TWeakObjectPtr<UInspectorModalBlockerWidget> ActiveConfirmDialogModalBlockerWidget;
     TWeakObjectPtr<UObject> ActiveColorEditItem;
     TWeakObjectPtr<UButton> ActiveConfirmDialogYesButton;
     TWeakObjectPtr<UButton> ActiveConfirmDialogNoButton;

@@ -56,6 +56,24 @@ void UInspectorPropertyRowWidget::SetPropertyItem(UInspectorPropertyItem* InItem
     RefreshRow();
 }
 
+bool UInspectorPropertyRowWidget::IsDisplayingItem(const UInspectorPropertyItem* InItem) const
+{
+    const UInspectorPropertyItem* CurrentItem = PropertyItem.Get();
+    if (!CurrentItem || !InItem)
+    {
+        return false;
+    }
+
+    return CurrentItem == InItem
+        || (CurrentItem->GetTargetObject() == InItem->GetTargetObject()
+            && CurrentItem->GetPropertyFName() == InItem->GetPropertyFName());
+}
+
+void UInspectorPropertyRowWidget::RefreshDisplay()
+{
+    RefreshRow();
+}
+
 bool UInspectorPropertyRowWidget::IsColorSwatchVisibleForAutomation() const
 {
     return ColorButton && ColorButton->GetVisibility() == ESlateVisibility::Visible;
@@ -69,6 +87,18 @@ bool UInspectorPropertyRowWidget::IsReadOnlyValueVisibleForAutomation() const
 bool UInspectorPropertyRowWidget::IsValueTextBoxVisibleForAutomation() const
 {
     return ValueTextBox && ValueTextBox->GetVisibility() == ESlateVisibility::Visible;
+}
+
+bool UInspectorPropertyRowWidget::TryGetDisplayedColorSwatchForAutomation(FLinearColor& OutColor) const
+{
+    OutColor = FLinearColor::Black;
+    if (!ColorSwatch || !ColorButton || ColorButton->GetVisibility() != ESlateVisibility::Visible)
+    {
+        return false;
+    }
+
+    OutColor = ColorSwatch->GetBrushColor();
+    return true;
 }
 
 TSharedRef<SWidget> UInspectorPropertyRowWidget::RebuildWidget()

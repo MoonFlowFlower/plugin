@@ -24,9 +24,12 @@ public:
 
     void SetInspectorSubsystem(UInspectorWorldSubsystem* InSubsystem);
     void SetPropertyItem(UInspectorPropertyItem* InItem);
+    bool IsDisplayingItem(const UInspectorPropertyItem* InItem) const;
+    void RefreshDisplay();
     bool IsColorSwatchVisibleForAutomation() const;
     bool IsReadOnlyValueVisibleForAutomation() const;
     bool IsValueTextBoxVisibleForAutomation() const;
+    bool TryGetDisplayedColorSwatchForAutomation(FLinearColor& OutColor) const;
 
 protected:
     virtual TSharedRef<SWidget> RebuildWidget() override;

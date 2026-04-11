@@ -294,6 +294,59 @@ void UInspectorPropertiesSectionWidget::RefreshFromSubsystem()
     }
 }
 
+void UInspectorPropertiesSectionWidget::RefreshItemDisplay(UObject* ItemObject)
+{
+    if (!EntriesBox || !ItemObject)
+    {
+        return;
+    }
+
+    if (UInspectorMaterialParamItem* MaterialItem = Cast<UInspectorMaterialParamItem>(ItemObject))
+    {
+        if (UInspectorMaterialParamRowWidget* Row = FindMaterialRowForAutomation(MaterialItem))
+        {
+            Row->RefreshDisplay();
+        }
+        return;
+    }
+
+    if (UInspectorPropertyItem* PropertyItem = Cast<UInspectorPropertyItem>(ItemObject))
+    {
+        for (int32 ChildIndex = 0; ChildIndex < EntriesBox->GetChildrenCount(); ++ChildIndex)
+        {
+            if (UInspectorPropertyRowWidget* Row = Cast<UInspectorPropertyRowWidget>(EntriesBox->GetChildAt(ChildIndex)))
+            {
+                if (Row->IsDisplayingItem(PropertyItem))
+                {
+                    Row->RefreshDisplay();
+                    break;
+                }
+            }
+        }
+    }
+}
+
+UInspectorMaterialParamRowWidget* UInspectorPropertiesSectionWidget::FindMaterialRowForAutomation(const UInspectorMaterialParamItem* Item) const
+{
+    if (!EntriesBox || !Item)
+    {
+        return nullptr;
+    }
+
+    for (int32 ChildIndex = 0; ChildIndex < EntriesBox->GetChildrenCount(); ++ChildIndex)
+    {
+        if (UInspectorMaterialParamRowWidget* Row = Cast<UInspectorMaterialParamRowWidget>(EntriesBox->GetChildAt(ChildIndex)))
+        {
+            if (Row->IsDisplayingItem(Item))
+            {
+                return Row;
+            }
+        }
+    }
+
+    return nullptr;
+}
+
 void UInspectorPropertiesSectionWidget::RefreshHeaderFromSubsystem()
 {
     UInspectorWorldSubsystem* InspectorSubsystem = Subsystem.Get();

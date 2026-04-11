@@ -5,6 +5,9 @@
 #include "InspectorPropertiesSectionWidget.generated.h"
 
 class UInspectorPropertyRowWidget;
+class UInspectorMaterialParamItem;
+class UInspectorMaterialParamRowWidget;
+class UInspectorPropertyItem;
 class UInspectorWorldSubsystem;
 class UBorder;
 class UHorizontalBox;
@@ -23,9 +26,11 @@ public:
     void SetInspectorSubsystem(UInspectorWorldSubsystem* InSubsystem);
     void SetOnlyModified(bool bInOnlyModified);
     void RefreshFromSubsystem();
+    void RefreshItemDisplay(UObject* ItemObject);
     int32 GetEntryWidgetCountForAutomation() const;
     bool HasSummaryHeader() const { return HeaderBorder != nullptr; }
     bool HasPropertyScrollRoot() const { return ScrollBox != nullptr; }
+    UInspectorMaterialParamRowWidget* FindMaterialRowForAutomation(const UInspectorMaterialParamItem* Item) const;
 
 protected:
     virtual TSharedRef<SWidget> RebuildWidget() override;

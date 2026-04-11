@@ -7,6 +7,7 @@
 #include "InspectorFunctionsSectionWidget.h"
 #include "InspectorGroupsSectionWidget.h"
 #include "InspectorMaterialParamRowWidget.h"
+#include "InspectorModalBlockerWidget.h"
 #include "InspectorPropertiesSectionWidget.h"
 #include "InspectorPropertyRowWidget.h"
 #include "InspectorMaterialParamItem.h"
@@ -704,6 +705,242 @@ static void RI_RefreshPropertyList(UUserWidget* PanelWidget, EInspectorRefreshRe
 #endif
 
     return;
+}
+
+static bool RI_InvokeWidgetFunctionIfPresent(UWidget* Widget, const FName& FunctionName)
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    UUserWidget* UserWidget = Cast<UUserWidget>(Widget);
+    if (!UserWidget)
+    {
+        return false;
+    }
+
+    if (UFunction* Function = UserWidget->GetClass()->FindFunctionByName(FunctionName))
+    {
+        if (Function->NumParms == 0)
+        {
+            UserWidget->ProcessEvent(Function, nullptr);
+            return true;
+        }
+    }
+#endif
+    return false;
+}
+
+static FObjectPropertyBase* RI_FindObjectPropertyByAuthoredName(UClass* InClass, const FName AuthoredName)
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    if (!InClass || AuthoredName.IsNone())
+    {
+        return nullptr;
+    }
+
+    const FString Wanted = AuthoredName.ToString();
+    for (TFieldIterator<FObjectPropertyBase> It(InClass, EFieldIteratorFlags::IncludeSuper); It; ++It)
+    {
+        FObjectPropertyBase* Prop = *It;
+        if (!Prop)
+        {
+            continue;
+        }
+
+        if (Prop->GetFName() == AuthoredName)
+        {
+            return Prop;
+        }
+
+        const FString PropName = Prop->GetName();
+        const FString Authored = Prop->GetAuthoredName();
+        if (Authored == Wanted
+            || PropName.StartsWith(Wanted, ESearchCase::CaseSensitive)
+            || PropName.Contains(Wanted, ESearchCase::CaseSensitive)
+            || Authored.StartsWith(Wanted, ESearchCase::CaseSensitive)
+            || Authored.Contains(Wanted, ESearchCase::CaseSensitive))
+        {
+            return Prop;
+        }
+    }
+#else
+    (void)InClass;
+    (void)AuthoredName;
+#endif
+    return nullptr;
+}
+
+static UObject* RI_ReadObjectPropertyByAuthoredName(UObject* Object, const FName AuthoredName)
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    if (!Object)
+    {
+        return nullptr;
+    }
+
+    if (FObjectPropertyBase* Prop = RI_FindObjectPropertyByAuthoredName(Object->GetClass(), AuthoredName))
+    {
+        return Prop->GetObjectPropertyValue_InContainer(Object);
+    }
+#else
+    (void)Object;
+    (void)AuthoredName;
+#endif
+    return nullptr;
+}
+
+static bool RI_SetLegacyPropertyRowSwatch(UUserWidget* EntryWidget, const FLinearColor& InColor)
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    if (!EntryWidget || !EntryWidget->WidgetTree)
+    {
+        return false;
+    }
+
+    bool bUpdated = false;
+
+    if (UButton* ColorButton = Cast<UButton>(EntryWidget->WidgetTree->FindWidget(TEXT("BTN_color"))))
+    {
+        ColorButton->SetBackgroundColor(InColor);
+        ColorButton->SetColorAndOpacity(FLinearColor::White);
+        ColorButton->InvalidateLayoutAndVolatility();
+        bUpdated = true;
+    }
+
+    EntryWidget->InvalidateLayoutAndVolatility();
+    return bUpdated;
+#else
+    (void)EntryWidget;
+    (void)InColor;
+    return false;
+#endif
+}
+
+static bool RI_SyncLegacyPropertyEntrySwatch(UUserWidget* EntryWidget, UObject* ItemObject, const FLinearColor& InColor)
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    if (!EntryWidget || !ItemObject)
+    {
+        return false;
+    }
+
+    UObject* BoundObject = RI_ReadObjectPropertyByAuthoredName(EntryWidget, TEXT("BoundItem"));
+    if (!BoundObject)
+    {
+        BoundObject = RI_ReadObjectPropertyByAuthoredName(EntryWidget, TEXT("MaterialItem"));
+    }
+    if (!BoundObject)
+    {
+        BoundObject = RI_ReadObjectPropertyByAuthoredName(EntryWidget, TEXT("Item"));
+    }
+
+    if (BoundObject != ItemObject)
+    {
+        return false;
+    }
+
+    const bool bSwatchSet = RI_SetLegacyPropertyRowSwatch(EntryWidget, InColor);
+    RI_InvokeWidgetFunctionIfPresent(EntryWidget, TEXT("RefreshMaterial"));
+    RI_InvokeWidgetFunctionIfPresent(EntryWidget, TEXT("RefreshItemShow"));
+    if (bSwatchSet)
+    {
+        RI_SetLegacyPropertyRowSwatch(EntryWidget, InColor);
+    }
+    return true;
+#else
+    (void)EntryWidget;
+    (void)ItemObject;
+    (void)InColor;
+    return false;
+#endif
+}
+
+static bool RI_SyncLegacyPropertyListSwatch(UUserWidget* PanelWidget, UObject* ItemObject, const FLinearColor& InColor)
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    if (!PanelWidget || !PanelWidget->WidgetTree || !ItemObject)
+    {
+        return false;
+    }
+
+    UListViewBase* PropertyList = Cast<UListViewBase>(PanelWidget->WidgetTree->FindWidget(TEXT("LV_Properties")));
+    if (!PropertyList)
+    {
+        return false;
+    }
+
+    bool bMatched = false;
+    const TArray<UUserWidget*> DisplayedEntries = PropertyList->GetDisplayedEntryWidgets();
+    for (UUserWidget* EntryWidget : DisplayedEntries)
+    {
+        bMatched |= RI_SyncLegacyPropertyEntrySwatch(EntryWidget, ItemObject, InColor);
+    }
+
+    return bMatched;
+#else
+    (void)PanelWidget;
+    (void)ItemObject;
+    (void)InColor;
+    return false;
+#endif
+}
+
+static void RI_RefreshVisiblePropertyEntryWidgets(UUserWidget* PanelWidget)
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    if (!PanelWidget || !PanelWidget->WidgetTree)
+    {
+        return;
+    }
+
+    UListViewBase* PropertyList = Cast<UListViewBase>(PanelWidget->WidgetTree->FindWidget(TEXT("LV_Properties")));
+    if (!PropertyList)
+    {
+        return;
+    }
+
+    const TArray<UUserWidget*> DisplayedEntries = PropertyList->GetDisplayedEntryWidgets();
+    static const FName RefreshNames[] = {
+        TEXT("RefreshMaterial"),
+        TEXT("RefreshItem"),
+        TEXT("RefreshItemShow")
+    };
+
+    for (UUserWidget* EntryWidget : DisplayedEntries)
+    {
+        if (!EntryWidget)
+        {
+            continue;
+        }
+
+        for (const FName& RefreshName : RefreshNames)
+        {
+            RI_InvokeWidgetFunctionIfPresent(EntryWidget, RefreshName);
+        }
+    }
+#endif
+}
+
+static void RI_RefreshLegacyPropertyPanelWidgets(UUserWidget* PanelWidget)
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    if (!PanelWidget || !PanelWidget->WidgetTree)
+    {
+        return;
+    }
+
+    RI_InvokeWidgetFunctionIfPresent(PanelWidget, TEXT("RefreshRightItems"));
+    RI_InvokeWidgetFunctionIfPresent(PanelWidget, TEXT("RefreshSetListItems"));
+    RI_InvokeWidgetFunctionIfPresent(PanelWidget, TEXT("RefreshVisibleRows"));
+
+    UListViewBase* PropertyList = Cast<UListViewBase>(PanelWidget->WidgetTree->FindWidget(TEXT("LV_Properties")));
+    if (!PropertyList)
+    {
+        return;
+    }
+
+    PropertyList->RegenerateAllEntries();
+    PropertyList->RequestRefresh();
+    RI_RefreshVisiblePropertyEntryWidgets(PanelWidget);
+#endif
 }
 
 static void RI_RefreshActorGroupWidgets(UUserWidget* PanelWidget, UInspectorWorldSubsystem* InspectorSubsystem, EInspectorRefreshReason Reason)
@@ -6951,6 +7188,8 @@ void UInspectorWorldSubsystem::RefreshOutlineRuntimeSettings()
 void UInspectorWorldSubsystem::ClearConfirmDialogBinding()
 {
 #if RUNTIME_INSPECTOR_ENABLED
+    DeactivateConfirmDialogModalState();
+
     if (UButton* Button = ActiveConfirmDialogYesButton.Get())
     {
         Button->OnClicked.RemoveAll(this);
@@ -6991,6 +7230,7 @@ void UInspectorWorldSubsystem::ClearConfirmDialogBinding()
     }
 
     ActiveConfirmDialogWidget.Reset();
+    ActiveConfirmDialogModalBlockerWidget.Reset();
     ActiveConfirmDialogYesButton.Reset();
     ActiveConfirmDialogNoButton.Reset();
     ActiveConfirmDialogInputR.Reset();
@@ -7068,9 +7308,87 @@ bool UInspectorWorldSubsystem::TryBindActiveConfirmDialog(UUserWidget* DialogWid
     }
 
     TryActivateConfirmDialogColorPage(DialogWidget);
+    ActivateConfirmDialogModalState(DialogWidget);
     return true;
 #else
     return false;
+#endif
+}
+
+void UInspectorWorldSubsystem::ActivateConfirmDialogModalState(UUserWidget* DialogWidget)
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    if (!DialogWidget)
+    {
+        return;
+    }
+
+    APlayerController* PC = GetLocalPC();
+    UWorld* World = GetWorld();
+    if (!PC || !World)
+    {
+        return;
+    }
+
+    if (UInspectorModalBlockerWidget* ExistingBlocker = ActiveConfirmDialogModalBlockerWidget.Get())
+    {
+        ExistingBlocker->RemoveFromParent();
+    }
+
+    UInspectorModalBlockerWidget* BlockerWidget = CreateWidget<UInspectorModalBlockerWidget>(PC, UInspectorModalBlockerWidget::StaticClass());
+    if (BlockerWidget)
+    {
+        BlockerWidget->SetAnchorsInViewport(FAnchors(0.f, 0.f, 1.f, 1.f));
+        BlockerWidget->SetAlignmentInViewport(FVector2D::ZeroVector);
+        BlockerWidget->SetPositionInViewport(FVector2D::ZeroVector, false);
+        BlockerWidget->AddToViewport(10000);
+        ActiveConfirmDialogModalBlockerWidget = BlockerWidget;
+    }
+
+    if (UUserWidget* InspectorPanel = PanelWidget.Get())
+    {
+        InspectorPanel->SetIsEnabled(false);
+    }
+
+    PC->bShowMouseCursor = true;
+    FInputModeUIOnly Mode;
+    Mode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+    Mode.SetWidgetToFocus(DialogWidget->TakeWidget());
+    PC->SetInputMode(Mode);
+#endif
+}
+
+void UInspectorWorldSubsystem::DeactivateConfirmDialogModalState()
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    if (UInspectorModalBlockerWidget* BlockerWidget = ActiveConfirmDialogModalBlockerWidget.Get())
+    {
+        BlockerWidget->RemoveFromParent();
+    }
+
+    if (UUserWidget* InspectorPanel = PanelWidget.Get())
+    {
+        InspectorPanel->SetIsEnabled(true);
+    }
+
+    if (APlayerController* PC = GetLocalPC())
+    {
+        PC->bShowMouseCursor = bOpen;
+        if (bOpen)
+        {
+            FInputModeGameAndUI Mode;
+            Mode.SetHideCursorDuringCapture(false);
+            if (UUserWidget* InspectorPanel = PanelWidget.Get())
+            {
+                Mode.SetWidgetToFocus(InspectorPanel->TakeWidget());
+            }
+            PC->SetInputMode(Mode);
+        }
+        else
+        {
+            PC->SetInputMode(FInputModeGameOnly());
+        }
+    }
 #endif
 }
 
@@ -7497,16 +7815,48 @@ bool UInspectorWorldSubsystem::ApplyInspectorItemColorInternal(UObject* ItemObje
 #else
     TGuardValue<bool> GuardPreviewHistory(bApplyingColorDialogPreview, bSuppressHistory);
 
+    const auto RefreshVisibleItemDisplay = [this, ItemObject]()
+    {
+        FLinearColor UpdatedColor = FLinearColor::Black;
+        const bool bHasUpdatedColor = TryGetInspectorItemColor(ItemObject, UpdatedColor);
+
+        if (UInspectorPropertiesSectionWidget* SectionWidget = ActorPropertiesSectionWidget.Get())
+        {
+            SectionWidget->RefreshItemDisplay(ItemObject);
+        }
+
+        if (UUserWidget* Panel = PanelWidget.Get())
+        {
+            RI_RefreshPropertyList(Panel, EInspectorRefreshReason::ValuesChanged);
+            RefreshPanel(EInspectorRefreshReason::ValuesChanged);
+            RI_RefreshLegacyPropertyPanelWidgets(Panel);
+            if (bHasUpdatedColor)
+            {
+                RI_SyncLegacyPropertyListSwatch(Panel, ItemObject, UpdatedColor);
+            }
+        }
+    };
+
     if (UInspectorPropertyItem* PropertyItem = Cast<UInspectorPropertyItem>(ItemObject))
     {
         if (PropertyItem->GetValueType() == EInspectorValueType::LinearColor)
         {
-            return PropertyItem->SetLinearColor(InColor, OutError);
+            const bool bApplied = PropertyItem->SetLinearColor(InColor, OutError);
+            if (bApplied)
+            {
+                RefreshVisibleItemDisplay();
+            }
+            return bApplied;
         }
 
         if (PropertyItem->GetValueType() == EInspectorValueType::Color)
         {
-            return PropertyItem->SetColor(InColor.ToFColorSRGB(), OutError);
+            const bool bApplied = PropertyItem->SetColor(InColor.ToFColorSRGB(), OutError);
+            if (bApplied)
+            {
+                RefreshVisibleItemDisplay();
+            }
+            return bApplied;
         }
 
         OutError = TEXT("Item is not a color property");
@@ -7515,7 +7865,12 @@ bool UInspectorWorldSubsystem::ApplyInspectorItemColorInternal(UObject* ItemObje
 
     if (UInspectorMaterialParamItem* MaterialItem = Cast<UInspectorMaterialParamItem>(ItemObject))
     {
-        return MaterialItem->SetVector(InColor, OutError);
+        const bool bApplied = MaterialItem->SetVector(InColor, OutError);
+        if (bApplied)
+        {
+            RefreshVisibleItemDisplay();
+        }
+        return bApplied;
     }
 
     OutError = TEXT("Unsupported color item");
@@ -9614,6 +9969,7 @@ bool UInspectorWorldSubsystem::RunConfirmDialogColorInputSelfTest(FString& OutRe
     }
 
     const bool bWasOpen = bOpen;
+    const ERIVisiblePage PreviousVisiblePage = GetVisiblePage();
     if (!bOpen)
     {
         Open();
@@ -9650,6 +10006,9 @@ bool UInspectorWorldSubsystem::RunConfirmDialogColorInputSelfTest(FString& OutRe
 
         if (bWasOpen)
         {
+            FString RestorePageError;
+            SetVisiblePageByName(RI_GetVisiblePageDisplayLabel(PreviousVisiblePage), RestorePageError);
+            RefreshPanel(EInspectorRefreshReason::StructureChanged);
             RefreshConfirmDialogBinding();
         }
         else
@@ -9764,8 +10123,16 @@ bool UInspectorWorldSubsystem::RunConfirmDialogColorInputSelfTest(FString& OutRe
 
     bool bMaterialDialogOpened = false;
     bool bMaterialColorPageOk = false;
+    bool bMaterialModalOk = false;
+    bool bMaterialSwatchOk = false;
     bool bMaterialPreviewOk = false;
     bool bMaterialApplyOk = false;
+    bool bInjectedMaterialRowFound = false;
+    bool bInjectedMaterialSwatchVisible = false;
+    bool bLegacyMaterialEntryFound = false;
+    bool bLegacyMaterialColorButtonFound = false;
+    FLinearColor InjectedMaterialSwatchColor = FLinearColor::Black;
+    FLinearColor LegacyMaterialButtonColor = FLinearColor::Black;
     FString MaterialVectorName = TEXT("None");
     FString MaterialHexApplied = TEXT("None");
 
@@ -9773,6 +10140,33 @@ bool UInspectorWorldSubsystem::RunConfirmDialogColorInputSelfTest(FString& OutRe
     FString FoundationError;
     if (ApplyFabScreenshotFoundationState(FoundationSummary, FoundationError))
     {
+        FString ShowActorPageError;
+        SetVisiblePageByName(TEXT("Actor"), ShowActorPageError);
+        if (bDeferredOpenActorRefreshScheduled)
+        {
+            HandleDeferredOpenActorRefreshTimerElapsed();
+        }
+
+        SetContentSwitcherIndex(0);
+        RefreshPanel(EInspectorRefreshReason::StructureChanged);
+        if (UUserWidget* Panel = PanelWidget.Get())
+        {
+            for (int32 Attempt = 0; Attempt < 2; ++Attempt)
+            {
+                if (FSlateApplication::IsInitialized())
+                {
+                    FSlateApplication::Get().Tick(ESlateTickType::All);
+                }
+
+                Panel->TakeWidget();
+                Panel->ForceLayoutPrepass();
+                if (TSharedPtr<SWidget> CachedWidget = Panel->GetCachedWidget())
+                {
+                    CachedWidget->SlatePrepass(FSlateApplication::Get().GetApplicationScale());
+                }
+            }
+        }
+
         AActor* TestActor = SelectedActor.Get();
         if (TestActor)
         {
@@ -9832,6 +10226,20 @@ bool UInspectorWorldSubsystem::RunConfirmDialogColorInputSelfTest(FString& OutRe
 
             if (TestMaterialItem)
             {
+                if (UMeshComponent* ViewMeshComponent = TestMaterialItem->GetMeshComponent())
+                {
+                    SetPropertyView_MaterialOnly(ViewMeshComponent, TestMaterialItem->GetSlotIndex());
+                    if (UUserWidget* Panel = PanelWidget.Get())
+                    {
+                        Panel->TakeWidget();
+                        Panel->ForceLayoutPrepass();
+                        if (TSharedPtr<SWidget> CachedWidget = Panel->GetCachedWidget())
+                        {
+                            CachedWidget->SlatePrepass(FSlateApplication::Get().GetApplicationScale());
+                        }
+                    }
+                }
+
                 const FLinearColor UpdatedMaterialColor = RI_MakeDistinctSelfTestColor(OriginalMaterialColor);
                 MaterialHexApplied = UpdatedMaterialColor.ToFColorSRGB().ToHex();
                 bMaterialDialogOpened = OpenColorEditorForAnyItem(TestMaterialItem);
@@ -9840,10 +10248,186 @@ bool UInspectorWorldSubsystem::RunConfirmDialogColorInputSelfTest(FString& OutRe
                 {
                     UUserWidget* MaterialDialog = ActiveConfirmDialogWidget.Get();
                     bMaterialColorPageOk = TryActivateConfirmDialogColorPage(MaterialDialog) && IsConfirmDialogColorPageActive(MaterialDialog);
+                    bMaterialModalOk = ActiveConfirmDialogModalBlockerWidget.IsValid();
 
                     if (TrySetActiveConfirmDialogColor(UpdatedMaterialColor))
                     {
                         SyncActiveConfirmDialogColorPreview();
+                    }
+
+                    auto DoesDisplayedSwatchMatch = [this, TestMaterialItem, UpdatedMaterialColor, ColorNear](UListViewBase* PropertyList) -> bool
+                    {
+                        if (!PropertyList || !TestMaterialItem)
+                        {
+                            return false;
+                        }
+
+                        const FString TargetLabel = TestMaterialItem->GetPropertyName();
+                        const TArray<UUserWidget*> DisplayedEntries = PropertyList->GetDisplayedEntryWidgets();
+                        for (UUserWidget* EntryWidget : DisplayedEntries)
+                        {
+                            if (UInspectorMaterialParamRowWidget* MaterialRow = Cast<UInspectorMaterialParamRowWidget>(EntryWidget))
+                            {
+                                if (!MaterialRow->IsDisplayingItem(TestMaterialItem))
+                                {
+                                    continue;
+                                }
+
+                                FLinearColor SwatchColor = FLinearColor::Black;
+                                return MaterialRow->TryGetDisplayedColorSwatchForAutomation(SwatchColor)
+                                    && ColorNear(SwatchColor, UpdatedMaterialColor, 0.02f);
+                            }
+
+                            TFunction<bool(UWidget*)> HasTargetLabel = [&](UWidget* Widget) -> bool
+                            {
+                                if (!Widget)
+                                {
+                                    return false;
+                                }
+
+                                if (UTextBlock* TextBlock = Cast<UTextBlock>(Widget))
+                                {
+                                    return TextBlock->GetText().ToString().Contains(TargetLabel);
+                                }
+
+                                if (const UUserWidget* UserWidget = Cast<UUserWidget>(Widget))
+                                {
+                                    return UserWidget->WidgetTree && HasTargetLabel(UserWidget->WidgetTree->RootWidget);
+                                }
+
+                                if (const UPanelWidget* PanelWidget = Cast<UPanelWidget>(Widget))
+                                {
+                                    for (int32 ChildIndex = 0; ChildIndex < PanelWidget->GetChildrenCount(); ++ChildIndex)
+                                    {
+                                        if (HasTargetLabel(PanelWidget->GetChildAt(ChildIndex)))
+                                        {
+                                            return true;
+                                        }
+                                    }
+                                }
+
+                                return false;
+                            };
+
+                            TFunction<bool(UWidget*)> HasMatchingSwatch = [&](UWidget* Widget) -> bool
+                            {
+                                if (!Widget)
+                                {
+                                    return false;
+                                }
+
+                                if (const UBorder* BorderWidget = Cast<UBorder>(Widget))
+                                {
+                                    if (ColorNear(BorderWidget->GetBrushColor(), UpdatedMaterialColor, 0.02f))
+                                    {
+                                        return true;
+                                    }
+                                }
+
+                                if (const UButton* ButtonWidget = Cast<UButton>(Widget))
+                                {
+                                    if (ColorNear(ButtonWidget->GetBackgroundColor(), UpdatedMaterialColor, 0.02f))
+                                    {
+                                        return true;
+                                    }
+                                }
+
+                                if (const UUserWidget* UserWidget = Cast<UUserWidget>(Widget))
+                                {
+                                    return UserWidget->WidgetTree && HasMatchingSwatch(UserWidget->WidgetTree->RootWidget);
+                                }
+
+                                if (const UPanelWidget* PanelWidget = Cast<UPanelWidget>(Widget))
+                                {
+                                    for (int32 ChildIndex = 0; ChildIndex < PanelWidget->GetChildrenCount(); ++ChildIndex)
+                                    {
+                                        if (HasMatchingSwatch(PanelWidget->GetChildAt(ChildIndex)))
+                                        {
+                                            return true;
+                                        }
+                                    }
+                                }
+
+                                return false;
+                            };
+
+                            if (HasTargetLabel(EntryWidget) && HasMatchingSwatch(EntryWidget))
+                            {
+                                return true;
+                            }
+                        }
+
+                        return false;
+                    };
+
+                    auto CaptureLegacySwatchDetails = [TestMaterialItem, &bLegacyMaterialEntryFound, &bLegacyMaterialColorButtonFound, &LegacyMaterialButtonColor](UListViewBase* PropertyList)
+                    {
+                        if (!PropertyList || !TestMaterialItem)
+                        {
+                            return;
+                        }
+
+                        const TArray<UUserWidget*> DisplayedEntries = PropertyList->GetDisplayedEntryWidgets();
+                        for (UUserWidget* EntryWidget : DisplayedEntries)
+                        {
+                            if (!EntryWidget)
+                            {
+                                continue;
+                            }
+
+                            UObject* BoundObject = RI_ReadObjectPropertyByAuthoredName(EntryWidget, TEXT("BoundItem"));
+                            if (!BoundObject)
+                            {
+                                BoundObject = RI_ReadObjectPropertyByAuthoredName(EntryWidget, TEXT("MaterialItem"));
+                            }
+                            if (!BoundObject)
+                            {
+                                BoundObject = RI_ReadObjectPropertyByAuthoredName(EntryWidget, TEXT("Item"));
+                            }
+
+                            if (BoundObject != TestMaterialItem)
+                            {
+                                continue;
+                            }
+
+                            bLegacyMaterialEntryFound = true;
+                            if (EntryWidget->WidgetTree)
+                            {
+                                if (UButton* ColorButton = Cast<UButton>(EntryWidget->WidgetTree->FindWidget(TEXT("BTN_color"))))
+                                {
+                                    bLegacyMaterialColorButtonFound = true;
+                                    LegacyMaterialButtonColor = ColorButton->GetBackgroundColor();
+                                }
+                            }
+                            break;
+                        }
+                    };
+
+                    if (UInspectorPropertiesSectionWidget* SectionWidget = ActorPropertiesSectionWidget.Get())
+                    {
+                        if (UInspectorMaterialParamRowWidget* MaterialRow = SectionWidget->FindMaterialRowForAutomation(TestMaterialItem))
+                        {
+                            bInjectedMaterialRowFound = true;
+                            bInjectedMaterialSwatchVisible = MaterialRow->TryGetDisplayedColorSwatchForAutomation(InjectedMaterialSwatchColor);
+                            bMaterialSwatchOk = bInjectedMaterialSwatchVisible
+                                && ColorNear(InjectedMaterialSwatchColor, UpdatedMaterialColor, 0.02f);
+                        }
+                    }
+
+                    if (!bMaterialSwatchOk)
+                    {
+                        if (UUserWidget* Panel = PanelWidget.Get())
+                        {
+                            if (Panel->WidgetTree)
+                            {
+                                if (UListViewBase* PropertyList = Cast<UListViewBase>(Panel->WidgetTree->FindWidget(TEXT("LV_Properties"))))
+                                {
+                                    PropertyList->RequestRefresh();
+                                    CaptureLegacySwatchDetails(PropertyList);
+                                    bMaterialSwatchOk = DoesDisplayedSwatchMatch(PropertyList);
+                                }
+                            }
+                        }
                     }
 
                     FLinearColor PreviewColor = FLinearColor::Black;
@@ -9867,10 +10451,10 @@ bool UInspectorWorldSubsystem::RunConfirmDialogColorInputSelfTest(FString& OutRe
         }
     }
 
-    bOverallSuccess = bPassR && bPassHex && bDirectColorPageOk && bMaterialDialogOpened && bMaterialColorPageOk && bMaterialPreviewOk && bMaterialApplyOk;
+    bOverallSuccess = bPassR && bPassHex && bDirectColorPageOk && bMaterialDialogOpened && bMaterialColorPageOk && bMaterialModalOk && bMaterialSwatchOk && bMaterialPreviewOk && bMaterialApplyOk;
 
     OutReport = FString::Printf(
-        TEXT("ConfirmDialogColorInputSelfTest=%s | DirectPage=%d | InitialUI=(%.3f, %.3f, %.3f, %.3f) | AfterRUI=%.3f HexAfterR=%s | AfterHexUI=(%.3f, %.3f, %.3f, %.3f) GAfterHex=%s HexAfterHex=%s | MaterialDialog=%d Page=%d Preview=%d Apply=%d Item=%s Hex=%s"),
+        TEXT("ConfirmDialogColorInputSelfTest=%s | DirectPage=%d | InitialUI=(%.3f, %.3f, %.3f, %.3f) | AfterRUI=%.3f HexAfterR=%s | AfterHexUI=(%.3f, %.3f, %.3f, %.3f) GAfterHex=%s HexAfterHex=%s | MaterialDialog=%d Page=%d Modal=%d Swatch=%d Preview=%d Apply=%d InjectedRow=%d InjectedSwatch=%d InjectedColor=(%.3f,%.3f,%.3f,%.3f) LegacyEntry=%d LegacyButton=%d LegacyColor=(%.3f,%.3f,%.3f,%.3f) Item=%s Hex=%s"),
         bOverallSuccess ? TEXT("PASS") : TEXT("FAIL"),
         bDirectColorPageOk ? 1 : 0,
         InitialR, InitialG, InitialB, InitialA,
@@ -9881,8 +10465,22 @@ bool UInspectorWorldSubsystem::RunConfirmDialogColorInputSelfTest(FString& OutRe
         *HexAfterHex,
         bMaterialDialogOpened ? 1 : 0,
         bMaterialColorPageOk ? 1 : 0,
+        bMaterialModalOk ? 1 : 0,
+        bMaterialSwatchOk ? 1 : 0,
         bMaterialPreviewOk ? 1 : 0,
         bMaterialApplyOk ? 1 : 0,
+        bInjectedMaterialRowFound ? 1 : 0,
+        bInjectedMaterialSwatchVisible ? 1 : 0,
+        InjectedMaterialSwatchColor.R,
+        InjectedMaterialSwatchColor.G,
+        InjectedMaterialSwatchColor.B,
+        InjectedMaterialSwatchColor.A,
+        bLegacyMaterialEntryFound ? 1 : 0,
+        bLegacyMaterialColorButtonFound ? 1 : 0,
+        LegacyMaterialButtonColor.R,
+        LegacyMaterialButtonColor.G,
+        LegacyMaterialButtonColor.B,
+        LegacyMaterialButtonColor.A,
         *MaterialVectorName,
         *MaterialHexApplied);
 

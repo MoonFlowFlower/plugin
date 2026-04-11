@@ -21,14 +21,18 @@ public:
 
     void SetInspectorSubsystem(UInspectorWorldSubsystem* InSubsystem);
     void SetMaterialItem(UInspectorMaterialParamItem* InItem);
+    bool IsDisplayingItem(const UInspectorMaterialParamItem* InItem) const;
+    void RefreshDisplay();
 
     bool IsColorSwatchVisibleForAutomation() const;
     bool IsScalarValueVisibleForAutomation() const;
     bool HasFavoriteButtonForAutomation() const;
+    bool TryGetDisplayedColorSwatchForAutomation(FLinearColor& OutColor) const;
 
 protected:
     virtual TSharedRef<SWidget> RebuildWidget() override;
     virtual void NativeConstruct() override;
+    virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 
 private:
     void BuildWidgetTree();
@@ -67,4 +71,7 @@ private:
 
     TWeakObjectPtr<UInspectorWorldSubsystem> Subsystem;
     TWeakObjectPtr<UInspectorMaterialParamItem> MaterialItem;
+    bool bHasCachedDisplayColor = false;
+    FLinearColor CachedDisplayColor = FLinearColor::Transparent;
+    bool bCachedFavorited = false;
 };

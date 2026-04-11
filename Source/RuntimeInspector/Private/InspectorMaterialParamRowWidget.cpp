@@ -52,6 +52,26 @@ void UInspectorMaterialParamRowWidget::SetMaterialItem(UInspectorMaterialParamIt
     RefreshRow();
 }
 
+bool UInspectorMaterialParamRowWidget::IsDisplayingItem(const UInspectorMaterialParamItem* InItem) const
+{
+    const UInspectorMaterialParamItem* CurrentItem = MaterialItem.Get();
+    if (!CurrentItem || !InItem)
+    {
+        return false;
+    }
+
+    return CurrentItem == InItem
+        || (CurrentItem->GetMeshComponent() == InItem->GetMeshComponent()
+            && CurrentItem->GetSlotIndex() == InItem->GetSlotIndex()
+            && CurrentItem->GetParamName() == InItem->GetParamName()
+            && CurrentItem->GetParamType() == InItem->GetParamType());
+}
+
+void UInspectorMaterialParamRowWidget::RefreshDisplay()
+{
+    RefreshRow();
+}
+
 bool UInspectorMaterialParamRowWidget::IsColorSwatchVisibleForAutomation() const
 {
     return ColorButton && ColorButton->GetVisibility() == ESlateVisibility::Visible;
@@ -65,6 +85,18 @@ bool UInspectorMaterialParamRowWidget::IsScalarValueVisibleForAutomation() const
 bool UInspectorMaterialParamRowWidget::HasFavoriteButtonForAutomation() const
 {
     return FavoriteButton && FavoriteButton->GetVisibility() == ESlateVisibility::Visible;
+}
+
+bool UInspectorMaterialParamRowWidget::TryGetDisplayedColorSwatchForAutomation(FLinearColor& OutColor) const
+{
+    OutColor = FLinearColor::Black;
+    if (!ColorSwatch || !ColorButton || ColorButton->GetVisibility() != ESlateVisibility::Visible)
+    {
+        return false;
+    }
+
+    OutColor = ColorSwatch->GetBrushColor();
+    return true;
 }
 
 TSharedRef<SWidget> UInspectorMaterialParamRowWidget::RebuildWidget()
@@ -81,6 +113,37 @@ void UInspectorMaterialParamRowWidget::NativeConstruct()
 {
     Super::NativeConstruct();
     RefreshRow();
+}
+
+void UInspectorMaterialParamRowWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
+{
+    Super::NativeTick(MyGeometry, InDeltaTime);
+
+    UInspectorMaterialParamItem* Item = MaterialItem.Get();
+    if (!Item)
+    {
+        return;
+    }
+
+    const bool bFavorited = Subsystem.IsValid() && Subsystem->IsFavoriteForAnyItem(Item);
+    if (bFavorited != bCachedFavorited)
+    {
+        RefreshRow();
+        return;
+    }
+
+    if (Item->GetParamType() == EInspectorMatParamType::Vector)
+    {
+        FString Error;
+        FLinearColor VectorValue = FLinearColor::Black;
+        if (Item->GetVector(VectorValue, Error))
+        {
+            if (!bHasCachedDisplayColor || !VectorValue.Equals(CachedDisplayColor, KINDA_SMALL_NUMBER))
+            {
+                RefreshRow();
+            }
+        }
+    }
 }
 
 void UInspectorMaterialParamRowWidget::BuildWidgetTree()
@@ -188,6 +251,7 @@ void UInspectorMaterialParamRowWidget::RefreshRow()
     if (FavoriteText)
     {
         const bool bFavorited = Subsystem.IsValid() && Subsystem->IsFavoriteForAnyItem(Item);
+        bCachedFavorited = bFavorited;
         FavoriteText->SetText(FText::FromString(bFavorited ? TEXT("★") : TEXT("☆")));
         FavoriteText->SetColorAndOpacity(bFavorited ? RI_MaterialFavoriteActiveColor() : RI_MaterialMutedColor());
     }
@@ -211,11 +275,16 @@ void UInspectorMaterialParamRowWidget::RefreshRow()
     {
         FLinearColor VectorValue = FLinearColor::Black;
         const bool bHasValue = Item->GetVector(VectorValue, Error);
+        bHasCachedDisplayColor = bHasValue;
+        CachedDisplayColor = bHasValue ? VectorValue : FLinearColor::Black;
         ColorSwatch->SetBrushColor(bHasValue ? VectorValue : FLinearColor::Black);
         ColorButton->SetVisibility(ESlateVisibility::Visible);
         ColorButton->SetIsEnabled(bHasValue);
         return;
     }
+
+    bHasCachedDisplayColor = false;
+    CachedDisplayColor = FLinearColor::Transparent;
 
     if (ReadOnlyValueText)
     {
