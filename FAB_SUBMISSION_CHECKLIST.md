@@ -9,6 +9,13 @@ Use this checklist when preparing the UE 5.5 Fab submission package.
 ## Current RC Status
 
 - Release-candidate baseline must stay fixed while preparing package, screenshots, manual smoke evidence, and demo media.
+- Current RC branch: `codex/runtimeinspector-fab-rc`
+- Current RC commit: `763100ac999abd0fae905ff3d5f7f8f56d0ca8a4`
+- Latest automated release evidence refreshed on `2026-04-11`.
+- Preserved blank-install smoke host:
+  - `Saved/FabRelease/BlankProjectValidation/RuntimeInspectorBlank_UE55/RuntimeInspectorBlank/RuntimeInspectorBlank.uproject`
+- Current deterministic screenshot set:
+  - `Saved/RuntimeInspector/FabMediaCapture/`
 - Remaining pre-submit items are intentionally narrow:
   - Re-run the packaged-install manual smoke path on the preserved blank host project.
   - Record the short demo video or GIF.
