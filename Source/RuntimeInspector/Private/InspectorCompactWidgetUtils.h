@@ -5,13 +5,18 @@
 #include "RuntimeInspectorSettings.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Button.h"
+#include "Components/ButtonSlot.h"
 #include "Components/Border.h"
+#include "Components/BorderSlot.h"
 #include "Components/ComboBoxString.h"
 #include "Components/ContentWidget.h"
 #include "Components/EditableTextBox.h"
 #include "Components/PanelWidget.h"
 #include "Components/SizeBox.h"
+#include "Components/SizeBoxSlot.h"
 #include "Components/TextBlock.h"
+#include "Components/VerticalBox.h"
+#include "Components/VerticalBoxSlot.h"
 
 namespace RICompactUI
 {
@@ -165,22 +170,22 @@ namespace RICompactUI
             FRIThemePresetTokens Tokens;
             Tokens.Metrics = {
                 8, 7, 7, 6,
-                22.0f, 26.0f, 96.0f, 120.0f,
-                4.0f, 1.0f,
-                FMargin(6.f, 3.f),
+                22.0f, 24.0f, 96.0f, 122.0f,
+                5.0f, 1.0f,
+                FMargin(6.f, 4.f),
                 FMargin(0.f),
-                FMargin(6.f, 4.f)
+                FMargin(7.f, 4.f)
             };
-            Tokens.PageBackground = FLinearColor(0.01f, 0.01f, 0.01f, 0.80f);
-            Tokens.FooterBackground = FLinearColor(0.05f, 0.05f, 0.05f, 0.92f);
-            Tokens.ContextStripBackground = FLinearColor(0.05f, 0.06f, 0.08f, 0.90f);
-            Tokens.ContextPrimaryCellBackground = FLinearColor(0.10f, 0.12f, 0.16f, 0.96f);
-            Tokens.ContextSecondaryCellBackground = FLinearColor(0.08f, 0.09f, 0.12f, 0.92f);
-            Tokens.ContextStatusCellBackground = FLinearColor(0.09f, 0.12f, 0.10f, 0.96f);
-            Tokens.SectionSurfaceBackground = FLinearColor(0.09f, 0.09f, 0.09f, 0.88f);
-            Tokens.RowSurfaceBackground = FLinearColor(0.04f, 0.04f, 0.04f, 0.80f);
-            Tokens.CellSurfaceBackground = FLinearColor(0.06f, 0.06f, 0.06f, 0.82f);
-            Tokens.SelectedRowSurfaceBackground = FLinearColor(0.09f, 0.14f, 0.18f, 0.88f);
+            Tokens.PageBackground = FLinearColor(0.02f, 0.02f, 0.03f, 0.90f);
+            Tokens.FooterBackground = FLinearColor(0.05f, 0.05f, 0.07f, 0.95f);
+            Tokens.ContextStripBackground = FLinearColor(0.08f, 0.09f, 0.11f, 0.94f);
+            Tokens.ContextPrimaryCellBackground = FLinearColor(0.13f, 0.15f, 0.20f, 0.98f);
+            Tokens.ContextSecondaryCellBackground = FLinearColor(0.10f, 0.11f, 0.14f, 0.95f);
+            Tokens.ContextStatusCellBackground = FLinearColor(0.15f, 0.12f, 0.08f, 0.98f);
+            Tokens.SectionSurfaceBackground = FLinearColor(0.12f, 0.13f, 0.16f, 0.93f);
+            Tokens.RowSurfaceBackground = FLinearColor(0.09f, 0.10f, 0.12f, 0.90f);
+            Tokens.CellSurfaceBackground = FLinearColor(0.10f, 0.11f, 0.14f, 0.92f);
+            Tokens.SelectedRowSurfaceBackground = FLinearColor(0.16f, 0.21f, 0.27f, 0.94f);
             Tokens.StrongText = FLinearColor(0.96f, 0.96f, 0.96f, 1.0f);
             Tokens.SecondaryText = FLinearColor(0.84f, 0.88f, 0.96f, 1.0f);
             Tokens.MutedText = FLinearColor(0.72f, 0.72f, 0.72f, 1.0f);
@@ -274,30 +279,30 @@ namespace RICompactUI
         static const FRIThemePresetTokens SoftContrast = []()
         {
             FRIThemePresetTokens Tokens = StudioSlate;
-            Tokens.Metrics.CornerRadius = 6.0f;
+            Tokens.Metrics.CornerRadius = 7.0f;
             Tokens.Metrics.BorderWidth = 1.25f;
-            Tokens.PageBackground = FLinearColor(0.03f, 0.03f, 0.04f, 0.84f);
-            Tokens.FooterBackground = FLinearColor(0.08f, 0.08f, 0.10f, 0.94f);
-            Tokens.ContextStripBackground = FLinearColor(0.07f, 0.08f, 0.10f, 0.92f);
-            Tokens.ContextPrimaryCellBackground = FLinearColor(0.12f, 0.14f, 0.18f, 0.98f);
-            Tokens.ContextSecondaryCellBackground = FLinearColor(0.10f, 0.11f, 0.14f, 0.94f);
-            Tokens.ContextStatusCellBackground = FLinearColor(0.10f, 0.14f, 0.12f, 0.98f);
-            Tokens.SectionSurfaceBackground = FLinearColor(0.16f, 0.17f, 0.20f, 0.92f);
-            Tokens.RowSurfaceBackground = FLinearColor(0.11f, 0.12f, 0.14f, 0.88f);
-            Tokens.CellSurfaceBackground = FLinearColor(0.14f, 0.15f, 0.18f, 0.90f);
-            Tokens.SelectedRowSurfaceBackground = FLinearColor(0.16f, 0.22f, 0.28f, 0.94f);
+            Tokens.PageBackground = FLinearColor(0.03f, 0.03f, 0.04f, 0.90f);
+            Tokens.FooterBackground = FLinearColor(0.07f, 0.07f, 0.09f, 0.96f);
+            Tokens.ContextStripBackground = FLinearColor(0.08f, 0.09f, 0.11f, 0.95f);
+            Tokens.ContextPrimaryCellBackground = FLinearColor(0.13f, 0.15f, 0.20f, 0.99f);
+            Tokens.ContextSecondaryCellBackground = FLinearColor(0.10f, 0.12f, 0.15f, 0.95f);
+            Tokens.ContextStatusCellBackground = FLinearColor(0.20f, 0.16f, 0.10f, 0.99f);
+            Tokens.SectionSurfaceBackground = FLinearColor(0.14f, 0.15f, 0.18f, 0.94f);
+            Tokens.RowSurfaceBackground = FLinearColor(0.10f, 0.11f, 0.13f, 0.91f);
+            Tokens.CellSurfaceBackground = FLinearColor(0.12f, 0.13f, 0.16f, 0.93f);
+            Tokens.SelectedRowSurfaceBackground = FLinearColor(0.18f, 0.24f, 0.31f, 0.95f);
             Tokens.StrongText = FLinearColor(0.98f, 0.98f, 0.99f, 1.0f);
             Tokens.SecondaryText = FLinearColor(0.88f, 0.91f, 0.95f, 1.0f);
             Tokens.MutedText = FLinearColor(0.78f, 0.80f, 0.84f, 1.0f);
             Tokens.SuccessText = FLinearColor(0.52f, 0.88f, 0.68f, 1.0f);
             Tokens.WarningText = FLinearColor(0.96f, 0.79f, 0.40f, 1.0f);
             Tokens.ErrorText = FLinearColor(0.95f, 0.49f, 0.49f, 1.0f);
-            Tokens.Metrics.ButtonHeight = 24.0f;
-            Tokens.Metrics.InputHeight = 28.0f;
-            Tokens.Metrics.CompactListHeight = 104.0f;
-            Tokens.Metrics.StandardListHeight = 132.0f;
-            Tokens.Metrics.SectionPadding = FMargin(8.f, 4.f);
-            Tokens.Metrics.InputPadding = FMargin(8.f, 5.f);
+            Tokens.Metrics.ButtonHeight = 22.0f;
+            Tokens.Metrics.InputHeight = 24.0f;
+            Tokens.Metrics.CompactListHeight = 94.0f;
+            Tokens.Metrics.StandardListHeight = 120.0f;
+            Tokens.Metrics.SectionPadding = FMargin(6.f, 4.f);
+            Tokens.Metrics.InputPadding = FMargin(7.f, 4.f);
             Tokens.PrimaryButton.Normal = FLinearColor(0.18f, 0.50f, 0.88f, 1.0f);
             Tokens.PrimaryButton.Hovered = FLinearColor(0.25f, 0.58f, 0.95f, 1.0f);
             Tokens.SecondaryButton.Normal = FLinearColor(0.35f, 0.37f, 0.42f, 1.0f);
@@ -373,6 +378,37 @@ namespace RICompactUI
     inline float GetStandardListHeight()
     {
         return GetThemeMetrics().StandardListHeight;
+    }
+
+    inline FMargin GetPanelPadding()
+    {
+        return GetActiveThemePreset() == ERIThemePreset::SoftContrast
+            ? FMargin(8.f, 6.f)
+            : FMargin(6.f, 5.f);
+    }
+
+    inline FMargin GetSurfaceCardPadding(bool bDense = false)
+    {
+        if (bDense)
+        {
+            return GetActiveThemePreset() == ERIThemePreset::SoftContrast
+                ? FMargin(6.f, 5.f)
+                : FMargin(5.f, 4.f);
+        }
+
+        return GetActiveThemePreset() == ERIThemePreset::SoftContrast
+            ? FMargin(8.f, 6.f)
+            : FMargin(6.f, 5.f);
+    }
+
+    inline float GetSectionGap()
+    {
+        return GetActiveThemePreset() == ERIThemePreset::SoftContrast ? 6.f : 5.f;
+    }
+
+    inline float GetInlineGap()
+    {
+        return GetActiveThemePreset() == ERIThemePreset::SoftContrast ? 4.f : 3.f;
     }
 
     inline FLinearColor GetPageBackgroundColor()
@@ -586,6 +622,53 @@ namespace RICompactUI
         }
     }
 
+    inline void CenterContentTextRecursive(UWidget* Widget)
+    {
+        if (!Widget)
+        {
+            return;
+        }
+
+        if (UTextBlock* TextBlock = Cast<UTextBlock>(Widget))
+        {
+            TextBlock->SetJustification(ETextJustify::Center);
+            return;
+        }
+
+        if (USizeBox* SizeBox = Cast<USizeBox>(Widget))
+        {
+            if (USizeBoxSlot* SizeBoxSlot = Cast<USizeBoxSlot>(SizeBox->GetContentSlot()))
+            {
+                SizeBoxSlot->SetHorizontalAlignment(HAlign_Center);
+                SizeBoxSlot->SetVerticalAlignment(VAlign_Center);
+                SizeBoxSlot->SetPadding(FMargin(0.f));
+            }
+        }
+
+        if (UBorder* Border = Cast<UBorder>(Widget))
+        {
+            if (UBorderSlot* BorderSlot = Cast<UBorderSlot>(Border->GetContentSlot()))
+            {
+                BorderSlot->SetHorizontalAlignment(HAlign_Center);
+                BorderSlot->SetVerticalAlignment(VAlign_Center);
+                BorderSlot->SetPadding(FMargin(0.f));
+            }
+        }
+
+        if (UContentWidget* ContentWidget = Cast<UContentWidget>(Widget))
+        {
+            CenterContentTextRecursive(ContentWidget->GetContent());
+        }
+
+        if (UPanelWidget* PanelWidget = Cast<UPanelWidget>(Widget))
+        {
+            for (int32 ChildIndex = 0; ChildIndex < PanelWidget->GetChildrenCount(); ++ChildIndex)
+            {
+                CenterContentTextRecursive(PanelWidget->GetChildAt(ChildIndex));
+            }
+        }
+    }
+
     inline void ConfigureButton(UButton* Button, ERIButtonVisualStyle Style, bool bApplyTextColorToChildren);
 
     inline void SetWidgetEnabledState(UWidget* Widget, bool bEnabled, const FString& DisabledReason = FString(), const FString& EnabledTooltip = FString())
@@ -649,8 +732,8 @@ namespace RICompactUI
         ButtonStyle.Pressed.TintColor = FSlateColor(Palette.Pressed);
         ButtonStyle.Disabled.TintColor = FSlateColor(Palette.Disabled);
         const FRIThemeMetrics& Metrics = GetThemeMetrics();
-        ButtonStyle.NormalPadding = Metrics.ButtonPadding;
-        ButtonStyle.PressedPadding = FMargin(Metrics.ButtonPadding.Left, Metrics.ButtonPadding.Top + 1.f, Metrics.ButtonPadding.Right, Metrics.ButtonPadding.Bottom);
+        ButtonStyle.NormalPadding = FMargin(Metrics.ButtonPadding.Left, 0.f, Metrics.ButtonPadding.Right, 0.f);
+        ButtonStyle.PressedPadding = FMargin(Metrics.ButtonPadding.Left, 0.f, Metrics.ButtonPadding.Right, 0.f);
         ButtonStyle.Normal.DrawAs = ESlateBrushDrawType::RoundedBox;
         ButtonStyle.Hovered.DrawAs = ESlateBrushDrawType::RoundedBox;
         ButtonStyle.Pressed.DrawAs = ESlateBrushDrawType::RoundedBox;
@@ -668,6 +751,13 @@ namespace RICompactUI
 
         Button->SetBackgroundColor(FLinearColor::White);
         Button->SetColorAndOpacity(FLinearColor::White);
+        if (UButtonSlot* ButtonSlot = Cast<UButtonSlot>(Button->GetContentSlot()))
+        {
+            ButtonSlot->SetHorizontalAlignment(HAlign_Center);
+            ButtonSlot->SetVerticalAlignment(VAlign_Center);
+            ButtonSlot->SetPadding(FMargin(0.f));
+        }
+        CenterContentTextRecursive(Button);
 
         if (bApplyTextColorToChildren)
         {
@@ -697,7 +787,9 @@ namespace RICompactUI
             SizeBox->SetMinDesiredWidth(72.f);
         }
         SizeBox->SetHeightOverride(HeightOverride > 0.f ? HeightOverride : Metrics.ButtonHeight);
-        SizeBox->SetContent(MakeText(WidgetTree, Label, EffectiveFontSize, true, GetButtonTextColor(Style)));
+        UTextBlock* LabelText = MakeText(WidgetTree, Label, EffectiveFontSize, true, GetButtonTextColor(Style));
+        LabelText->SetJustification(ETextJustify::Center);
+        SizeBox->SetContent(LabelText);
         Button->AddChild(SizeBox);
         ConfigureButton(Button, Style, false);
         return Button;
@@ -715,6 +807,58 @@ namespace RICompactUI
         Border->SetPadding(Metrics.SectionPadding);
         Border->SetBrushColor(Palette.Background);
         Border->SetContent(MakeText(WidgetTree, Label, GetSectionTitleFontSize(), true, Palette.Text));
+        return Border;
+    }
+
+    inline UBorder* MakeSurfaceCard(
+        UWidgetTree* WidgetTree,
+        const FName& Name = NAME_None,
+        const FLinearColor& Background = FLinearColor::Transparent,
+        const FMargin& Padding = FMargin(-1.f))
+    {
+        if (!WidgetTree)
+        {
+            return nullptr;
+        }
+
+        UBorder* Border = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), Name);
+        Border->SetPadding(Padding.Left >= 0.f ? Padding : GetSurfaceCardPadding());
+        Border->SetBrushColor(Background == FLinearColor::Transparent ? GetSectionSurfaceBackgroundColor() : Background);
+        return Border;
+    }
+
+    inline UWidget* MakeMetricCard(
+        UWidgetTree* WidgetTree,
+        const FString& Label,
+        const FName& ValueName,
+        UTextBlock*& OutValueText,
+        const FLinearColor& Background,
+        int32 ValueFontSize = 0,
+        bool bBoldValue = true)
+    {
+        if (!WidgetTree)
+        {
+            return nullptr;
+        }
+
+        UBorder* Border = MakeSurfaceCard(WidgetTree, NAME_None, Background, GetSurfaceCardPadding(true));
+        UVerticalBox* Box = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
+        Border->SetContent(Box);
+
+        if (UVerticalBoxSlot* LabelSlot = Box->AddChildToVerticalBox(MakeText(WidgetTree, Label, GetMutedFontSize(), true, GetMutedTextColor())))
+        {
+            LabelSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 2.f));
+        }
+
+        OutValueText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), ValueName);
+        OutValueText->SetAutoWrapText(true);
+        OutValueText->SetClipping(EWidgetClipping::ClipToBounds);
+        ApplyTextStyle(
+            OutValueText,
+            ValueFontSize > 0 ? ValueFontSize : GetValueFontSize(),
+            bBoldValue,
+            GetStrongTextColor());
+        Box->AddChildToVerticalBox(OutValueText);
         return Border;
     }
 

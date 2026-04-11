@@ -622,7 +622,7 @@ void UInspectorFilePageWidget::BuildWidgetTree()
     }
 
     UBorder* RootBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("RI_FileRoot"));
-    RootBorder->SetPadding(FMargin(4.f));
+    RootBorder->SetPadding(RICompactUI::GetPanelPadding());
     RootBorder->SetBrushColor(RICompactUI::GetPageBackgroundColor());
 
     UVerticalBox* RootBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_FileRootBox"));
@@ -637,43 +637,64 @@ void UInspectorFilePageWidget::BuildWidgetTree()
     UVerticalBox* MainBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_FileMainBox"));
     PageScrollBox->AddChild(MainBox);
 
+    if (UVerticalBoxSlot* VBoxSlot = MainBox->AddChildToVerticalBox(CreateSectionTitle(TEXT("Changes Workspace"), true)))
+    {
+        VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, RICompactUI::GetInlineGap()));
+    }
+
+    if (UVerticalBoxSlot* VBoxSlot = MainBox->AddChildToVerticalBox(RI_MakeText(
+        WidgetTree,
+        TEXT("Review runtime edits, stage them intentionally, preview source impact, then apply only when the result is clear."),
+        RICompactUI::GetMutedFontSize(),
+        false,
+        RI_FileMutedColor(),
+        true)))
+    {
+        VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, RICompactUI::GetSectionGap()));
+    }
+
     if (UVerticalBoxSlot* VBoxSlot = MainBox->AddChildToVerticalBox(CreateSelectionContextSection()))
     {
-        VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+        VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, RICompactUI::GetSectionGap()));
     }
 
     if (UVerticalBoxSlot* VBoxSlot = MainBox->AddChildToVerticalBox(CreateMainActionsSection()))
     {
-        VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+        VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, RICompactUI::GetSectionGap()));
     }
 
     if (UVerticalBoxSlot* VBoxSlot = MainBox->AddChildToVerticalBox(CreateStatusSection()))
     {
-        VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+        VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, RICompactUI::GetSectionGap()));
     }
 
     if (UVerticalBoxSlot* VBoxSlot = MainBox->AddChildToVerticalBox(CreateAuditsSection()))
     {
-        VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+        VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, RICompactUI::GetSectionGap()));
     }
 
     if (UVerticalBoxSlot* VBoxSlot = MainBox->AddChildToVerticalBox(CreatePresetsSection()))
     {
-        VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+        VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, RICompactUI::GetSectionGap()));
     }
 
     if (UVerticalBoxSlot* VBoxSlot = MainBox->AddChildToVerticalBox(CreateSnapshotSettingsSection()))
     {
-        VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+        VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, RICompactUI::GetSectionGap()));
     }
 
-    UHorizontalBox* FooterRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_FileFooterRow"));
-    if (UVerticalBoxSlot* VBoxSlot = RootBox->AddChildToVerticalBox(FooterRow))
+    UBorder* FooterBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("RI_FileFooterBorder"));
+    FooterBorder->SetPadding(RICompactUI::GetSurfaceCardPadding());
+    FooterBorder->SetBrushColor(RICompactUI::GetFooterBackgroundColor());
+    if (UVerticalBoxSlot* VBoxSlot = RootBox->AddChildToVerticalBox(FooterBorder))
     {
         VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 0.f));
     }
 
-    StatusText = RI_MakeText(WidgetTree, TEXT("Snapshot Ready"), 6, false, RI_FileMutedColor(), true);
+    UHorizontalBox* FooterRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_FileFooterRow"));
+    FooterBorder->SetContent(FooterRow);
+
+    StatusText = RI_MakeText(WidgetTree, TEXT("Changes ready"), 6, false, RI_FileMutedColor(), true);
     if (UHorizontalBoxSlot* HSlot = FooterRow->AddChildToHorizontalBox(StatusText))
     {
         HSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
@@ -707,7 +728,7 @@ UWidget* UInspectorFilePageWidget::CreateSectionTitle(const FString& InTitle, bo
 UWidget* UInspectorFilePageWidget::CreateSelectionContextSection()
 {
     UVerticalBox* Outer = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
-    if (UVerticalBoxSlot* VBoxSlot = Outer->AddChildToVerticalBox(CreateSectionTitle(TEXT("Snapshot Context"), true)))
+    if (UVerticalBoxSlot* VBoxSlot = Outer->AddChildToVerticalBox(CreateSectionTitle(TEXT("Changes Context"), true)))
     {
         VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
     }
@@ -838,7 +859,7 @@ UWidget* UInspectorFilePageWidget::CreateMainActionsSection()
 {
     UVerticalBox* Outer = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
 
-    if (UVerticalBoxSlot* VBoxSlot = Outer->AddChildToVerticalBox(CreateSectionTitle(TEXT("Snapshot Workflow"), true)))
+    if (UVerticalBoxSlot* VBoxSlot = Outer->AddChildToVerticalBox(CreateSectionTitle(TEXT("Mainline Path"), true)))
     {
         VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
     }
@@ -848,7 +869,7 @@ UWidget* UInspectorFilePageWidget::CreateMainActionsSection()
     IntroBorder->SetBrushColor(RI_FileRowColor());
     IntroBorder->SetContent(RI_MakeText(
         WidgetTree,
-        TEXT("Work from left to right: stage the live edit, review the snapshot preview, then apply only when the snapshot looks correct."),
+        TEXT("Work from left to right: stage the live edit, review the source preview, then apply only when the change review is clear."),
         6,
         false,
         RI_FileMutedColor(),
@@ -922,8 +943,8 @@ UWidget* UInspectorFilePageWidget::CreateMainActionsSection()
     AddCard(
         RowA,
         TEXT("Step 1"),
-        TEXT("Stage Snapshot"),
-        TEXT("Capture the current runtime edits into a staged snapshot patch."),
+        TEXT("Stage Runtime Changes"),
+        TEXT("Capture the current runtime edits into a staged patch bundle for review."),
         TEXT("BTN_FileStagePatch"),
         TEXT("RI_FileActionCard_Stage"),
         StagePatchButton,
@@ -938,8 +959,8 @@ UWidget* UInspectorFilePageWidget::CreateMainActionsSection()
     AddCard(
         RowA,
         TEXT("Step 2"),
-        TEXT("Preview Snapshot Source"),
-        TEXT("See the source-side snapshot preview before writing anything back."),
+        TEXT("Preview Source Changes"),
+        TEXT("See the source-side preview before writing anything back."),
         TEXT("BTN_FilePreviewPromote"),
         TEXT("RI_FileActionCard_Preview"),
         PreviewPromoteButton,
@@ -955,8 +976,8 @@ UWidget* UInspectorFilePageWidget::CreateMainActionsSection()
     AddCard(
         RowB,
         TEXT("Step 3"),
-        TEXT("Apply Snapshot To Source"),
-        TEXT("Write the staged snapshot patch back to source settings or assets."),
+        TEXT("Apply To Source"),
+        TEXT("Write the staged patch back to source settings or assets."),
         TEXT("BTN_FilePromoteApply"),
         TEXT("RI_FileActionCard_Apply"),
         PromoteApplyButton,
@@ -972,8 +993,8 @@ UWidget* UInspectorFilePageWidget::CreateMainActionsSection()
     AddCard(
         RowC,
         TEXT("Optional"),
-        TEXT("Discard Snapshot Patch"),
-        TEXT("Clear the staged snapshot patch without changing source content."),
+        TEXT("Discard Staged Patch"),
+        TEXT("Clear the staged patch without changing source content."),
         TEXT("BTN_FileClearStaged"),
         TEXT("RI_FileActionCard_Clear"),
         ClearStagedButton,
@@ -1032,7 +1053,7 @@ UWidget* UInspectorFilePageWidget::CreateInfoRow(const FString& Label, TObjectPt
 UWidget* UInspectorFilePageWidget::CreateStatusSection()
 {
     UVerticalBox* Outer = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
-    if (UVerticalBoxSlot* VBoxSlot = Outer->AddChildToVerticalBox(CreateSectionTitle(TEXT("Snapshot Status"), true)))
+    if (UVerticalBoxSlot* VBoxSlot = Outer->AddChildToVerticalBox(CreateSectionTitle(TEXT("Current Change State"), true)))
     {
         VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
     }
@@ -1064,15 +1085,15 @@ UWidget* UInspectorFilePageWidget::CreateStatusSection()
         VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
     }
 
-    if (UVerticalBoxSlot* VBoxSlot = Outer->AddChildToVerticalBox(CreateInfoRow(TEXT("Staged Snapshot Patch"), StagedPatchText, true)))
+    if (UVerticalBoxSlot* VBoxSlot = Outer->AddChildToVerticalBox(CreateInfoRow(TEXT("Staged Patch"), StagedPatchText, true)))
     {
         VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 3.f));
     }
-    if (UVerticalBoxSlot* VBoxSlot = Outer->AddChildToVerticalBox(CreateInfoRow(TEXT("Preview Snapshot Source"), PromotePreviewText, true)))
+    if (UVerticalBoxSlot* VBoxSlot = Outer->AddChildToVerticalBox(CreateInfoRow(TEXT("Preview Source Changes"), PromotePreviewText, true)))
     {
         VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 3.f));
     }
-    if (UVerticalBoxSlot* VBoxSlot = Outer->AddChildToVerticalBox(CreateInfoRow(TEXT("Apply Snapshot To Source"), PromoteResultText, true)))
+    if (UVerticalBoxSlot* VBoxSlot = Outer->AddChildToVerticalBox(CreateInfoRow(TEXT("Apply To Source"), PromoteResultText, true)))
     {
         VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 3.f));
     }
@@ -1087,7 +1108,7 @@ UWidget* UInspectorFilePageWidget::CreateStatusSection()
 UWidget* UInspectorFilePageWidget::CreateAuditsSection()
 {
     UVerticalBox* Outer = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
-    UWidget* Header = CreateCollapsibleSectionHeader(TEXT("Snapshot Audits"), AuditsSectionToggleText, TEXT("BTN_FileToggleAudits"));
+    UWidget* Header = CreateCollapsibleSectionHeader(TEXT("Audits & Comparisons"), AuditsSectionToggleText, TEXT("BTN_FileToggleAudits"));
     if (UButton* HeaderButton = Cast<UButton>(Header))
     {
         HeaderButton->OnClicked.AddDynamic(this, &UInspectorFilePageWidget::HandleToggleAuditsSectionClicked);
@@ -1227,7 +1248,7 @@ UWidget* UInspectorFilePageWidget::CreateAuditsSection()
 UWidget* UInspectorFilePageWidget::CreatePresetsSection()
 {
     UVerticalBox* Outer = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
-    UWidget* Header = CreateCollapsibleSectionHeader(TEXT("Snapshot Artifacts"), PresetsSectionToggleText, TEXT("BTN_FileTogglePresets"));
+    UWidget* Header = CreateCollapsibleSectionHeader(TEXT("Presets & Export"), PresetsSectionToggleText, TEXT("BTN_FileTogglePresets"));
     if (UButton* HeaderButton = Cast<UButton>(Header))
     {
         HeaderButton->OnClicked.AddDynamic(this, &UInspectorFilePageWidget::HandleTogglePresetsSectionClicked);
@@ -1270,7 +1291,7 @@ UWidget* UInspectorFilePageWidget::CreatePresetsSection()
     ApplyLatestPresetButton->OnClicked.AddDynamic(this, &UInspectorFilePageWidget::HandleApplyLatestPresetClicked);
     AddButton(ApplyLatestPresetButton);
 
-    if (UVerticalBoxSlot* VBoxSlot = PresetsSectionBody->AddChildToVerticalBox(CreateSectionTitle(TEXT("Latest Snapshot Artifacts"))))
+    if (UVerticalBoxSlot* VBoxSlot = PresetsSectionBody->AddChildToVerticalBox(CreateSectionTitle(TEXT("Latest Artifacts"))))
     {
         VBoxSlot->SetPadding(FMargin(0.f, 4.f, 0.f, 4.f));
     }
@@ -1802,22 +1823,22 @@ void UInspectorFilePageWidget::ApplyPrimaryActionGuidance(const AActor* Selected
     const bool bHasPromoteResult = Summary && (Summary->bHasLastPromoteResult || !Summary->LastPromoteSummary.TrimStartAndEnd().IsEmpty());
 
     const FString NextStep = !bHasSelectedActor
-        ? TEXT("Select an actor in Actor, edit a property, then return to Snapshot.")
+        ? TEXT("Select an actor in Actor, edit a property, then return to Changes.")
         : (!bHasStagedPatch
-            ? TEXT("Stage Snapshot to capture the current runtime edits.")
+            ? TEXT("Stage Runtime Changes to capture the current runtime edits.")
             : (!bHasPreview
-                ? TEXT("Preview Snapshot Source to inspect the staged snapshot patch before writing to source.")
+                ? TEXT("Preview Source Changes to inspect the staged patch before writing to source.")
                 : (!bHasPromoteResult
-                    ? TEXT("Review the preview, then Apply Snapshot To Source when the staged snapshot patch looks correct.")
-                    : TEXT("Use audits to verify the result, or discard the staged snapshot patch if you are done."))));
+                    ? TEXT("Review the preview, then Apply To Source when the staged patch looks correct.")
+                    : TEXT("Use audits to verify the result, or discard the staged patch if you are done."))));
 
     const FString ActionGuide = !bHasSelectedActor
-        ? TEXT("Start in Actor. Snapshot is for stage, preview, and apply.")
+        ? TEXT("Start in Actor. Changes is for stage, preview, and apply.")
         : (!bHasStagedPatch
-            ? TEXT("Recommended path: Stage Snapshot -> Preview Snapshot Source -> Apply Snapshot To Source.")
+            ? TEXT("Recommended path: Stage Runtime Changes -> Preview Source Changes -> Apply To Source.")
             : (bHasPreview
-                ? TEXT("You already have a staged snapshot patch and preview. Apply when ready, or discard it.")
-                : TEXT("You already have a staged snapshot patch. Preview it next, or discard it.")));
+                ? TEXT("You already have a staged patch and preview. Apply when ready, or discard it.")
+                : TEXT("You already have a staged patch. Preview it next, or discard it.")));
 
     SetValueText(NextStepText, NextStep, !bHasSelectedActor);
     SetValueText(ActionGuideText, ActionGuide);
@@ -1853,55 +1874,55 @@ void UInspectorFilePageWidget::ApplyPrimaryActionButtonStates(const AActor* Sele
     const bool bHasPromoteResult = Summary && (Summary->bHasLastPromoteResult || !Summary->LastPromoteSummary.TrimStartAndEnd().IsEmpty());
     const bool bHasPreset = Summary && Summary->PresetCount > 0;
     const FString StageReason = bHasSelectedActor ? FString() : TEXT("Select an actor first.");
-    const FString PreviewReason = bHasStagedPatch ? FString() : TEXT("Stage a snapshot patch first.");
-    const FString ApplyReason = !bHasStagedPatch ? TEXT("Stage a snapshot patch first.") : (!bHasPreview ? TEXT("Preview snapshot source first.") : FString());
+    const FString PreviewReason = bHasStagedPatch ? FString() : TEXT("Stage runtime changes first.");
+    const FString ApplyReason = !bHasStagedPatch ? TEXT("Stage runtime changes first.") : (!bHasPreview ? TEXT("Preview source changes first.") : FString());
     const FString ClearReason = bHasStagedPatch ? FString() : TEXT("Nothing is staged yet.");
-    const FString ExportReason = bHasStagedPatch ? FString() : TEXT("Stage a snapshot patch first.");
-    const FString PresetReason = bHasStagedPatch ? FString() : TEXT("Stage a snapshot patch first.");
+    const FString ExportReason = bHasStagedPatch ? FString() : TEXT("Stage runtime changes first.");
+    const FString PresetReason = bHasStagedPatch ? FString() : TEXT("Stage runtime changes first.");
     const FString ApplyPresetReason = bHasPreset ? FString() : TEXT("No presets are available yet.");
     const FString BaselineReason = bHasSelectedActor ? FString() : TEXT("Select an actor first.");
-    const FString AuditReason = bHasStagedPatch ? FString() : TEXT("Stage a snapshot patch first.");
-    const FString AppliedAuditReason = bHasPromoteResult ? FString() : TEXT("Run Apply Snapshot To Source first.");
+    const FString AuditReason = bHasStagedPatch ? FString() : TEXT("Stage runtime changes first.");
+    const FString AppliedAuditReason = bHasPromoteResult ? FString() : TEXT("Run Apply To Source first.");
 
     if (StagePatchButton)
     {
-        RICompactUI::SetButtonAffordance(StagePatchButton, RICompactUI::ERIButtonVisualStyle::Primary, bHasSelectedActor, StageReason, TEXT("Stage the current runtime edits as a snapshot patch."), true);
+        RICompactUI::SetButtonAffordance(StagePatchButton, RICompactUI::ERIButtonVisualStyle::Primary, bHasSelectedActor, StageReason, TEXT("Stage the current runtime edits as a patch."), true);
     }
     if (PreviewPromoteButton)
     {
-        RICompactUI::SetButtonAffordance(PreviewPromoteButton, RICompactUI::ERIButtonVisualStyle::Secondary, bHasStagedPatch, PreviewReason, TEXT("Preview the staged snapshot patch on the source side."), true);
+        RICompactUI::SetButtonAffordance(PreviewPromoteButton, RICompactUI::ERIButtonVisualStyle::Secondary, bHasStagedPatch, PreviewReason, TEXT("Preview the staged patch on the source side."), true);
     }
     if (PromoteApplyButton)
     {
-        RICompactUI::SetButtonAffordance(PromoteApplyButton, RICompactUI::ERIButtonVisualStyle::Primary, bHasStagedPatch && bHasPreview, ApplyReason, TEXT("Write the staged snapshot patch back to source."), true);
+        RICompactUI::SetButtonAffordance(PromoteApplyButton, RICompactUI::ERIButtonVisualStyle::Primary, bHasStagedPatch && bHasPreview, ApplyReason, TEXT("Write the staged patch back to source."), true);
     }
     if (ClearStagedButton)
     {
-        RICompactUI::SetButtonAffordance(ClearStagedButton, RICompactUI::ERIButtonVisualStyle::Danger, bHasStagedPatch, ClearReason, TEXT("Discard the staged snapshot patch."), true);
+        RICompactUI::SetButtonAffordance(ClearStagedButton, RICompactUI::ERIButtonVisualStyle::Danger, bHasStagedPatch, ClearReason, TEXT("Discard the staged patch."), true);
     }
     if (ExportPatchButton)
     {
-        RICompactUI::SetButtonAffordance(ExportPatchButton, RICompactUI::ERIButtonVisualStyle::Secondary, bHasStagedPatch, ExportReason, TEXT("Export the staged snapshot patch bundle."), true);
+        RICompactUI::SetButtonAffordance(ExportPatchButton, RICompactUI::ERIButtonVisualStyle::Secondary, bHasStagedPatch, ExportReason, TEXT("Export the staged patch bundle."), true);
     }
     if (SavePresetButton)
     {
-        RICompactUI::SetButtonAffordance(SavePresetButton, RICompactUI::ERIButtonVisualStyle::Secondary, bHasStagedPatch, PresetReason, TEXT("Save the staged snapshot patch as a preset."), true);
+        RICompactUI::SetButtonAffordance(SavePresetButton, RICompactUI::ERIButtonVisualStyle::Secondary, bHasStagedPatch, PresetReason, TEXT("Save the staged patch as a preset."), true);
     }
     if (ApplyLatestPresetButton)
     {
-        RICompactUI::SetButtonAffordance(ApplyLatestPresetButton, RICompactUI::ERIButtonVisualStyle::Secondary, bHasPreset, ApplyPresetReason, TEXT("Apply the newest available snapshot preset."), true);
+        RICompactUI::SetButtonAffordance(ApplyLatestPresetButton, RICompactUI::ERIButtonVisualStyle::Secondary, bHasPreset, ApplyPresetReason, TEXT("Apply the newest available preset."), true);
     }
     if (BuildBaselineAuditButton)
     {
-        RICompactUI::SetButtonAffordance(BuildBaselineAuditButton, RICompactUI::ERIButtonVisualStyle::Secondary, bHasSelectedActor, BaselineReason, TEXT("Compare the baseline snapshot actor state."), true);
+        RICompactUI::SetButtonAffordance(BuildBaselineAuditButton, RICompactUI::ERIButtonVisualStyle::Secondary, bHasSelectedActor, BaselineReason, TEXT("Compare the baseline actor state."), true);
     }
     if (BuildAuditButton)
     {
-        RICompactUI::SetButtonAffordance(BuildAuditButton, RICompactUI::ERIButtonVisualStyle::Secondary, bHasStagedPatch, AuditReason, TEXT("Compare the current snapshot patch against the last staged snapshot patch."), true);
+        RICompactUI::SetButtonAffordance(BuildAuditButton, RICompactUI::ERIButtonVisualStyle::Secondary, bHasStagedPatch, AuditReason, TEXT("Compare the current runtime state against the staged patch."), true);
     }
     if (BuildPatchVsSourceAuditButton)
     {
-        RICompactUI::SetButtonAffordance(BuildPatchVsSourceAuditButton, RICompactUI::ERIButtonVisualStyle::Secondary, bHasStagedPatch, AuditReason, TEXT("Preview the staged snapshot patch against source."), true);
+        RICompactUI::SetButtonAffordance(BuildPatchVsSourceAuditButton, RICompactUI::ERIButtonVisualStyle::Secondary, bHasStagedPatch, AuditReason, TEXT("Compare the staged patch against source."), true);
     }
     if (BuildAppliedAuditButton)
     {

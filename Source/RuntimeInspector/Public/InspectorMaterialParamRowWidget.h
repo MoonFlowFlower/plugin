@@ -1,0 +1,70 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Blueprint/UserWidget.h"
+#include "InspectorMaterialParamRowWidget.generated.h"
+
+class UBorder;
+class UButton;
+class UHorizontalBox;
+class UInspectorMaterialParamItem;
+class UInspectorWorldSubsystem;
+class UTextBlock;
+
+UCLASS()
+class RUNTIMEINSPECTOR_API UInspectorMaterialParamRowWidget : public UUserWidget
+{
+    GENERATED_BODY()
+
+public:
+    UInspectorMaterialParamRowWidget(const FObjectInitializer& ObjectInitializer);
+
+    void SetInspectorSubsystem(UInspectorWorldSubsystem* InSubsystem);
+    void SetMaterialItem(UInspectorMaterialParamItem* InItem);
+
+    bool IsColorSwatchVisibleForAutomation() const;
+    bool IsScalarValueVisibleForAutomation() const;
+    bool HasFavoriteButtonForAutomation() const;
+
+protected:
+    virtual TSharedRef<SWidget> RebuildWidget() override;
+    virtual void NativeConstruct() override;
+
+private:
+    void BuildWidgetTree();
+    void RefreshRow();
+
+    UFUNCTION()
+    void HandleFavoriteClicked();
+
+    UFUNCTION()
+    void HandleColorClicked();
+
+private:
+    UPROPERTY(Transient)
+    TObjectPtr<UBorder> RootBorder = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UHorizontalBox> RootBox = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UButton> FavoriteButton = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UTextBlock> FavoriteText = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UTextBlock> NameText = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UTextBlock> ReadOnlyValueText = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UButton> ColorButton = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UBorder> ColorSwatch = nullptr;
+
+    TWeakObjectPtr<UInspectorWorldSubsystem> Subsystem;
+    TWeakObjectPtr<UInspectorMaterialParamItem> MaterialItem;
+};

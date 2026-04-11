@@ -24,6 +24,8 @@ public:
     void SetOnlyModified(bool bInOnlyModified);
     void RefreshFromSubsystem();
     int32 GetEntryWidgetCountForAutomation() const;
+    bool HasSummaryHeader() const { return HeaderBorder != nullptr; }
+    bool HasPropertyScrollRoot() const { return ScrollBox != nullptr; }
 
 protected:
     virtual TSharedRef<SWidget> RebuildWidget() override;

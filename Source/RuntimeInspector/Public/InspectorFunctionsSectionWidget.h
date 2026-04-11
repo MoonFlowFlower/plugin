@@ -26,6 +26,8 @@ public:
     int32 GetEntryWidgetCountForAutomation() const;
 
     bool HasFunctionsSection() const { return FunctionsSectionBorder != nullptr; }
+    bool HasFunctionScrollRoot() const { return FunctionsScrollBox != nullptr; }
+    bool HasFocusSummary() const { return FocusSummaryText != nullptr; }
 
 protected:
     virtual TSharedRef<SWidget> RebuildWidget() override;

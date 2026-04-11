@@ -101,6 +101,22 @@ void UInspectorPropertyRowWidget::BuildWidgetTree()
     RootBox = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_PropertyRowBox"));
     RootBorder->SetContent(RootBox);
 
+    FavoriteButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("RI_PropertyRowFavoriteButton"));
+    RICompactUI::ConfigureButton(FavoriteButton, RICompactUI::ERIButtonVisualStyle::Secondary, false);
+    USizeBox* FavoriteSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_PropertyRowFavoriteSize"));
+    FavoriteSizeBox->SetWidthOverride(24.f);
+    FavoriteSizeBox->SetHeightOverride(24.f);
+    FavoriteText = RICompactUI::MakeText(WidgetTree, TEXT("☆"), RICompactUI::GetValueFontSize(), true, RI_PropertyMutedColor(), false);
+    FavoriteText->SetJustification(ETextJustify::Center);
+    FavoriteSizeBox->SetContent(FavoriteText);
+    FavoriteButton->AddChild(FavoriteSizeBox);
+    FavoriteButton->OnClicked.AddDynamic(this, &UInspectorPropertyRowWidget::HandleFavoriteClicked);
+    if (UHorizontalBoxSlot* FavoriteSlot = RootBox->AddChildToHorizontalBox(FavoriteButton))
+    {
+        FavoriteSlot->SetVerticalAlignment(VAlign_Center);
+        FavoriteSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
+    }
+
     NameText = RICompactUI::MakeText(WidgetTree, TEXT("Property"), RICompactUI::GetLabelFontSize(), true, RI_PropertyTextColor(), true);
     if (UHorizontalBoxSlot* NameSlot = RootBox->AddChildToHorizontalBox(NameText))
     {
@@ -150,11 +166,11 @@ void UInspectorPropertyRowWidget::BuildWidgetTree()
     }
 
     ColorButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("RI_PropertyRowColorButton"));
-    RICompactUI::ConfigureButton(ColorButton, RICompactUI::ERIButtonVisualStyle::Secondary, false);
+    RICompactUI::ConfigureButton(ColorButton, RICompactUI::ERIButtonVisualStyle::Subtle, false);
     ColorButton->OnClicked.AddDynamic(this, &UInspectorPropertyRowWidget::HandleColorClicked);
     USizeBox* ColorSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_PropertyRowColorSize"));
-    ColorSizeBox->SetWidthOverride(24.f);
-    ColorSizeBox->SetHeightOverride(24.f);
+    ColorSizeBox->SetWidthOverride(34.f);
+    ColorSizeBox->SetHeightOverride(20.f);
     ColorSwatch = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("RI_PropertyRowColorSwatch"));
     ColorSwatch->SetPadding(FMargin(0.f));
     ColorSwatch->SetBrushColor(FLinearColor::Black);
@@ -164,16 +180,6 @@ void UInspectorPropertyRowWidget::BuildWidgetTree()
     {
         ColorSlot->SetVerticalAlignment(VAlign_Center);
         ColorSlot->SetPadding(FMargin(0.f, 0.f, 6.f, 0.f));
-    }
-
-    FavoriteButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("RI_PropertyRowFavoriteButton"));
-    RICompactUI::ConfigureButton(FavoriteButton, RICompactUI::ERIButtonVisualStyle::Secondary, false);
-    FavoriteButton->OnClicked.AddDynamic(this, &UInspectorPropertyRowWidget::HandleFavoriteClicked);
-    FavoriteText = RICompactUI::MakeText(WidgetTree, TEXT("*"), RICompactUI::GetLabelFontSize(), true, RI_PropertyMutedColor(), false);
-    FavoriteButton->AddChild(FavoriteText);
-    if (UHorizontalBoxSlot* FavoriteSlot = RootBox->AddChildToHorizontalBox(FavoriteButton))
-    {
-        FavoriteSlot->SetVerticalAlignment(VAlign_Center);
     }
 
     WidgetTree->RootWidget = RootBorder;
@@ -222,7 +228,8 @@ void UInspectorPropertyRowWidget::RefreshRow()
     }
     if (FavoriteText)
     {
-        const bool bFavorited = Subsystem.IsValid() && Subsystem->IsFavoriteForItem(Item);
+        const bool bFavorited = Subsystem.IsValid() && Subsystem->IsFavoriteForAnyItem(Item);
+        FavoriteText->SetText(FText::FromString(bFavorited ? TEXT("★") : TEXT("☆")));
         FavoriteText->SetColorAndOpacity(bFavorited ? RI_PropertyFavoriteActiveColor() : RI_PropertyMutedColor());
     }
 
@@ -350,7 +357,7 @@ void UInspectorPropertyRowWidget::HandleFavoriteClicked()
         return;
     }
 
-    InspectorSubsystem->ToggleFavoriteForItem(Item);
+    InspectorSubsystem->ToggleFavoriteForAnyItem(Item);
     RefreshRow();
 }
 

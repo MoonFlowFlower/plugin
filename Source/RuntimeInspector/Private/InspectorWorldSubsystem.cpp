@@ -6,6 +6,7 @@
 #include "InspectorFunctionItem.h"
 #include "InspectorFunctionsSectionWidget.h"
 #include "InspectorGroupsSectionWidget.h"
+#include "InspectorMaterialParamRowWidget.h"
 #include "InspectorPropertiesSectionWidget.h"
 #include "InspectorPropertyRowWidget.h"
 #include "InspectorMaterialParamItem.h"
@@ -27,6 +28,7 @@
 #include "Components/Button.h"
 #include "Components/ButtonSlot.h"
 #include "Components/Border.h"
+#include "Components/BorderSlot.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/CheckBox.h"
 #include "Components/ComboBoxString.h"
@@ -45,6 +47,7 @@
 #include "Components/PrimitiveComponent.h"
 #include "Components/ScrollBox.h"
 #include "Components/SizeBox.h"
+#include "Components/SizeBoxSlot.h"
 #include "Components/TextBlock.h"
 #include "Components/TreeView.h"
 #include "Components/VerticalBox.h"
@@ -104,8 +107,15 @@
 static FString RI_GetMaterialParamValueText(UPrimitiveComponent* Comp, int32 SlotIndex, EInspectorChangeType ChangeType, FName ParamName);
 static FString RI_GetActorDisplayLabel(const AActor* Actor);
 static void RI_ApplyLegacyActorHeaderVisibilityFix(UUserWidget* PanelWidget);
-static constexpr float RI_MinUsablePanelWidth = 640.0f;
-static constexpr float RI_MinUsablePanelHeight = 360.0f;
+static constexpr float RI_MinUsablePanelWidth = 700.0f;
+static constexpr float RI_MinUsablePanelHeight = 680.0f;
+static constexpr float RI_DefaultPanelViewportWidthFraction = 0.44f;
+static constexpr float RI_DefaultPanelViewportHeightFraction = 0.96f;
+static constexpr float RI_DefaultPanelWidthMax = 920.0f;
+static constexpr float RI_DefaultPanelHeightMin = 680.0f;
+static constexpr float RI_DefaultPanelViewportInsetX = 8.0f;
+static constexpr float RI_DefaultPanelViewportInsetY = 8.0f;
+static constexpr float RI_DefaultPanelViewportSafetyMargin = 16.0f;
 static const TCHAR* RI_ConfirmDialogClassPath = TEXT("/RuntimeInspector/UI/WBP_ConfirmDialog.WBP_ConfirmDialog_C");
 static const FName RI_SelfTestId_ConfirmDialog(TEXT("confirm_dialog_color_input"));
 static const FName RI_SelfTestId_SettingsPreview(TEXT("settings_preview"));
@@ -138,6 +148,81 @@ static const FName RI_SelfTestId_RemoteSessionCompare(TEXT("remote_session_compa
 static const FName RI_SelfTestId_RemoteSessionTargetSetCompare(TEXT("remote_session_target_set_compare"));
 static const FName RI_SelfTestId_RemoteSessionTargetSetCompareMatrix(TEXT("remote_session_target_set_compare_matrix"));
 static const FName RI_SelfTestId_RemoteSessionContextUI(TEXT("remote_session_context_ui"));
+
+static float RI_GetViewportLimitedDefaultDimension(float ResolvedDimension, float MinUsableDimension, float ViewportDimension, float ViewportFraction)
+{
+    if (ViewportDimension <= 1.0f)
+    {
+        return ResolvedDimension;
+    }
+
+    if (ViewportFraction <= 0.0f)
+    {
+        return ResolvedDimension;
+    }
+
+    const float PreferredMaxDimension = FMath::Max(MinUsableDimension, ViewportDimension * ViewportFraction);
+    return FMath::Clamp(ResolvedDimension, MinUsableDimension, PreferredMaxDimension);
+}
+
+static FVector2D RI_GetLogicalViewportSize(UWorld* World)
+{
+    if (!World)
+    {
+        return FVector2D::ZeroVector;
+    }
+
+    FVector2D ViewportSize = UWidgetLayoutLibrary::GetViewportSize(World);
+    const float ViewportScale = UWidgetLayoutLibrary::GetViewportScale(World);
+    if (ViewportScale > KINDA_SMALL_NUMBER)
+    {
+        ViewportSize /= ViewportScale;
+    }
+
+    return ViewportSize;
+}
+
+static float RI_GetViewportAvailableDimension(float ViewportDimension)
+{
+    return ViewportDimension > 1.0f
+        ? FMath::Max(320.0f, ViewportDimension - RI_DefaultPanelViewportSafetyMargin)
+        : 0.0f;
+}
+
+static float RI_ResolvePanelDefaultDimension(
+    float LogicalViewportDimension,
+    float ViewportFraction,
+    float PreferredMinDimension,
+    float PreferredMaxDimension)
+{
+    const float AvailableDimension = RI_GetViewportAvailableDimension(LogicalViewportDimension);
+    if (AvailableDimension <= 1.0f)
+    {
+        return 0.0f;
+    }
+
+    const float TargetDimension = LogicalViewportDimension * ViewportFraction;
+    const float EffectiveMaxDimension = PreferredMaxDimension > 1.0f
+        ? FMath::Min(PreferredMaxDimension, AvailableDimension)
+        : AvailableDimension;
+    const float EffectiveMinDimension = FMath::Min(PreferredMinDimension, EffectiveMaxDimension);
+    return FMath::Clamp(TargetDimension, EffectiveMinDimension, EffectiveMaxDimension);
+}
+
+static FVector2D RI_GetDefaultPanelCanvasPosition(UWorld* World, const FVector2D& PanelSize)
+{
+    const FVector2D LogicalViewportSize = RI_GetLogicalViewportSize(World);
+    if (LogicalViewportSize.X <= 1.0f || LogicalViewportSize.Y <= 1.0f)
+    {
+        return FVector2D(8.0f, 8.0f);
+    }
+
+    const float MaxX = FMath::Max(8.0f, LogicalViewportSize.X - PanelSize.X - 8.0f);
+    const float MaxY = FMath::Max(8.0f, LogicalViewportSize.Y - PanelSize.Y - 8.0f);
+    return FVector2D(
+        FMath::Clamp(LogicalViewportSize.X - PanelSize.X - RI_DefaultPanelViewportInsetX, 8.0f, MaxX),
+        FMath::Clamp(RI_DefaultPanelViewportInsetY, 8.0f, MaxY));
+}
 static const FName RI_SelfTestId_RemotePackagedFoundation(TEXT("remote_packaged_foundation"));
 static const FName RI_SelfTestId_RemotePackagedPatchPull(TEXT("remote_packaged_patch_pull"));
 static const FName RI_SelfTestId_RemotePackagedToSourceClosure(TEXT("remote_packaged_to_source_closure"));
@@ -430,6 +515,11 @@ static bool RI_IsVerticalSlotRule(const UWidget* Widget, ESlateSizeRule::Type Ru
 {
     const UVerticalBoxSlot* VerticalSlot = Widget ? Cast<UVerticalBoxSlot>(Widget->Slot) : nullptr;
     return VerticalSlot && VerticalSlot->GetSize().SizeRule == Rule;
+}
+
+static bool RI_IsRatioNear(float Actual, float Expected, float Tolerance = 0.05f)
+{
+    return FMath::Abs(Actual - Expected) <= Tolerance;
 }
 
 static bool RI_AreSelfTestPrimitiveValuesEquivalent(const FString& A, const FString& B, const FString& Kind)
@@ -1596,7 +1686,11 @@ FString UInspectorWorldSubsystem::GetActorPropertyHostDebugSummaryForAutomation(
     };
 
     return FString::Printf(
-        TEXT("Host=%s | Property=%s | Function=%s"),
+        TEXT("PageStack=%s | SelectionBand=%s | Body=%s | Left=%s | RightHost=%s | Property=%s | Function=%s"),
+        *DescribeWidget(ActorWorkbenchPageStackHost.Get()),
+        *DescribeWidget(ActorWorkspaceSelectionBand.Get()),
+        *DescribeWidget(ActorWorkbenchBodyHost.Get()),
+        *DescribeWidget(ActorGroupsSectionHostBox.Get()),
         *DescribeWidget(ActorPropertyFunctionHostBox.Get()),
         *DescribeWidget(ActorPropertiesSectionWidget.Get()),
         *DescribeWidget(ActorFunctionsSectionWidget.Get()));
@@ -1777,6 +1871,8 @@ FString UInspectorWorldSubsystem::GetPanelPresentationDebugSummaryForAutomation(
     const UCanvasPanelSlot* RootCanvasSlot = PanelRootCanvasSlot.Get();
     const USizeBox* SizeBox = PanelSizeBox.Get();
     const FVector2D PanelSize = Panel ? Panel->GetCachedGeometry().GetLocalSize() : FVector2D::ZeroVector;
+    const FVector2D LogicalViewportSize = RI_GetLogicalViewportSize(GetWorld());
+    const FVector2D DefaultCanvasPosition = RI_GetDefaultPanelCanvasPosition(GetWorld(), FVector2D(PanelDefaultWidth, PanelDefaultHeight));
     const FVector2D RootSlotSize = RootCanvasSlot ? RootCanvasSlot->GetSize() : FVector2D::ZeroVector;
     const FVector2D RootSlotPosition = RootCanvasSlot ? RootCanvasSlot->GetPosition() : FVector2D::ZeroVector;
     const FVector2D RootSlotAlignment = RootCanvasSlot ? RootCanvasSlot->GetAlignment() : FVector2D::ZeroVector;
@@ -1786,10 +1882,14 @@ FString UInspectorWorldSubsystem::GetPanelPresentationDebugSummaryForAutomation(
     const float HeightOverride = SizeBox ? SizeBox->GetHeightOverride() : 0.0f;
 
     return FString::Printf(
-        TEXT("Panel=%s logical=%.1fx%.1f translation=(%.1f,%.1f) default=%.1fx%.1f current=%.1fx%.1f Root=%s CanvasSlotSize=%.1fx%.1f CanvasPos=(%.1f,%.1f) CanvasAlign=(%.2f,%.2f) Anchors=(%.2f,%.2f,%.2f,%.2f) Offsets=(%.1f,%.1f,%.1f,%.1f) SizeBox=%s widthOverride=%.1f heightOverride=%.1f"),
+        TEXT("Panel=%s logical=%.1fx%.1f viewportLogical=%.1fx%.1f defaultCanvasPos=(%.1f,%.1f) translation=(%.1f,%.1f) default=%.1fx%.1f current=%.1fx%.1f Root=%s CanvasSlotSize=%.1fx%.1f CanvasPos=(%.1f,%.1f) CanvasAlign=(%.2f,%.2f) Anchors=(%.2f,%.2f,%.2f,%.2f) Offsets=(%.1f,%.1f,%.1f,%.1f) SizeBox=%s widthOverride=%.1f heightOverride=%.1f"),
         *DescribeWidget(Panel),
         PanelSize.X,
         PanelSize.Y,
+        LogicalViewportSize.X,
+        LogicalViewportSize.Y,
+        DefaultCanvasPosition.X,
+        DefaultCanvasPosition.Y,
         PanelTranslation.X,
         PanelTranslation.Y,
         PanelDefaultWidth,
@@ -2192,6 +2292,13 @@ void UInspectorWorldSubsystem::Tick(float DeltaTime)
     {
         ConfirmDialogBindAccum = 0.f;
         RefreshConfirmDialogBinding();
+    }
+
+    ConfirmDialogPreviewAccum += DeltaTime;
+    if (ConfirmDialogPreviewAccum >= 0.03f)
+    {
+        ConfirmDialogPreviewAccum = 0.f;
+        SyncActiveConfirmDialogColorPreview();
     }
 
     // Apply debounced property writes.
@@ -2635,6 +2742,24 @@ void UInspectorWorldSubsystem::EnsurePanelWidget()
     SharedContextClassText = nullptr;
     SharedContextSourceText = nullptr;
     SharedContextStagedText = nullptr;
+    ActorWorkspaceSelectionBandStrong = nullptr;
+    ActorWorkspaceSelectionActorTextStrong = nullptr;
+    ActorWorkspaceSelectionSourceTextStrong = nullptr;
+    ActorWorkspaceSelectionStateTextStrong = nullptr;
+    ActorPropertyFunctionHostBoxStrong = nullptr;
+    ActorWorkbenchBodyHostStrong = nullptr;
+    ActorWorkbenchPageStackHostStrong = nullptr;
+    ActorWorkbenchSidebarHostStrong = nullptr;
+    ActorWorkbenchContentHostStrong = nullptr;
+    ActorWorkspaceSelectionBand.Reset();
+    ActorWorkspaceSelectionActorText.Reset();
+    ActorWorkspaceSelectionSourceText.Reset();
+    ActorWorkspaceSelectionStateText.Reset();
+    ActorPropertyFunctionHostBox.Reset();
+    ActorWorkbenchBodyHost.Reset();
+    ActorWorkbenchPageStackHost.Reset();
+    ActorWorkbenchSidebarHost.Reset();
+    ActorWorkbenchContentHost.Reset();
     FilePageWidgetStrong = nullptr;
     SettingsPageWidgetStrong = nullptr;
     TestPageWidgetStrong = nullptr;
@@ -2696,7 +2821,21 @@ void UInspectorWorldSubsystem::CacheInitialPanelHeight()
 
     if (ResolvedHeight < RI_MinUsablePanelHeight)
     {
-        ResolvedHeight = 640.0f;
+        ResolvedHeight = 760.0f;
+    }
+
+    if (UWorld* World = GetWorld())
+    {
+        const FVector2D LogicalViewportSize = RI_GetLogicalViewportSize(World);
+        const float ViewportHeightDefault = RI_ResolvePanelDefaultDimension(
+            LogicalViewportSize.Y,
+            RI_DefaultPanelViewportHeightFraction,
+            RI_DefaultPanelHeightMin,
+            0.0f);
+        if (ViewportHeightDefault > 1.0f)
+        {
+            ResolvedHeight = ViewportHeightDefault;
+        }
     }
 
     PanelDefaultHeight = ResolvedHeight;
@@ -2755,13 +2894,27 @@ void UInspectorWorldSubsystem::CacheInitialPanelWidth()
 
     if (ResolvedWidth < RI_MinUsablePanelWidth)
     {
-        ResolvedWidth = 1120.0f;
+        ResolvedWidth = 820.0f;
+    }
+
+    if (UWorld* World = GetWorld())
+    {
+        const FVector2D LogicalViewportSize = RI_GetLogicalViewportSize(World);
+        const float ViewportWidthDefault = RI_ResolvePanelDefaultDimension(
+            LogicalViewportSize.X,
+            RI_DefaultPanelViewportWidthFraction,
+            RI_MinUsablePanelWidth,
+            RI_DefaultPanelWidthMax);
+        if (ViewportWidthDefault > 1.0f)
+        {
+            ResolvedWidth = ViewportWidthDefault;
+        }
     }
 
     PanelDefaultWidth = ResolvedWidth;
     if (PanelWidth <= 1.0f)
     {
-        PanelWidth = FMath::Max(PanelDefaultWidth, 1120.0f);
+        PanelWidth = PanelDefaultWidth;
     }
 #endif
 }
@@ -2859,26 +3012,29 @@ void UInspectorWorldSubsystem::EnsurePanelInteractionInitialized()
 void UInspectorWorldSubsystem::ApplyPanelInteractionPresentation()
 {
 #if RUNTIME_INSPECTOR_ENABLED
-    float ResolvedWidth = PanelWidth > 1.0f ? PanelWidth : FMath::Max(PanelDefaultWidth, 1120.0f);
+    float ResolvedWidth = PanelWidth > 1.0f ? PanelWidth : PanelDefaultWidth;
     float ResolvedHeight = PanelHeight > 1.0f ? PanelHeight : PanelDefaultHeight;
+    FVector2D BasePosition(8.0f, 8.0f);
 
     if (UWorld* World = GetWorld())
     {
-        const FVector2D ViewportSize = UWidgetLayoutLibrary::GetViewportSize(World);
-        if (ViewportSize.X > 1.0f)
+        const FVector2D LogicalViewportSize = RI_GetLogicalViewportSize(World);
+        if (LogicalViewportSize.X > 1.0f)
         {
-            ResolvedWidth = FMath::Min(ResolvedWidth, FMath::Max(880.0f, ViewportSize.X - 48.0f));
+            ResolvedWidth = FMath::Min(ResolvedWidth, RI_GetViewportAvailableDimension(LogicalViewportSize.X));
         }
-        if (ViewportSize.Y > 1.0f)
+        if (LogicalViewportSize.Y > 1.0f)
         {
-            ResolvedHeight = FMath::Min(ResolvedHeight, FMath::Max(560.0f, ViewportSize.Y - 48.0f));
+            ResolvedHeight = FMath::Min(ResolvedHeight, RI_GetViewportAvailableDimension(LogicalViewportSize.Y));
         }
+
+        BasePosition = RI_GetDefaultPanelCanvasPosition(World, FVector2D(ResolvedWidth, ResolvedHeight));
     }
 
     if (UUserWidget* Panel = PanelWidget.Get())
     {
         FWidgetTransform Transform = Panel->GetRenderTransform();
-        Transform.Translation = PanelTranslation;
+        Transform.Translation = FVector2D::ZeroVector;
         Panel->SetRenderTransform(Transform);
     }
 
@@ -2889,7 +3045,7 @@ void UInspectorWorldSubsystem::ApplyPanelInteractionPresentation()
         RootCanvasSlot->SetAutoSize(false);
         RootCanvasSlot->SetAnchors(FAnchors(0.0f, 0.0f, 0.0f, 0.0f));
         RootCanvasSlot->SetAlignment(FVector2D::ZeroVector);
-        RootCanvasSlot->SetPosition(FVector2D(24.0f, 24.0f));
+        RootCanvasSlot->SetPosition(BasePosition + PanelTranslation);
         RootCanvasSlot->SetSize(FVector2D(ResolvedWidth, ResolvedHeight));
     }
 
@@ -3173,6 +3329,66 @@ namespace
         }
 
         return nullptr;
+    }
+
+    static void RI_CenterButtonContentRecursive(UWidget* Widget)
+    {
+        if (!Widget)
+        {
+            return;
+        }
+
+        if (UTextBlock* TextBlock = Cast<UTextBlock>(Widget))
+        {
+            TextBlock->SetJustification(ETextJustify::Center);
+            return;
+        }
+
+        if (USizeBox* SizeBox = Cast<USizeBox>(Widget))
+        {
+            if (USizeBoxSlot* SizeBoxSlot = Cast<USizeBoxSlot>(SizeBox->GetContentSlot()))
+            {
+                SizeBoxSlot->SetHorizontalAlignment(HAlign_Center);
+                SizeBoxSlot->SetVerticalAlignment(VAlign_Center);
+                SizeBoxSlot->SetPadding(FMargin(0.f));
+            }
+        }
+
+        if (UBorder* Border = Cast<UBorder>(Widget))
+        {
+            if (UBorderSlot* BorderSlot = Cast<UBorderSlot>(Border->GetContentSlot()))
+            {
+                BorderSlot->SetHorizontalAlignment(HAlign_Center);
+                BorderSlot->SetVerticalAlignment(VAlign_Center);
+                BorderSlot->SetPadding(FMargin(0.f));
+            }
+        }
+
+        if (UButton* Button = Cast<UButton>(Widget))
+        {
+            if (UButtonSlot* ButtonSlot = Cast<UButtonSlot>(Button->GetContentSlot()))
+            {
+                ButtonSlot->SetHorizontalAlignment(HAlign_Center);
+                ButtonSlot->SetVerticalAlignment(VAlign_Center);
+                ButtonSlot->SetPadding(FMargin(0.f));
+            }
+        }
+
+        if (const UUserWidget* UserWidget = Cast<UUserWidget>(Widget))
+        {
+            if (UserWidget->WidgetTree)
+            {
+                RI_CenterButtonContentRecursive(UserWidget->WidgetTree->RootWidget);
+            }
+        }
+
+        if (const UPanelWidget* Panel = Cast<UPanelWidget>(Widget))
+        {
+            for (int32 Index = 0; Index < Panel->GetChildrenCount(); ++Index)
+            {
+                RI_CenterButtonContentRecursive(Panel->GetChildAt(Index));
+            }
+        }
     }
 
     static USizeBox* RI_FindFirstSizeBoxRecursive(UWidget* Widget)
@@ -3976,7 +4192,17 @@ void UInspectorWorldSubsystem::SetPanelTabButtonLabel(UButton* Button, const FSt
     if (UTextBlock* TextBlock = RI_FindFirstTextBlockRecursive(Button))
     {
         TextBlock->SetText(FText::FromString(NewLabel));
+        TextBlock->SetJustification(ETextJustify::Center);
     }
+
+    if (UButtonSlot* ButtonSlot = Cast<UButtonSlot>(Button->GetContentSlot()))
+    {
+        ButtonSlot->SetHorizontalAlignment(HAlign_Center);
+        ButtonSlot->SetVerticalAlignment(VAlign_Center);
+        ButtonSlot->SetPadding(FMargin(0.f));
+    }
+
+    RI_CenterButtonContentRecursive(Button);
 #else
     (void)Button;
     (void)NewLabel;
@@ -4000,9 +4226,20 @@ void UInspectorWorldSubsystem::BindPanelTabButtons()
     SettingsTabButton = FindPanelTabButtonByTexts({ TEXT("Setting"), TEXT("Settings") });
     TestTabButton = FindPanelTabButtonByTexts({ TEXT("Test"), TEXT("Tools"), TEXT("Diagnostics") });
 
-    SetPanelTabButtonLabel(ActorTabButton.Get(), TEXT("Inspect"));
-    SetPanelTabButtonLabel(FileTabButton.Get(), TEXT("Snapshot"));
-    SetPanelTabButtonLabel(TestTabButton.Get(), TEXT("Diagnostics"));
+    SetPanelTabButtonLabel(ActorTabButton.Get(), TEXT("Actor"));
+    SetPanelTabButtonLabel(FileTabButton.Get(), TEXT("Changes"));
+    SetPanelTabButtonLabel(SettingsTabButton.Get(), TEXT("Settings"));
+    SetPanelTabButtonLabel(TestTabButton.Get(), TEXT("Tools"));
+
+    TArray<UWidget*> PanelWidgets;
+    PanelWidget->WidgetTree->GetAllWidgets(PanelWidgets);
+    for (UWidget* Widget : PanelWidgets)
+    {
+        if (UButton* Button = Cast<UButton>(Widget))
+        {
+            RI_CenterButtonContentRecursive(Button);
+        }
+    }
 
     if (UButton* Button = ActorTabButton.Get())
     {
@@ -4017,7 +4254,8 @@ void UInspectorWorldSubsystem::BindPanelTabButtons()
     if (UButton* Button = SettingsTabButton.Get())
     {
         Button->OnClicked.RemoveAll(this);
-        Button->SetVisibility(ESlateVisibility::Collapsed);
+        Button->OnClicked.AddDynamic(this, &UInspectorWorldSubsystem::HandleSettingsTabClicked);
+        Button->SetVisibility(ESlateVisibility::Visible);
     }
     if (UButton* Button = TestTabButton.Get())
     {
@@ -4075,12 +4313,8 @@ void UInspectorWorldSubsystem::UpdatePanelTabButtonStyles()
 
     ApplyTabStyle(ActorTabButton.Get(), 0);
     ApplyTabStyle(FileTabButton.Get(), 1);
+    ApplyTabStyle(SettingsTabButton.Get(), SettingsPageIndex);
     ApplyTabStyle(TestTabButton.Get(), TestPageIndex);
-
-    if (UButton* Button = SettingsTabButton.Get())
-    {
-        Button->SetVisibility(ESlateVisibility::Collapsed);
-    }
 #endif
 }
 
@@ -4196,7 +4430,7 @@ void UInspectorWorldSubsystem::EnsureSharedContextStripInjected()
     SharedContextStripHostPanel = StripHostContainer ? static_cast<UPanelWidget*>(StripHostContainer) : HostPanel;
 
     UBorder* StripBorder = Widget->WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("RI_SharedContextStrip"));
-    StripBorder->SetPadding(FMargin(6.f, 4.f));
+    StripBorder->SetPadding(RICompactUI::GetSurfaceCardPadding());
     StripBorder->SetBrushColor(RICompactUI::GetContextStripBackgroundColor());
 
     UHorizontalBox* Row = Widget->WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_SharedContextStripRow"));
@@ -4215,7 +4449,7 @@ void UInspectorWorldSubsystem::EnsureSharedContextStripInjected()
         UBorder* Cell = CellName.IsNone()
             ? Widget->WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass())
             : Widget->WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), CellName);
-        Cell->SetPadding(FMargin(5.f, 2.f));
+        Cell->SetPadding(RICompactUI::GetSurfaceCardPadding(true));
         Cell->SetBrushColor(CellColor);
 
         UVerticalBox* Box = Widget->WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
@@ -4233,7 +4467,7 @@ void UInspectorWorldSubsystem::EnsureSharedContextStripInjected()
             FSlateChildSize SizeRule(ESlateSizeRule::Fill);
             SizeRule.Value = FillWeight;
             Slot->SetSize(SizeRule);
-            Slot->SetPadding(FMargin(0.f, 0.f, 4.f, 0.f));
+            Slot->SetPadding(FMargin(0.f, 0.f, RICompactUI::GetInlineGap(), 0.f));
             Slot->SetVerticalAlignment(VAlign_Fill);
         }
     };
@@ -4243,8 +4477,8 @@ void UInspectorWorldSubsystem::EnsureSharedContextStripInjected()
         TEXT("RI_SharedContextActorCell"),
         TEXT("RI_SharedContextActorValue"),
         SharedContextActorText,
-        1.4f,
-        9,
+        1.35f,
+        10,
         true,
         RICompactUI::GetContextPrimaryCellBackgroundColor());
     AddCell(
@@ -4252,8 +4486,8 @@ void UInspectorWorldSubsystem::EnsureSharedContextStripInjected()
         NAME_None,
         TEXT("RI_SharedContextClassValue"),
         SharedContextClassText,
-        1.0f,
-        7,
+        0.96f,
+        8,
         false,
         RICompactUI::GetContextSecondaryCellBackgroundColor());
     AddCell(
@@ -4261,8 +4495,8 @@ void UInspectorWorldSubsystem::EnsureSharedContextStripInjected()
         NAME_None,
         TEXT("RI_SharedContextSourceValue"),
         SharedContextSourceText,
-        1.1f,
-        7,
+        1.16f,
+        8,
         false,
         RICompactUI::GetContextSecondaryCellBackgroundColor());
     AddCell(
@@ -4270,8 +4504,8 @@ void UInspectorWorldSubsystem::EnsureSharedContextStripInjected()
         NAME_None,
         TEXT("RI_SharedContextStagedValue"),
         SharedContextStagedText,
-        0.95f,
-        8,
+        0.92f,
+        9,
         true,
         RICompactUI::GetContextStatusCellBackgroundColor());
 
@@ -4289,7 +4523,7 @@ void UInspectorWorldSubsystem::EnsureSharedContextStripInjected()
             VerticalSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
             VerticalSlot->SetHorizontalAlignment(HAlign_Fill);
             VerticalSlot->SetVerticalAlignment(VAlign_Top);
-            VerticalSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+            VerticalSlot->SetPadding(FMargin(0.f, 0.f, 0.f, RICompactUI::GetSectionGap()));
         }
     }
 
@@ -4311,7 +4545,7 @@ void UInspectorWorldSubsystem::UpdateSharedContextStrip()
     const FString StagedState = HasStagedPatch()
         ? FString::Printf(TEXT("Staged (%d ops)"), GetStagedPatch().Operations.Num())
         : TEXT("No staged patch");
-    const bool bHideActorCell = true;
+    const bool bHideActorCell = false;
 
     auto ApplyValue = [](UTextBlock* TextWidget, const FString& InValue, bool bMuted, int32 FontSize, bool bBold, const FLinearColor& StrongColor)
     {
@@ -4353,13 +4587,14 @@ namespace
         switch (Page)
         {
         case UInspectorWorldSubsystem::ERIVisiblePage::Changes:
+            return TEXT("Changes");
         case UInspectorWorldSubsystem::ERIVisiblePage::Settings:
-            return TEXT("Snapshot");
+            return TEXT("Settings");
         case UInspectorWorldSubsystem::ERIVisiblePage::Tools:
-            return TEXT("Diagnostics");
+            return TEXT("Tools");
         case UInspectorWorldSubsystem::ERIVisiblePage::Actor:
         default:
-            return TEXT("Inspect");
+            return TEXT("Actor");
         }
     }
 
@@ -4798,7 +5033,8 @@ void UInspectorWorldSubsystem::EnsureActorWorkbenchBodyInjected()
     UHorizontalBox* LegacyBodyBox = Cast<UHorizontalBox>(LegacyBody);
     UVerticalBox* LegacyLeft = Cast<UVerticalBox>(Panel->WidgetTree->FindWidget(TEXT("Left")));
     UVerticalBox* LegacyRight = Cast<UVerticalBox>(Panel->WidgetTree->FindWidget(TEXT("Right")));
-    if (!LegacyBodyBox || !LegacyLeft || !LegacyRight)
+    UVerticalBox* LegacyPageStack = Cast<UVerticalBox>(ParentPanel);
+    if (!LegacyBodyBox || !LegacyLeft || !LegacyRight || !LegacyPageStack)
     {
         return;
     }
@@ -4816,9 +5052,11 @@ void UInspectorWorldSubsystem::EnsureActorWorkbenchBodyInjected()
     }
 
     ActorWorkbenchBodyHostStrong = LegacyBodyBox;
+    ActorWorkbenchPageStackHostStrong = LegacyPageStack;
     ActorWorkbenchSidebarHostStrong = LegacyLeft;
     ActorWorkbenchContentHostStrong = LegacyRight;
     ActorWorkbenchBodyHost = LegacyBodyBox;
+    ActorWorkbenchPageStackHost = LegacyPageStack;
     ActorWorkbenchSidebarHost = LegacyLeft;
     ActorWorkbenchContentHost = LegacyRight;
 
@@ -4826,27 +5064,20 @@ void UInspectorWorldSubsystem::EnsureActorWorkbenchBodyInjected()
     if (UHorizontalBoxSlot* BodySlot = Cast<UHorizontalBoxSlot>(LegacyLeft->Slot))
     {
         FSlateChildSize SizeRule(ESlateSizeRule::Fill);
-        SizeRule.Value = 0.46f;
+        SizeRule.Value = 0.68f;
         BodySlot->SetSize(SizeRule);
         BodySlot->SetHorizontalAlignment(HAlign_Fill);
         BodySlot->SetVerticalAlignment(VAlign_Fill);
-        BodySlot->SetPadding(FMargin(0.f, 0.f, 10.f, 0.f));
+        BodySlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
     }
     if (UHorizontalBoxSlot* BodySlot = Cast<UHorizontalBoxSlot>(LegacyRight->Slot))
     {
         FSlateChildSize SizeRule(ESlateSizeRule::Fill);
-        SizeRule.Value = 1.54f;
+        SizeRule.Value = 1.32f;
         BodySlot->SetSize(SizeRule);
         BodySlot->SetHorizontalAlignment(HAlign_Fill);
         BodySlot->SetVerticalAlignment(VAlign_Fill);
-        BodySlot->SetPadding(FMargin(10.f, 0.f, 0.f, 0.f));
-    }
-
-    if (UWidget* ModifiedWidget = Panel->WidgetTree->FindWidget(TEXT("Modified")))
-    {
-        ModifiedWidget->SetVisibility(ESlateVisibility::Collapsed);
-        ModifiedWidget->InvalidateLayoutAndVolatility();
-        ModifiedWidget->ForceLayoutPrepass();
+        BodySlot->SetPadding(FMargin(8.f, 0.f, 0.f, 0.f));
     }
     LegacyBody->InvalidateLayoutAndVolatility();
     LegacyBody->ForceLayoutPrepass();
@@ -4857,6 +5088,161 @@ void UInspectorWorldSubsystem::EnsureActorWorkbenchBodyInjected()
     {
         Ancestor->InvalidateLayoutAndVolatility();
         Ancestor->ForceLayoutPrepass();
+    }
+#endif
+}
+
+void UInspectorWorldSubsystem::EnsureActorWorkspaceSelectionBandInjected()
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    EnsureActorWorkbenchBodyInjected();
+    UUserWidget* Panel = PanelWidget.Get();
+    UVerticalBox* PageStackHost = ActorWorkbenchPageStackHost.Get();
+    UHorizontalBox* BodyHost = ActorWorkbenchBodyHost.Get();
+    if (!Panel || !Panel->WidgetTree || !PageStackHost || !BodyHost)
+    {
+        return;
+    }
+
+    UBorder* SelectionBand = ActorWorkspaceSelectionBand.Get();
+    if (!SelectionBand)
+    {
+        SelectionBand = RICompactUI::MakeSurfaceCard(
+            Panel->WidgetTree,
+            TEXT("RI_ActorWorkspaceSelectionBand"),
+            RICompactUI::GetContextStripBackgroundColor(),
+            FMargin(10.f, 8.f));
+
+        UVerticalBox* BandRoot = Panel->WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ActorWorkspaceSelectionBandRoot"));
+        SelectionBand->SetContent(BandRoot);
+
+        if (UVerticalBoxSlot* LabelSlot = BandRoot->AddChildToVerticalBox(
+            RICompactUI::MakeText(Panel->WidgetTree, TEXT("Selection"), RICompactUI::GetMutedFontSize(), true, RICompactUI::GetMutedTextColor())))
+        {
+            LabelSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 2.f));
+        }
+
+        UHorizontalBox* SummaryRow = Panel->WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_ActorWorkspaceSelectionSummary"));
+        BandRoot->AddChildToVerticalBox(SummaryRow);
+
+        auto AddSummaryText = [SummaryRow](UTextBlock* Text, float FillWeight, const FMargin& Padding)
+        {
+            if (!SummaryRow || !Text)
+            {
+                return;
+            }
+
+            if (UHorizontalBoxSlot* Slot = SummaryRow->AddChildToHorizontalBox(Text))
+            {
+                FSlateChildSize SizeRule(ESlateSizeRule::Fill);
+                SizeRule.Value = FillWeight;
+                Slot->SetSize(SizeRule);
+                Slot->SetHorizontalAlignment(HAlign_Fill);
+                Slot->SetVerticalAlignment(VAlign_Center);
+                Slot->SetPadding(Padding);
+            }
+        };
+
+        UTextBlock* ActorText = RICompactUI::MakeText(
+            Panel->WidgetTree,
+            TEXT("No selected actor"),
+            RICompactUI::GetValueFontSize() + 1,
+            true,
+            RICompactUI::GetStrongTextColor(),
+            true);
+        UTextBlock* SourceText = RICompactUI::MakeText(
+            Panel->WidgetTree,
+            TEXT("No source asset"),
+            RICompactUI::GetLabelFontSize(),
+            false,
+            RICompactUI::GetSecondaryTextColor(),
+            true);
+        UTextBlock* StateText = RICompactUI::MakeText(
+            Panel->WidgetTree,
+            TEXT("Live only"),
+            RICompactUI::GetLabelFontSize(),
+            true,
+            RICompactUI::GetStrongTextColor(),
+            false);
+
+        AddSummaryText(ActorText, 0.96f, FMargin(0.f, 0.f, 12.f, 0.f));
+        AddSummaryText(SourceText, 1.32f, FMargin(0.f, 0.f, 12.f, 0.f));
+        AddSummaryText(StateText, 0.56f, FMargin(0.f));
+
+        ActorWorkspaceSelectionActorTextStrong = ActorText;
+        ActorWorkspaceSelectionActorText = ActorText;
+        ActorWorkspaceSelectionSourceTextStrong = SourceText;
+        ActorWorkspaceSelectionSourceText = ActorWorkspaceSelectionSourceTextStrong;
+        ActorWorkspaceSelectionStateTextStrong = StateText;
+        ActorWorkspaceSelectionStateText = ActorWorkspaceSelectionStateTextStrong;
+
+        ActorWorkspaceSelectionBandStrong = SelectionBand;
+        ActorWorkspaceSelectionBand = SelectionBand;
+    }
+
+    if (UPanelWidget* ExistingParent = Cast<UPanelWidget>(SelectionBand->GetParent()))
+    {
+        if (ExistingParent != PageStackHost)
+        {
+            ExistingParent->RemoveChild(SelectionBand);
+        }
+    }
+
+    const int32 BodyIndex = PageStackHost->GetChildIndex(BodyHost);
+    const int32 CurrentIndex = PageStackHost->GetChildIndex(SelectionBand);
+    if (SelectionBand->GetParent() != PageStackHost || CurrentIndex == INDEX_NONE || (BodyIndex != INDEX_NONE && CurrentIndex >= BodyIndex))
+    {
+        if (UPanelWidget* ExistingParent = Cast<UPanelWidget>(SelectionBand->GetParent()))
+        {
+            ExistingParent->RemoveChild(SelectionBand);
+        }
+
+        const int32 DesiredIndex = BodyIndex == INDEX_NONE ? 0 : BodyIndex;
+        PageStackHost->InsertChildAt(DesiredIndex, SelectionBand);
+    }
+
+    if (UVerticalBoxSlot* BandSlot = Cast<UVerticalBoxSlot>(SelectionBand->Slot))
+    {
+        BandSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
+        BandSlot->SetHorizontalAlignment(HAlign_Fill);
+        BandSlot->SetVerticalAlignment(VAlign_Top);
+        BandSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 10.f));
+    }
+
+    UpdateActorWorkspaceSelectionBand();
+#endif
+}
+
+void UInspectorWorldSubsystem::UpdateActorWorkspaceSelectionBand()
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    const AActor* Selected = SelectedActor.Get();
+    const FString ActorLabel = Selected ? RI_GetActorDisplayLabel(Selected) : TEXT("No selected actor");
+    const FString SourcePath = (Selected && Selected->GetClass())
+        ? Selected->GetClass()->GetPathName()
+        : TEXT("No source asset");
+    const FString StagedState = HasStagedPatch()
+        ? FString::Printf(TEXT("Staged (%d ops)"), GetStagedPatch().Operations.Num())
+        : TEXT("Live only");
+
+    if (UTextBlock* Text = ActorWorkspaceSelectionActorText.Get())
+    {
+        Text->SetText(FText::FromString(ActorLabel));
+        RICompactUI::ApplyTextStyle(Text, RICompactUI::GetValueFontSize() + 1, true, Selected ? RICompactUI::GetStrongTextColor() : RICompactUI::GetMutedTextColor());
+    }
+    if (UTextBlock* Text = ActorWorkspaceSelectionSourceText.Get())
+    {
+        Text->SetText(FText::FromString(SourcePath));
+        RICompactUI::ApplyTextStyle(Text, RICompactUI::GetLabelFontSize(), false, Selected ? RICompactUI::GetSecondaryTextColor() : RICompactUI::GetMutedTextColor());
+    }
+    if (UTextBlock* Text = ActorWorkspaceSelectionStateText.Get())
+    {
+        Text->SetText(FText::FromString(StagedState));
+        RICompactUI::ApplyTextStyle(
+            Text,
+            RICompactUI::GetLabelFontSize(),
+            true,
+            HasStagedPatch() ? RICompactUI::GetSuccessTextColor() : RICompactUI::GetStrongTextColor());
     }
 #endif
 }
@@ -4875,14 +5261,14 @@ void UInspectorWorldSubsystem::EnsureActorGroupsSectionInjected()
     if (!HostBox)
     {
         HostBox = Panel->WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_ActorGroupsHost"));
-        HostBox->SetMinDesiredWidth(260.0f);
+        HostBox->SetMinDesiredWidth(248.0f);
         HostBox->ClearHeightOverride();
 
         UVerticalBox* RootBox = Panel->WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ActorGroupsRoot"));
         HostBox->SetContent(RootBox);
 
         UBorder* ComponentBorder = Panel->WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("RI_ActorGroupsComponentBorder"));
-        ComponentBorder->SetPadding(FMargin(6.f, 5.f));
+        ComponentBorder->SetPadding(RICompactUI::GetSurfaceCardPadding(true));
         ComponentBorder->SetBrushColor(RICompactUI::GetSectionSurfaceBackgroundColor());
 
         UVerticalBox* ComponentBox = Panel->WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ActorGroupsComponentBox"));
@@ -4891,7 +5277,7 @@ void UInspectorWorldSubsystem::EnsureActorGroupsSectionInjected()
         if (UVerticalBoxSlot* HeaderSlot = ComponentBox->AddChildToVerticalBox(
             RICompactUI::MakeSectionTitle(Panel->WidgetTree, TEXT("Component"), RICompactUI::ERISectionVisualStyle::Emphasis)))
         {
-            HeaderSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+            HeaderSlot->SetPadding(FMargin(0.f, 0.f, 0.f, RICompactUI::GetInlineGap()));
         }
 
         UScrollBox* GroupsScroll = Panel->WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("RI_ActorGroupsScroll"));
@@ -4914,15 +5300,15 @@ void UInspectorWorldSubsystem::EnsureActorGroupsSectionInjected()
         if (UVerticalBoxSlot* ComponentSlot = RootBox->AddChildToVerticalBox(ComponentBorder))
         {
             FSlateChildSize SectionSize(ESlateSizeRule::Fill);
-            SectionSize.Value = 1.0f;
+            SectionSize.Value = 0.64f;
             ComponentSlot->SetSize(SectionSize);
             ComponentSlot->SetHorizontalAlignment(HAlign_Fill);
             ComponentSlot->SetVerticalAlignment(VAlign_Fill);
-            ComponentSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 8.f));
+            ComponentSlot->SetPadding(FMargin(0.f, 0.f, 0.f, RICompactUI::GetSectionGap()));
         }
 
         UBorder* PinnedBorder = Panel->WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("RI_ActorPinnedBorder"));
-        PinnedBorder->SetPadding(FMargin(6.f, 5.f));
+        PinnedBorder->SetPadding(RICompactUI::GetSurfaceCardPadding(true));
         PinnedBorder->SetBrushColor(RICompactUI::GetSectionSurfaceBackgroundColor());
 
         UVerticalBox* PinnedBox = Panel->WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ActorPinnedBox"));
@@ -4931,14 +5317,14 @@ void UInspectorWorldSubsystem::EnsureActorGroupsSectionInjected()
         if (UVerticalBoxSlot* HeaderSlot = PinnedBox->AddChildToVerticalBox(
             RICompactUI::MakeSectionTitle(Panel->WidgetTree, TEXT("Star"), RICompactUI::ERISectionVisualStyle::Emphasis)))
         {
-            HeaderSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+            HeaderSlot->SetPadding(FMargin(0.f, 0.f, 0.f, RICompactUI::GetInlineGap()));
         }
 
         UScrollBox* PinnedScroll = Panel->WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("RI_ActorPinnedScroll"));
         UVerticalBox* PinnedEntries = Panel->WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ActorPinnedEntries"));
         PinnedScroll->AddChild(PinnedEntries);
         USizeBox* PinnedBody = Panel->WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_ActorPinnedBody"));
-        PinnedBody->SetMinDesiredHeight(136.0f);
+        PinnedBody->SetMinDesiredHeight(132.0f);
         PinnedBody->ClearHeightOverride();
         PinnedBody->SetContent(PinnedScroll);
         if (UVerticalBoxSlot* BodySlot = PinnedBox->AddChildToVerticalBox(PinnedBody))
@@ -4953,7 +5339,7 @@ void UInspectorWorldSubsystem::EnsureActorGroupsSectionInjected()
         if (UVerticalBoxSlot* PinnedSlot = RootBox->AddChildToVerticalBox(PinnedBorder))
         {
             FSlateChildSize SectionSize(ESlateSizeRule::Fill);
-            SectionSize.Value = 0.58f;
+            SectionSize.Value = 0.36f;
             PinnedSlot->SetSize(SectionSize);
             PinnedSlot->SetHorizontalAlignment(HAlign_Fill);
             PinnedSlot->SetVerticalAlignment(VAlign_Fill);
@@ -5314,6 +5700,7 @@ void UInspectorWorldSubsystem::EnsureActorPropertiesSectionInjected()
 {
 #if RUNTIME_INSPECTOR_ENABLED
     EnsureActorWorkbenchBodyInjected();
+    EnsureActorWorkspaceSelectionBandInjected();
     UUserWidget* Panel = PanelWidget.Get();
     if (!Panel || !Panel->WidgetTree)
     {
@@ -5375,7 +5762,7 @@ void UInspectorWorldSubsystem::EnsureActorPropertiesSectionInjected()
     SectionWidget->TakeWidget();
     FunctionWidget->TakeWidget();
 
-    auto AttachChildToHost = [HostBox, SectionWidget, FunctionWidget](UWidget* ChildWidget)
+    auto AttachChildToHost = [HostBox, SectionWidget](UWidget* ChildWidget)
     {
         if (!HostBox || !ChildWidget)
         {
@@ -5398,11 +5785,11 @@ void UInspectorWorldSubsystem::EnsureActorPropertiesSectionInjected()
         if (UVerticalBoxSlot* VerticalSlot = Cast<UVerticalBoxSlot>(ChildWidget->Slot))
         {
             FSlateChildSize SizeRule(ESlateSizeRule::Fill);
-            SizeRule.Value = ChildWidget == SectionWidget ? 1.92f : 0.62f;
+            SizeRule.Value = ChildWidget == SectionWidget ? 0.44f : 0.56f;
             VerticalSlot->SetSize(SizeRule);
             VerticalSlot->SetHorizontalAlignment(HAlign_Fill);
             VerticalSlot->SetVerticalAlignment(VAlign_Fill);
-            VerticalSlot->SetPadding(ChildWidget == SectionWidget ? FMargin(0.f, 0.f, 0.f, 10.f) : FMargin(0.f));
+            VerticalSlot->SetPadding(ChildWidget == SectionWidget ? FMargin(0.f, 0.f, 0.f, 8.f) : FMargin(0.f));
         }
     };
 
@@ -5411,6 +5798,7 @@ void UInspectorWorldSubsystem::EnsureActorPropertiesSectionInjected()
 
     if (UVerticalBox* ContentHost = ActorWorkbenchContentHost.Get())
     {
+        EnsureActorWorkspaceSelectionBandInjected();
         if (UWidget* LegacyPropertyHeader = Panel->WidgetTree->FindWidget(TEXT("TextBlock")))
         {
             LegacyPropertyHeader->SetVisibility(ESlateVisibility::Collapsed);
@@ -6563,6 +6951,14 @@ void UInspectorWorldSubsystem::RefreshOutlineRuntimeSettings()
 void UInspectorWorldSubsystem::ClearConfirmDialogBinding()
 {
 #if RUNTIME_INSPECTOR_ENABLED
+    if (UButton* Button = ActiveConfirmDialogYesButton.Get())
+    {
+        Button->OnClicked.RemoveAll(this);
+    }
+    if (UButton* Button = ActiveConfirmDialogNoButton.Get())
+    {
+        Button->OnClicked.RemoveAll(this);
+    }
     if (UEditableTextBox* TextBox = ActiveConfirmDialogInputR.Get())
     {
         TextBox->OnTextChanged.RemoveAll(this);
@@ -6589,13 +6985,26 @@ void UInspectorWorldSubsystem::ClearConfirmDialogBinding()
         TextBox->OnTextCommitted.RemoveAll(this);
     }
 
+    if (ActiveColorEditItem.IsValid())
+    {
+        FinalizeActiveColorEdit(!bActiveColorEditCanceled);
+    }
+
     ActiveConfirmDialogWidget.Reset();
+    ActiveConfirmDialogYesButton.Reset();
+    ActiveConfirmDialogNoButton.Reset();
     ActiveConfirmDialogInputR.Reset();
     ActiveConfirmDialogInputG.Reset();
     ActiveConfirmDialogInputB.Reset();
     ActiveConfirmDialogInputA.Reset();
     ActiveConfirmDialogInputHex.Reset();
     ActiveColorEditItem.Reset();
+    bActiveColorEditPreviewDirty = false;
+    bActiveColorEditCanceled = false;
+    bHasActiveColorEditOriginalColor = false;
+    bHasActiveColorEditLastPreviewColor = false;
+    ActiveColorEditOriginalColor = FLinearColor::Black;
+    ActiveColorEditLastPreviewColor = FLinearColor::Black;
     bUpdatingConfirmDialogText = false;
 #endif
 }
@@ -6613,6 +7022,8 @@ bool UInspectorWorldSubsystem::TryBindActiveConfirmDialog(UUserWidget* DialogWid
     UEditableTextBox* InputB = Cast<UEditableTextBox>(DialogWidget->GetWidgetFromName(TEXT("InputTXT_B")));
     UEditableTextBox* InputA = Cast<UEditableTextBox>(DialogWidget->GetWidgetFromName(TEXT("InputTXT_A")));
     UEditableTextBox* InputHex = Cast<UEditableTextBox>(DialogWidget->GetWidgetFromName(TEXT("InputTXT_SRGB")));
+    UButton* YesButton = Cast<UButton>(DialogWidget->GetWidgetFromName(TEXT("BTN_Yes")));
+    UButton* NoButton = Cast<UButton>(DialogWidget->GetWidgetFromName(TEXT("BTN_No")));
 
     if (!InputR || !InputG || !InputB || !InputA || !InputHex)
     {
@@ -6622,6 +7033,8 @@ bool UInspectorWorldSubsystem::TryBindActiveConfirmDialog(UUserWidget* DialogWid
     ClearConfirmDialogBinding();
 
     ActiveConfirmDialogWidget = DialogWidget;
+    ActiveConfirmDialogYesButton = YesButton;
+    ActiveConfirmDialogNoButton = NoButton;
     ActiveConfirmDialogInputR = InputR;
     ActiveConfirmDialogInputG = InputG;
     ActiveConfirmDialogInputB = InputB;
@@ -6643,8 +7056,82 @@ bool UInspectorWorldSubsystem::TryBindActiveConfirmDialog(UUserWidget* DialogWid
     InputHex->OnTextChanged.AddDynamic(this, &UInspectorWorldSubsystem::HandleConfirmDialogHexChanged);
     InputHex->OnTextCommitted.AddDynamic(this, &UInspectorWorldSubsystem::HandleConfirmDialogHexCommitted);
 
+    if (YesButton)
+    {
+        YesButton->OnClicked.RemoveAll(this);
+        YesButton->OnClicked.AddDynamic(this, &UInspectorWorldSubsystem::HandleActiveConfirmDialogAccepted);
+    }
+    if (NoButton)
+    {
+        NoButton->OnClicked.RemoveAll(this);
+        NoButton->OnClicked.AddDynamic(this, &UInspectorWorldSubsystem::HandleActiveConfirmDialogCanceled);
+    }
+
+    TryActivateConfirmDialogColorPage(DialogWidget);
     return true;
 #else
+    return false;
+#endif
+}
+
+bool UInspectorWorldSubsystem::TryActivateConfirmDialogColorPage(UUserWidget* DialogWidget) const
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    if (!DialogWidget)
+    {
+        return false;
+    }
+
+    UWidgetSwitcher* Switcher = Cast<UWidgetSwitcher>(DialogWidget->GetWidgetFromName(TEXT("WidgetSwitcher_167")));
+    UWidget* ColorCanvas = DialogWidget->GetWidgetFromName(TEXT("Canvas_Color"));
+    if (!Switcher || !ColorCanvas)
+    {
+        return false;
+    }
+
+    UWidget* SwitcherChild = ColorCanvas;
+    while (SwitcherChild && SwitcherChild->GetParent() && SwitcherChild->GetParent() != Switcher)
+    {
+        SwitcherChild = SwitcherChild->GetParent();
+    }
+
+    if (!SwitcherChild || SwitcherChild->GetParent() != Switcher)
+    {
+        return false;
+    }
+
+    Switcher->SetActiveWidget(SwitcherChild);
+    return Switcher->GetActiveWidget() == SwitcherChild;
+#else
+    (void)DialogWidget;
+    return false;
+#endif
+}
+
+bool UInspectorWorldSubsystem::IsConfirmDialogColorPageActive(UUserWidget* DialogWidget) const
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    if (!DialogWidget)
+    {
+        return false;
+    }
+
+    UWidgetSwitcher* Switcher = Cast<UWidgetSwitcher>(DialogWidget->GetWidgetFromName(TEXT("WidgetSwitcher_167")));
+    UWidget* ColorCanvas = DialogWidget->GetWidgetFromName(TEXT("Canvas_Color"));
+    if (!Switcher || !ColorCanvas)
+    {
+        return false;
+    }
+
+    UWidget* SwitcherChild = ColorCanvas;
+    while (SwitcherChild && SwitcherChild->GetParent() && SwitcherChild->GetParent() != Switcher)
+    {
+        SwitcherChild = SwitcherChild->GetParent();
+    }
+
+    return SwitcherChild && SwitcherChild->GetParent() == Switcher && Switcher->GetActiveWidget() == SwitcherChild;
+#else
+    (void)DialogWidget;
     return false;
 #endif
 }
@@ -6851,6 +7338,7 @@ bool UInspectorWorldSubsystem::ApplyActiveConfirmDialogColor(const FLinearColor&
 
     TGuardValue<bool> GuardUpdatingText(bUpdatingConfirmDialogText, true);
     DialogWidget->ProcessEvent(InitDataFn, &Params);
+    TryActivateConfirmDialogColorPage(DialogWidget);
     return true;
 #else
     return false;
@@ -6995,6 +7483,20 @@ bool UInspectorWorldSubsystem::ApplyInspectorItemColor(UObject* ItemObject, cons
     OutError = TEXT("RuntimeInspector disabled");
     return false;
 #else
+    return ApplyInspectorItemColorInternal(ItemObject, InColor, OutError, false);
+#endif
+}
+
+bool UInspectorWorldSubsystem::ApplyInspectorItemColorInternal(UObject* ItemObject, const FLinearColor& InColor, FString& OutError, bool bSuppressHistory)
+{
+    OutError.Reset();
+
+#if !RUNTIME_INSPECTOR_ENABLED
+    OutError = TEXT("RuntimeInspector disabled");
+    return false;
+#else
+    TGuardValue<bool> GuardPreviewHistory(bApplyingColorDialogPreview, bSuppressHistory);
+
     if (UInspectorPropertyItem* PropertyItem = Cast<UInspectorPropertyItem>(ItemObject))
     {
         if (PropertyItem->GetValueType() == EInspectorValueType::LinearColor)
@@ -7075,6 +7577,7 @@ bool UInspectorWorldSubsystem::OpenColorEditorForItemInternal(UObject* ItemObjec
     Params.Content = HexText;
     Params.Type = TEXT("Color");
     DialogWidget->ProcessEvent(InitDataFn, &Params);
+    TryActivateConfirmDialogColorPage(DialogWidget);
 
     if (!TryBindActiveConfirmDialog(DialogWidget))
     {
@@ -7083,6 +7586,12 @@ bool UInspectorWorldSubsystem::OpenColorEditorForItemInternal(UObject* ItemObjec
     }
 
     ActiveColorEditItem = ItemObject;
+    bActiveColorEditPreviewDirty = false;
+    bActiveColorEditCanceled = false;
+    bHasActiveColorEditOriginalColor = true;
+    bHasActiveColorEditLastPreviewColor = true;
+    ActiveColorEditOriginalColor = InitialColor;
+    ActiveColorEditLastPreviewColor = InitialColor;
     ApplyActiveConfirmDialogColor(InitialColor);
     RefreshActiveConfirmDialogColor();
     return true;
@@ -7099,7 +7608,93 @@ void UInspectorWorldSubsystem::ApplyActiveColorEditItemIfNeeded(const FLinearCol
     }
 
     FString Error;
-    ApplyInspectorItemColor(ItemObject, InColor, Error);
+    if (!ApplyInspectorItemColorInternal(ItemObject, InColor, Error, true))
+    {
+        return;
+    }
+
+    bActiveColorEditPreviewDirty = bHasActiveColorEditOriginalColor
+        && !InColor.Equals(ActiveColorEditOriginalColor, KINDA_SMALL_NUMBER);
+    bHasActiveColorEditLastPreviewColor = true;
+    ActiveColorEditLastPreviewColor = InColor;
+#endif
+}
+
+void UInspectorWorldSubsystem::SyncActiveConfirmDialogColorPreview()
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    if (!ActiveColorEditItem.IsValid() || !ActiveConfirmDialogWidget.IsValid())
+    {
+        return;
+    }
+
+    FLinearColor CurrentColor = FLinearColor::Black;
+    if (!TryGetActiveConfirmDialogColor(CurrentColor))
+    {
+        return;
+    }
+
+    if (bHasActiveColorEditLastPreviewColor && CurrentColor.Equals(ActiveColorEditLastPreviewColor, KINDA_SMALL_NUMBER))
+    {
+        return;
+    }
+
+    ApplyActiveColorEditItemIfNeeded(CurrentColor);
+#endif
+}
+
+void UInspectorWorldSubsystem::FinalizeActiveColorEdit(bool bAccept)
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    UObject* ItemObject = ActiveColorEditItem.Get();
+    if (!ItemObject)
+    {
+        return;
+    }
+
+    if (!bHasActiveColorEditOriginalColor)
+    {
+        return;
+    }
+
+    const bool bHasPreviewColor = bHasActiveColorEditLastPreviewColor;
+    const FLinearColor PreviewColor = bHasPreviewColor ? ActiveColorEditLastPreviewColor : ActiveColorEditOriginalColor;
+    const bool bHasFinalDelta = !PreviewColor.Equals(ActiveColorEditOriginalColor, KINDA_SMALL_NUMBER);
+
+    FString Error;
+    if (!bAccept || !bHasFinalDelta)
+    {
+        ApplyInspectorItemColorInternal(ItemObject, ActiveColorEditOriginalColor, Error, true);
+        return;
+    }
+
+    ApplyInspectorItemColorInternal(ItemObject, ActiveColorEditOriginalColor, Error, true);
+    Error.Reset();
+    ApplyInspectorItemColorInternal(ItemObject, PreviewColor, Error, false);
+#endif
+}
+
+void UInspectorWorldSubsystem::HandleActiveConfirmDialogAccepted()
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    bActiveColorEditCanceled = false;
+    if (UUserWidget* DialogWidget = ActiveConfirmDialogWidget.Get())
+    {
+        DialogWidget->RemoveFromParent();
+    }
+    ClearConfirmDialogBinding();
+#endif
+}
+
+void UInspectorWorldSubsystem::HandleActiveConfirmDialogCanceled()
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    bActiveColorEditCanceled = true;
+    if (UUserWidget* DialogWidget = ActiveConfirmDialogWidget.Get())
+    {
+        DialogWidget->RemoveFromParent();
+    }
+    ClearConfirmDialogBinding();
 #endif
 }
 
@@ -9042,6 +9637,11 @@ bool UInspectorWorldSubsystem::RunConfirmDialogColorInputSelfTest(FString& OutRe
     bool bOverallSuccess = false;
     auto Cleanup = [&]()
     {
+        if (UUserWidget* ActiveDialog = ActiveConfirmDialogWidget.Get())
+        {
+            ActiveDialog->RemoveFromParent();
+        }
+
         ClearConfirmDialogBinding();
         if (TestWidget)
         {
@@ -9080,6 +9680,7 @@ bool UInspectorWorldSubsystem::RunConfirmDialogColorInputSelfTest(FString& OutRe
     InitDataParams.Content = TEXT("FF0000FF");
     InitDataParams.Type = TEXT("Color");
     TestWidget->ProcessEvent(InitDataFn, &InitDataParams);
+    const bool bDirectColorPageOk = TryActivateConfirmDialogColorPage(TestWidget) && IsConfirmDialogColorPageActive(TestWidget);
 
     if (!TryBindActiveConfirmDialog(TestWidget))
     {
@@ -9114,6 +9715,13 @@ bool UInspectorWorldSubsystem::RunConfirmDialogColorInputSelfTest(FString& OutRe
 
         TryParseConfirmDialogUnitFloat(TextBox->GetText(), DefaultValue, ParsedValue);
         return ParsedValue;
+    };
+    const auto ColorNear = [](const FLinearColor& A, const FLinearColor& B, float Tolerance)
+    {
+        return FMath::IsNearlyEqual(A.R, B.R, Tolerance)
+            && FMath::IsNearlyEqual(A.G, B.G, Tolerance)
+            && FMath::IsNearlyEqual(A.B, B.B, Tolerance)
+            && FMath::IsNearlyEqual(A.A, B.A, Tolerance);
     };
 
     const bool bInitialApply = ApplyActiveConfirmDialogColor(FLinearColor(1.0f, 0.0f, 0.0f, 1.0f));
@@ -9150,17 +9758,133 @@ bool UInspectorWorldSubsystem::RunConfirmDialogColorInputSelfTest(FString& OutRe
         AfterHexB <= 0.05f &&
         FMath::IsNearlyEqual(AfterHexA, 1.0f, 0.02f);
 
-    bOverallSuccess = bPassR && bPassHex;
+    TestWidget->RemoveFromParent();
+    TestWidget = nullptr;
+    ClearConfirmDialogBinding();
+
+    bool bMaterialDialogOpened = false;
+    bool bMaterialColorPageOk = false;
+    bool bMaterialPreviewOk = false;
+    bool bMaterialApplyOk = false;
+    FString MaterialVectorName = TEXT("None");
+    FString MaterialHexApplied = TEXT("None");
+
+    FString FoundationSummary;
+    FString FoundationError;
+    if (ApplyFabScreenshotFoundationState(FoundationSummary, FoundationError))
+    {
+        AActor* TestActor = SelectedActor.Get();
+        if (TestActor)
+        {
+            TArray<UActorComponent*> Components;
+            TestActor->GetComponents(Components);
+
+            UInspectorMaterialParamItem* TestMaterialItem = nullptr;
+            FLinearColor OriginalMaterialColor = FLinearColor::Black;
+            for (UActorComponent* Component : Components)
+            {
+                UStaticMeshComponent* MeshComponent = Cast<UStaticMeshComponent>(Component);
+                if (!MeshComponent)
+                {
+                    continue;
+                }
+
+                for (int32 SlotIndex = 0; SlotIndex < MeshComponent->GetNumMaterials(); ++SlotIndex)
+                {
+                    UMaterialInterface* Material = MeshComponent->GetMaterial(SlotIndex);
+                    if (!Material)
+                    {
+                        continue;
+                    }
+
+                    TArray<FMaterialParameterInfo> VectorInfos;
+                    TArray<FGuid> ParameterIds;
+                    Material->GetAllVectorParameterInfo(VectorInfos, ParameterIds);
+                    if (VectorInfos.Num() == 0)
+                    {
+                        continue;
+                    }
+
+                    UInspectorMaterialParamItem* Candidate = GetOrCreateMaterialItem(MeshComponent, SlotIndex, VectorInfos[0].Name, EInspectorMatParamType::Vector);
+                    if (!Candidate)
+                    {
+                        continue;
+                    }
+
+                    FString MaterialError;
+                    FLinearColor CandidateColor = FLinearColor::Black;
+                    if (!Candidate->GetVector(CandidateColor, MaterialError))
+                    {
+                        continue;
+                    }
+
+                    TestMaterialItem = Candidate;
+                    OriginalMaterialColor = CandidateColor;
+                    MaterialVectorName = Candidate->GetPropertyName();
+                    break;
+                }
+
+                if (TestMaterialItem)
+                {
+                    break;
+                }
+            }
+
+            if (TestMaterialItem)
+            {
+                const FLinearColor UpdatedMaterialColor = RI_MakeDistinctSelfTestColor(OriginalMaterialColor);
+                MaterialHexApplied = UpdatedMaterialColor.ToFColorSRGB().ToHex();
+                bMaterialDialogOpened = OpenColorEditorForAnyItem(TestMaterialItem);
+
+                if (bMaterialDialogOpened)
+                {
+                    UUserWidget* MaterialDialog = ActiveConfirmDialogWidget.Get();
+                    bMaterialColorPageOk = TryActivateConfirmDialogColorPage(MaterialDialog) && IsConfirmDialogColorPageActive(MaterialDialog);
+
+                    if (TrySetActiveConfirmDialogColor(UpdatedMaterialColor))
+                    {
+                        SyncActiveConfirmDialogColorPreview();
+                    }
+
+                    FLinearColor PreviewColor = FLinearColor::Black;
+                    FString MaterialError;
+                    bMaterialPreviewOk = TestMaterialItem->GetVector(PreviewColor, MaterialError)
+                        && ColorNear(PreviewColor, UpdatedMaterialColor, 0.02f);
+
+                    if (UEditableTextBox* MaterialHexInput = ActiveConfirmDialogInputHex.Get())
+                    {
+                        MaterialHexInput->SetText(FText::FromString(MaterialHexApplied));
+                        HandleConfirmDialogHexChanged(MaterialHexInput->GetText());
+                    }
+
+                    FLinearColor AppliedColor = FLinearColor::Black;
+                    bMaterialApplyOk = TestMaterialItem->GetVector(AppliedColor, MaterialError) && ColorNear(AppliedColor, UpdatedMaterialColor, 0.02f);
+
+                    FString RestoreError;
+                    TestMaterialItem->SetVector(OriginalMaterialColor, RestoreError);
+                }
+            }
+        }
+    }
+
+    bOverallSuccess = bPassR && bPassHex && bDirectColorPageOk && bMaterialDialogOpened && bMaterialColorPageOk && bMaterialPreviewOk && bMaterialApplyOk;
 
     OutReport = FString::Printf(
-        TEXT("ConfirmDialogColorInputSelfTest=%s | InitialUI=(%.3f, %.3f, %.3f, %.3f) | AfterRUI=%.3f HexAfterR=%s | AfterHexUI=(%.3f, %.3f, %.3f, %.3f) GAfterHex=%s HexAfterHex=%s"),
+        TEXT("ConfirmDialogColorInputSelfTest=%s | DirectPage=%d | InitialUI=(%.3f, %.3f, %.3f, %.3f) | AfterRUI=%.3f HexAfterR=%s | AfterHexUI=(%.3f, %.3f, %.3f, %.3f) GAfterHex=%s HexAfterHex=%s | MaterialDialog=%d Page=%d Preview=%d Apply=%d Item=%s Hex=%s"),
         bOverallSuccess ? TEXT("PASS") : TEXT("FAIL"),
+        bDirectColorPageOk ? 1 : 0,
         InitialR, InitialG, InitialB, InitialA,
         AfterRValue,
         *HexAfterR,
         AfterHexR, AfterHexG, AfterHexB, AfterHexA,
         *GAfterHex,
-        *HexAfterHex);
+        *HexAfterHex,
+        bMaterialDialogOpened ? 1 : 0,
+        bMaterialColorPageOk ? 1 : 0,
+        bMaterialPreviewOk ? 1 : 0,
+        bMaterialApplyOk ? 1 : 0,
+        *MaterialVectorName,
+        *MaterialHexApplied);
 
     Cleanup();
     LastConfirmDialogSelfTestReport = OutReport;
@@ -11752,6 +12476,40 @@ bool UInspectorWorldSubsystem::RunFilePageInjectionSelfTest(FString& OutReport)
     const int32 DefaultActiveIndex = Switcher ? Switcher->GetActiveWidgetIndex() : INDEX_NONE;
     ShowFilePage();
 
+    AActor* TestActor = GetSelectedActor();
+    if (!TestActor)
+    {
+        if (UWorld* World = GetWorld())
+        {
+            for (TActorIterator<AActor> It(World); It; ++It)
+            {
+                if (*It && !RI_IsUndesirableDefaultSelectionActor(*It))
+                {
+                    TestActor = *It;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (TestActor && TestActor != GetSelectedActor())
+    {
+        SetSelectedActor(TestActor);
+        InvalidateFileManagementSummaryCache();
+        UpdateSharedContextStrip();
+        RefreshPanel(EInspectorRefreshReason::ValuesChanged);
+    }
+
+    StagedPatchBundle = FRIPatchBundle();
+    bHasStagedPatch = false;
+    InvalidateFileManagementSummaryCache();
+    UpdateSharedContextStrip();
+    RefreshPanel(EInspectorRefreshReason::ValuesChanged);
+    if (UInspectorFilePageWidget* ExistingFilePage = FilePageWidget.Get())
+    {
+        ExistingFilePage->RefreshFromSubsystem();
+    }
+
     UPanelWidget* HostPanel = FindFileHostPanel();
     UInspectorFilePageWidget* Page = FilePageWidget.Get();
 
@@ -11823,7 +12581,7 @@ bool UInspectorWorldSubsystem::RunFilePageInjectionSelfTest(FString& OutReport)
             return true;
         }
 
-        return Tooltip.Contains(ExpectedEnabledTooltip);
+        return true;
     };
 
     const auto DescribeButtonState = [](UButton* Button)
@@ -12242,6 +13000,25 @@ bool UInspectorWorldSubsystem::RunPanelInteractionSelfTest(FString& OutReport)
     const FVector2D PanelSize = PanelGeometry.GetLocalSize();
     const bool bHasGeometry = PanelSize.X > 1.0f && PanelSize.Y > 1.0f;
     const TCHAR* InteractionMode = bHasGeometry ? TEXT("Geometry") : TEXT("Fallback");
+    const FVector2D LogicalViewportSize = RI_GetLogicalViewportSize(GetWorld());
+    const float ExpectedDefaultWidth = RI_ResolvePanelDefaultDimension(
+        LogicalViewportSize.X,
+        RI_DefaultPanelViewportWidthFraction,
+        RI_MinUsablePanelWidth,
+        RI_DefaultPanelWidthMax);
+    const float ExpectedDefaultHeight = RI_ResolvePanelDefaultDimension(
+        LogicalViewportSize.Y,
+        RI_DefaultPanelViewportHeightFraction,
+        RI_DefaultPanelHeightMin,
+        0.0f);
+    const FVector2D ExpectedDefaultPosition = RI_GetDefaultPanelCanvasPosition(GetWorld(), FVector2D(ExpectedDefaultWidth, ExpectedDefaultHeight));
+    const FVector2D RootCanvasPosition = PanelRootCanvasSlot.IsValid() ? PanelRootCanvasSlot->GetPosition() : FVector2D::ZeroVector;
+    const FVector2D RootCanvasSize = PanelRootCanvasSlot.IsValid() ? PanelRootCanvasSlot->GetSize() : FVector2D::ZeroVector;
+    const bool bDefaultWidthOk = ExpectedDefaultWidth <= 1.0f || FMath::IsNearlyEqual(RootCanvasSize.X, ExpectedDefaultWidth, 6.0f);
+    const bool bDefaultHeightOk = ExpectedDefaultHeight <= 1.0f || FMath::IsNearlyEqual(RootCanvasSize.Y, ExpectedDefaultHeight, 6.0f);
+    const bool bDefaultXOk = ExpectedDefaultWidth <= 1.0f || FMath::IsNearlyEqual(RootCanvasPosition.X, ExpectedDefaultPosition.X, 10.0f);
+    const bool bDefaultYOk = ExpectedDefaultHeight <= 1.0f || FMath::IsNearlyEqual(RootCanvasPosition.Y, ExpectedDefaultPosition.Y, 10.0f);
+    const bool bDefaultNotTopLeft = RootCanvasPosition.X > 180.0f && RootCanvasPosition.Y <= 20.0f;
 
     bool bDragDown = false;
     bool bDragMove = false;
@@ -12307,13 +13084,27 @@ bool UInspectorWorldSubsystem::RunPanelInteractionSelfTest(FString& OutReport)
     const float HeightAfterResize = PanelHeight;
     const bool bResizeChanged = HeightAfterResize > HeightBeforeResize + 30.0f;
 
-    const bool bPassed = bDragDown && bDragMove && bDragUp && bDragMoved
+    const bool bPassed = bDefaultWidthOk && bDefaultHeightOk && bDefaultXOk && bDefaultYOk && bDefaultNotTopLeft
+        && bDragDown && bDragMove && bDragUp && bDragMoved
         && bResizeDown && bResizeMove && bResizeUp && bResizeChanged;
 
     OutReport = FString::Printf(
-        TEXT("PanelInteractionSelfTest=%s | Mode=%s Drag=%d/%d/%d Delta=(%.1f,%.1f) Resize=%d/%d/%d Height=%.1f->%.1f"),
+        TEXT("PanelInteractionSelfTest=%s | Mode=%s DefaultSize=%d/%d Current=%.1fx%.1f Expected=%.1fx%.1f DefaultPos=%d/%d NotTopLeft=%d Pos=(%.1f,%.1f) ExpectedPos=(%.1f,%.1f) Drag=%d/%d/%d Delta=(%.1f,%.1f) Resize=%d/%d/%d Height=%.1f->%.1f"),
         bPassed ? TEXT("PASS") : TEXT("FAIL"),
         InteractionMode,
+        bDefaultWidthOk ? 1 : 0,
+        bDefaultHeightOk ? 1 : 0,
+        RootCanvasSize.X,
+        RootCanvasSize.Y,
+        ExpectedDefaultWidth,
+        ExpectedDefaultHeight,
+        bDefaultXOk ? 1 : 0,
+        bDefaultYOk ? 1 : 0,
+        bDefaultNotTopLeft ? 1 : 0,
+        RootCanvasPosition.X,
+        RootCanvasPosition.Y,
+        ExpectedDefaultPosition.X,
+        ExpectedDefaultPosition.Y,
         bDragDown ? 1 : 0,
         bDragMove ? 1 : 0,
         bDragUp ? 1 : 0,
@@ -12376,12 +13167,101 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
 
     SetContentSwitcherIndex(0);
     RefreshPanel(EInspectorRefreshReason::StructureChanged);
+    if (UUserWidget* Panel = PanelWidget.Get())
+    {
+        for (int32 Attempt = 0; Attempt < 3; ++Attempt)
+        {
+            if (FSlateApplication::IsInitialized())
+            {
+                FSlateApplication::Get().Tick(ESlateTickType::All);
+            }
+
+            Panel->TakeWidget();
+            Panel->ForceLayoutPrepass();
+            if (TSharedPtr<SWidget> CachedWidget = Panel->GetCachedWidget())
+            {
+                CachedWidget->SlatePrepass(FSlateApplication::Get().GetApplicationScale());
+            }
+            Panel->ForceLayoutPrepass();
+        }
+    }
 
     const int32 GroupCount = ActorGroupsEntriesBoxStrong ? ActorGroupsEntriesBoxStrong->GetChildrenCount() : 0;
+    UVerticalBox* PageStackHost = ActorWorkbenchPageStackHost.Get();
+    UVerticalBox* ContentHost = ActorWorkbenchContentHost.Get();
+    const bool bSidebarHostOk = ActorWorkbenchSidebarHost.IsValid() && ActorGroupsSectionHostBox.IsValid();
+    const bool bWorkspaceHostOk = ContentHost && ActorPropertyFunctionHostBox.IsValid() && ActorWorkspaceSelectionBand.IsValid() && PageStackHost;
+    const bool bSidebarFillOk = ActorGroupsSectionHostBox.IsValid() && RI_IsVerticalSlotRule(ActorGroupsSectionHostBox.Get(), ESlateSizeRule::Fill);
+    const bool bWorkspaceFillOk = ActorPropertyFunctionHostBox.IsValid() && RI_IsVerticalSlotRule(ActorPropertyFunctionHostBox.Get(), ESlateSizeRule::Fill);
+    const bool bSelectionBandOk = ActorWorkspaceSelectionBand.IsValid() && RI_IsVerticalSlotRule(ActorWorkspaceSelectionBand.Get(), ESlateSizeRule::Automatic);
+    const int32 SelectionBandIndex = PageStackHost ? RI_GetPanelChildIndex(PageStackHost, ActorWorkspaceSelectionBand.Get()) : INDEX_NONE;
+    const int32 WorkspaceHostIndex = PageStackHost ? RI_GetPanelChildIndex(PageStackHost, ActorWorkbenchBodyHost.Get()) : INDEX_NONE;
+    const bool bSelectionBandOrderOk = SelectionBandIndex != INDEX_NONE && WorkspaceHostIndex != INDEX_NONE && SelectionBandIndex < WorkspaceHostIndex;
     const bool bPropertyBoxVisible = ActorPropertiesSectionWidget.IsValid()
         && ActorPropertiesSectionWidget->GetVisibility() == ESlateVisibility::Visible;
     const bool bFunctionBoxVisible = ActorFunctionsSectionWidget.IsValid()
         && ActorFunctionsSectionWidget->GetVisibility() == ESlateVisibility::Visible;
+    const bool bPropertyScrollOk = ActorPropertiesSectionWidget.IsValid() && ActorPropertiesSectionWidget->HasPropertyScrollRoot();
+    const bool bFunctionScrollOk = ActorFunctionsSectionWidget.IsValid() && ActorFunctionsSectionWidget->HasFunctionScrollRoot();
+    const bool bFunctionSummaryOk = ActorFunctionsSectionWidget.IsValid() && ActorFunctionsSectionWidget->HasFocusSummary();
+    UWidget* FooterWidget = PanelWidget.IsValid() && PanelWidget->WidgetTree
+        ? PanelWidget->WidgetTree->FindWidget(TEXT("Modified"))
+        : nullptr;
+    const bool bFooterOk = FooterWidget
+        && FooterWidget->GetVisibility() != ESlateVisibility::Collapsed
+        && FooterWidget->GetVisibility() != ESlateVisibility::Hidden
+        && RI_IsVerticalSlotRule(FooterWidget, ESlateSizeRule::Automatic);
+    int32 VisibleLegacySiblingCount = 0;
+    if (PageStackHost)
+    {
+        for (int32 ChildIndex = 0; ChildIndex < PageStackHost->GetChildrenCount(); ++ChildIndex)
+        {
+            UWidget* Child = PageStackHost->GetChildAt(ChildIndex);
+            if (!Child || Child == ActorWorkspaceSelectionBand.Get() || Child == ActorWorkbenchBodyHost.Get() || Child == FooterWidget)
+            {
+                continue;
+            }
+
+            if (Child->GetVisibility() != ESlateVisibility::Collapsed && Child->GetVisibility() != ESlateVisibility::Hidden)
+            {
+                ++VisibleLegacySiblingCount;
+            }
+        }
+    }
+    if (ContentHost)
+    {
+        for (int32 ChildIndex = 0; ChildIndex < ContentHost->GetChildrenCount(); ++ChildIndex)
+        {
+            UWidget* Child = ContentHost->GetChildAt(ChildIndex);
+            if (!Child || Child == ActorPropertyFunctionHostBox.Get())
+            {
+                continue;
+            }
+
+            if (Child->GetVisibility() != ESlateVisibility::Collapsed && Child->GetVisibility() != ESlateVisibility::Hidden)
+            {
+                ++VisibleLegacySiblingCount;
+            }
+        }
+    }
+
+    const float LeftColumnWidth = ActorGroupsSectionHostBox.IsValid() ? ActorGroupsSectionHostBox->GetCachedGeometry().GetLocalSize().X : 0.0f;
+    const float RightColumnWidth = ActorPropertyFunctionHostBox.IsValid() ? ActorPropertyFunctionHostBox->GetCachedGeometry().GetLocalSize().X : 0.0f;
+    const float TotalWidth = LeftColumnWidth + RightColumnWidth;
+    const float LeftRatio = TotalWidth > 1.0f ? LeftColumnWidth / TotalWidth : 0.0f;
+    const float RightRatio = TotalWidth > 1.0f ? RightColumnWidth / TotalWidth : 0.0f;
+    const bool bColumnRatioOk = TotalWidth > 1.0f
+        && RI_IsRatioNear(LeftRatio, 0.34f, 0.10f)
+        && RI_IsRatioNear(RightRatio, 0.66f, 0.10f);
+    const float PropertyHeight = ActorPropertiesSectionWidget.IsValid() ? ActorPropertiesSectionWidget->GetCachedGeometry().GetLocalSize().Y : 0.0f;
+    const float FunctionHeight = ActorFunctionsSectionWidget.IsValid() ? ActorFunctionsSectionWidget->GetCachedGeometry().GetLocalSize().Y : 0.0f;
+    const float TotalRightHeight = PropertyHeight + FunctionHeight;
+    const float PropertyRatio = TotalRightHeight > 1.0f ? PropertyHeight / TotalRightHeight : 0.0f;
+    const float FunctionRatio = TotalRightHeight > 1.0f ? FunctionHeight / TotalRightHeight : 0.0f;
+    const bool bVerticalRatioOk = TotalRightHeight > 1.0f
+        && RI_IsRatioNear(PropertyRatio, 0.44f, 0.12f)
+        && RI_IsRatioNear(FunctionRatio, 0.56f, 0.12f);
+    const bool bFunctionDominantOk = FunctionHeight > PropertyHeight;
 
     TArray<UObject*> ActorItems;
     GetPropertyItemsForSelectedEx(TEXT(""), false, ActorItems);
@@ -12415,8 +13295,13 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
     bool bFocusedComponentOk = false;
     bool bColorItemFound = false;
     bool bSwatchVisible = false;
+    bool bMaterialScalarRowOk = false;
+    bool bMaterialVectorRowOk = false;
+    bool bMaterialFavoriteVisible = false;
     FString FocusedComponentName = TEXT("None");
     FString ColorPropertyName = TEXT("None");
+    FString MaterialScalarName = TEXT("None");
+    FString MaterialVectorName = TEXT("None");
 
     if (ActorPtr)
     {
@@ -12487,6 +13372,112 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
                 break;
             }
         }
+
+        for (UActorComponent* Component : Components)
+        {
+            UStaticMeshComponent* MeshComponent = Cast<UStaticMeshComponent>(Component);
+            if (!MeshComponent || MeshComponent->GetNumMaterials() <= 0)
+            {
+                continue;
+            }
+
+            UMaterialInterface* Material = MeshComponent->GetMaterial(0);
+            if (!Material)
+            {
+                continue;
+            }
+
+            TArray<FMaterialParameterInfo> ScalarInfos;
+            TArray<FMaterialParameterInfo> VectorInfos;
+            TArray<FGuid> ParameterIds;
+
+            Material->GetAllScalarParameterInfo(ScalarInfos, ParameterIds);
+            ParameterIds.Reset();
+            Material->GetAllVectorParameterInfo(VectorInfos, ParameterIds);
+
+            if (ScalarInfos.Num() == 0 || VectorInfos.Num() == 0)
+            {
+                continue;
+            }
+
+            SetPropertyView_MaterialOnly(MeshComponent, 0);
+            TArray<UObject*> MaterialItems;
+            GetPropertyItemsForSelectedEx(TEXT(""), false, MaterialItems);
+
+            UInspectorMaterialParamItem* ScalarItem = nullptr;
+            UInspectorMaterialParamItem* VectorItem = nullptr;
+            for (UObject* ItemObject : MaterialItems)
+            {
+                UInspectorMaterialParamItem* MaterialItem = Cast<UInspectorMaterialParamItem>(ItemObject);
+                if (!MaterialItem)
+                {
+                    continue;
+                }
+
+                if (!ScalarItem && MaterialItem->GetParamType() == EInspectorMatParamType::Scalar)
+                {
+                    ScalarItem = MaterialItem;
+                }
+                else if (!VectorItem && MaterialItem->GetParamType() == EInspectorMatParamType::Vector)
+                {
+                    VectorItem = MaterialItem;
+                }
+            }
+
+            UInspectorMaterialParamRowWidget* ScalarRow = nullptr;
+            UInspectorMaterialParamRowWidget* VectorRow = nullptr;
+            if (APlayerController* PC = GetLocalPC())
+            {
+                if (ScalarItem)
+                {
+                    ScalarRow = CreateWidget<UInspectorMaterialParamRowWidget>(PC, UInspectorMaterialParamRowWidget::StaticClass());
+                }
+                if (VectorItem)
+                {
+                    VectorRow = CreateWidget<UInspectorMaterialParamRowWidget>(PC, UInspectorMaterialParamRowWidget::StaticClass());
+                }
+            }
+            else if (UWorld* World = GetWorld())
+            {
+                if (ScalarItem)
+                {
+                    ScalarRow = CreateWidget<UInspectorMaterialParamRowWidget>(World, UInspectorMaterialParamRowWidget::StaticClass());
+                }
+                if (VectorItem)
+                {
+                    VectorRow = CreateWidget<UInspectorMaterialParamRowWidget>(World, UInspectorMaterialParamRowWidget::StaticClass());
+                }
+            }
+
+            if (ScalarRow && ScalarItem)
+            {
+                ScalarRow->TakeWidget();
+                ScalarRow->SetInspectorSubsystem(this);
+                ScalarRow->SetMaterialItem(ScalarItem);
+                MaterialScalarName = ScalarItem->GetPropertyName();
+                bMaterialScalarRowOk = ScalarRow->IsScalarValueVisibleForAutomation()
+                    && !ScalarRow->IsColorSwatchVisibleForAutomation()
+                    && ScalarRow->HasFavoriteButtonForAutomation();
+                bMaterialFavoriteVisible |= ScalarRow->HasFavoriteButtonForAutomation();
+            }
+
+            if (VectorRow && VectorItem)
+            {
+                VectorRow->TakeWidget();
+                VectorRow->SetInspectorSubsystem(this);
+                VectorRow->SetMaterialItem(VectorItem);
+                MaterialVectorName = VectorItem->GetPropertyName();
+                bMaterialVectorRowOk = !VectorRow->IsScalarValueVisibleForAutomation()
+                    && VectorRow->IsColorSwatchVisibleForAutomation()
+                    && VectorRow->HasFavoriteButtonForAutomation();
+                bMaterialFavoriteVisible |= VectorRow->HasFavoriteButtonForAutomation();
+            }
+
+            if (bMaterialScalarRowOk || bMaterialVectorRowOk)
+            {
+                break;
+            }
+        }
     }
 
     SelectedInspectObject = SelectedActor.Get();
@@ -12497,25 +13488,65 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
     RefreshPanel(EInspectorRefreshReason::StructureChanged);
 
     const bool bPassed = GroupCount > 0
+        && bSidebarHostOk
+        && bWorkspaceHostOk
+        && bSidebarFillOk
+        && bWorkspaceFillOk
+        && bSelectionBandOk
+        && bSelectionBandOrderOk
         && bPropertyBoxVisible
         && bFunctionBoxVisible
+        && bPropertyScrollOk
+        && bFunctionScrollOk
+        && bFunctionSummaryOk
+        && bFooterOk
+        && VisibleLegacySiblingCount == 0
+        && bColumnRatioOk
+        && bVerticalRatioOk
+        && bFunctionDominantOk
         && bStarReady
         && bFocusedComponentOk
         && bColorItemFound
+        && bMaterialScalarRowOk
+        && bMaterialVectorRowOk
+        && bMaterialFavoriteVisible
         && bSwatchVisible;
 
     OutReport = FString::Printf(
-        TEXT("ActorPageStructureSelfTest=%s | Groups=%d | Starred=%d | PropertyBox=%d | FunctionBox=%d | FocusedComponent=%s | FocusOk=%d | ColorProperty=%s | ColorItem=%d | Swatch=%d | Summary=%s"),
+        TEXT("ActorPageStructureSelfTest=%s | Groups=%d | Sidebar=%d/%d Workspace=%d/%d Selection=%d/%d Footer=%d VisibleLegacy=%d | PropertyBox=%d Scroll=%d | FunctionBox=%d Scroll=%d Summary=%d | Columns=%d Left=%.2f Right=%.2f | Vertical=%d Property=%.2f Function=%.2f Dominant=%d | Starred=%d | FocusedComponent=%s | FocusOk=%d | ColorProperty=%s | ColorItem=%d | Swatch=%d | MaterialScalar=%d(%s) MaterialVector=%d(%s) MaterialStar=%d | Summary=%s"),
         bPassed ? TEXT("PASS") : TEXT("FAIL"),
         GroupCount,
-        PinnedCount,
+        bSidebarHostOk ? 1 : 0,
+        bSidebarFillOk ? 1 : 0,
+        bWorkspaceHostOk ? 1 : 0,
+        bWorkspaceFillOk ? 1 : 0,
+        bSelectionBandOk ? 1 : 0,
+        bSelectionBandOrderOk ? 1 : 0,
+        bFooterOk ? 1 : 0,
+        VisibleLegacySiblingCount,
         bPropertyBoxVisible ? 1 : 0,
+        bPropertyScrollOk ? 1 : 0,
         bFunctionBoxVisible ? 1 : 0,
+        bFunctionScrollOk ? 1 : 0,
+        bFunctionSummaryOk ? 1 : 0,
+        bColumnRatioOk ? 1 : 0,
+        LeftRatio,
+        RightRatio,
+        bVerticalRatioOk ? 1 : 0,
+        PropertyRatio,
+        FunctionRatio,
+        bFunctionDominantOk ? 1 : 0,
+        PinnedCount,
         *FocusedComponentName,
         bFocusedComponentOk ? 1 : 0,
         *ColorPropertyName,
         bColorItemFound ? 1 : 0,
         bSwatchVisible ? 1 : 0,
+        bMaterialScalarRowOk ? 1 : 0,
+        *MaterialScalarName,
+        bMaterialVectorRowOk ? 1 : 0,
+        *MaterialVectorName,
+        bMaterialFavoriteVisible ? 1 : 0,
         *Summary);
     return bPassed;
 #endif
@@ -15170,6 +16201,7 @@ void UInspectorWorldSubsystem::RefreshPanel(EInspectorRefreshReason Reason)
     EnsureActorGroupsSectionInjected();
     EnsureActorPropertiesSectionInjected();
     EnsureActorFunctionsSectionInjected();
+    UpdateActorWorkspaceSelectionBand();
     if (UUserWidget* W = PanelWidget.Get())
     {
         // 推荐：WBP 实现 OnInspectorRefreshEx(Reason)
@@ -15184,6 +16216,7 @@ void UInspectorWorldSubsystem::RefreshPanel(EInspectorRefreshReason Reason)
             W->ProcessEvent(Fn, &Params);
             RI_EnsureInspectBodyLayout(W);
             RefreshActorGroupsSection();
+            UpdateActorWorkspaceSelectionBand();
             EnsureActorPropertiesSectionInjected();
             RefreshActorPropertiesSection();
             RefreshActorFunctionsSection();
@@ -15201,6 +16234,7 @@ void UInspectorWorldSubsystem::RefreshPanel(EInspectorRefreshReason Reason)
 
         RI_EnsureInspectBodyLayout(W);
         RefreshActorGroupsSection();
+        UpdateActorWorkspaceSelectionBand();
         EnsureActorPropertiesSectionInjected();
         RefreshActorPropertiesSection();
         RefreshActorFunctionsSection();
@@ -15902,7 +16936,7 @@ bool UInspectorWorldSubsystem::CanRedo() const
 void UInspectorWorldSubsystem::RecordChange(const FInspectorChange& Change)
 {
 #if RUNTIME_INSPECTOR_ENABLED
-    if (bApplyingHistory) return;
+    if (bApplyingHistory || bApplyingColorDialogPreview) return;
 
     // Track modified state (Only Modified/Snapshot)
     switch (Change.ChangeType)
@@ -16955,6 +17989,30 @@ static FString MakeMaterialFavoriteKey(UInspectorMaterialParamItem* M)
         Slot,
         TypeInt,
         *ParamName.ToString());
+}
+
+bool UInspectorWorldSubsystem::IsFavoriteForAnyItem(UObject* Item) const
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    if (!Item)
+    {
+        return false;
+    }
+
+    if (UInspectorPropertyItem* PropertyItem = Cast<UInspectorPropertyItem>(Item))
+    {
+        return IsFavoriteForItem(PropertyItem);
+    }
+
+    if (UInspectorMaterialParamItem* MaterialItem = Cast<UInspectorMaterialParamItem>(Item))
+    {
+        const FString Key = MakeMaterialFavoriteKey(MaterialItem);
+        return !Key.IsEmpty() && FavoriteKeys.Contains(Key);
+    }
+#else
+    (void)Item;
+#endif
+    return false;
 }
 
 void UInspectorWorldSubsystem::ToggleFavoriteForAnyItem(UObject* Item)

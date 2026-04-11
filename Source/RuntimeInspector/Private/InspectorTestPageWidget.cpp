@@ -137,7 +137,7 @@ void UInspectorTestPageWidget::BuildWidgetTree()
     }
 
     UBorder* RootBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("RI_TestRoot"));
-    RootBorder->SetPadding(FMargin(4.0f));
+    RootBorder->SetPadding(RICompactUI::GetPanelPadding());
     RootBorder->SetBrushColor(RICompactUI::GetPageBackgroundColor());
 
     UVerticalBox* RootBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_TestRootBox"));
@@ -152,9 +152,25 @@ void UInspectorTestPageWidget::BuildWidgetTree()
     UVerticalBox* MainBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_TestMainBox"));
     PageScroll->AddChild(MainBox);
 
+    if (UVerticalBoxSlot* VBoxSlot = MainBox->AddChildToVerticalBox(CreateSectionTitle(TEXT("Tools Workspace"), true)))
+    {
+        VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, RICompactUI::GetInlineGap()));
+    }
+
+    if (UVerticalBoxSlot* VBoxSlot = MainBox->AddChildToVerticalBox(RI_MakeText(
+        WidgetTree,
+        TEXT("Keep high-frequency workflows in view and collapse deep diagnostics until they are actually needed."),
+        RICompactUI::GetMutedFontSize(),
+        false,
+        RI_TestMutedTextColor(),
+        true)))
+    {
+        VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, RICompactUI::GetSectionGap()));
+    }
+
     if (UVerticalBoxSlot* VBoxSlot = MainBox->AddChildToVerticalBox(CreateSectionTitle(TEXT("Run Controls"), true)))
     {
-        VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+        VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, RICompactUI::GetInlineGap()));
     }
 
     UBorder* ControlsBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("RI_TestControlsBorder"));
@@ -162,7 +178,7 @@ void UInspectorTestPageWidget::BuildWidgetTree()
     ControlsBorder->SetBrushColor(RI_TestRowColor());
     if (UVerticalBoxSlot* VBoxSlot = MainBox->AddChildToVerticalBox(ControlsBorder))
     {
-        VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 8.f));
+        VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, RICompactUI::GetSectionGap()));
     }
 
     UVerticalBox* ControlsBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_TestControlsBox"));
@@ -252,9 +268,9 @@ void UInspectorTestPageWidget::BuildWidgetTree()
         VBoxSlot->SetPadding(FMargin(0.f, 6.f, 0.f, 0.f));
     }
 
-    if (UVerticalBoxSlot* VBoxSlot = MainBox->AddChildToVerticalBox(CreateSectionTitle(TEXT("Workflows"), true)))
+    if (UVerticalBoxSlot* VBoxSlot = MainBox->AddChildToVerticalBox(CreateSectionTitle(TEXT("High Frequency Workflows"), true)))
     {
-        VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+        VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, RICompactUI::GetInlineGap()));
     }
 
     AvailableWorkflowsScroll = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("RI_WorkflowDefinitionsScroll"));
@@ -265,7 +281,7 @@ void UInspectorTestPageWidget::BuildWidgetTree()
     WorkflowSize->SetContent(AvailableWorkflowsScroll);
     if (UVerticalBoxSlot* VBoxSlot = MainBox->AddChildToVerticalBox(WorkflowSize))
     {
-        VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 8.f));
+        VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, RICompactUI::GetSectionGap()));
     }
 
     UWidget* TestsHeader = CreateCollapsibleSectionHeader(TEXT("Tests"), TestsSectionToggleText, TEXT("BTN_ToggleTestsSection"));
@@ -338,9 +354,9 @@ void UInspectorTestPageWidget::BuildWidgetTree()
         VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 8.f));
     }
 
-    if (UVerticalBoxSlot* VBoxSlot = MainBox->AddChildToVerticalBox(CreateSectionTitle(TEXT("Latest Results"), true)))
+    if (UVerticalBoxSlot* VBoxSlot = MainBox->AddChildToVerticalBox(CreateSectionTitle(TEXT("Recent Results"), true)))
     {
-        VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+        VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, RICompactUI::GetInlineGap()));
     }
 
     ResultsScroll = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("RI_TestResultsScroll"));
@@ -355,9 +371,9 @@ void UInspectorTestPageWidget::BuildWidgetTree()
         VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 8.f));
     }
 
-    if (UVerticalBoxSlot* VBoxSlot = MainBox->AddChildToVerticalBox(CreateSectionTitle(TEXT("Report"))))
+    if (UVerticalBoxSlot* VBoxSlot = MainBox->AddChildToVerticalBox(CreateSectionTitle(TEXT("Selected Report"))))
     {
-        VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+        VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, RICompactUI::GetInlineGap()));
     }
 
     UBorder* ReportBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("RI_TestReportBorder"));

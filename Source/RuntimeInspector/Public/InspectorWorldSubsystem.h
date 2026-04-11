@@ -38,6 +38,7 @@
 //    UPROPERTY() FString DebugObjectName; // ��ѡ��������־
 //};
 class UCameraComponent;
+class UBorder;
 class UButton;
 class UInputComponent;
 class UInspectorFilePageWidget;
@@ -720,6 +721,9 @@ public:
     bool IsFavoriteForItem(UInspectorPropertyItem* Item) const;
 
     UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Favorites")
+    bool IsFavoriteForAnyItem(UObject* Item) const;
+
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Favorites")
     void ToggleFavoriteForItem(UInspectorPropertyItem* Item);
 
     UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|UI")
@@ -986,6 +990,8 @@ private:
     void EnsureActorWorkbenchBodyInjected();
     void EnsureActorGroupsSectionInjected();
     void RefreshActorGroupsSection();
+    void EnsureActorWorkspaceSelectionBandInjected();
+    void UpdateActorWorkspaceSelectionBand();
     void EnsureActorPropertiesSectionInjected();
     void RefreshActorPropertiesSection();
     void EnsureActorFunctionsSectionInjected();
@@ -1013,6 +1019,8 @@ private:
     void RefreshConfirmDialogBinding();
     void ClearConfirmDialogBinding();
     bool TryBindActiveConfirmDialog(UUserWidget* DialogWidget);
+    bool TryActivateConfirmDialogColorPage(UUserWidget* DialogWidget) const;
+    bool IsConfirmDialogColorPageActive(UUserWidget* DialogWidget) const;
     bool TryGetActiveConfirmDialogColor(FLinearColor& OutColor) const;
     bool TrySetActiveConfirmDialogColor(const FLinearColor& InColor);
     bool ApplyActiveConfirmDialogColor(const FLinearColor& InColor);
@@ -1022,11 +1030,20 @@ private:
     bool TryParseConfirmDialogHexColor(const FText& InText, FLinearColor& OutColor) const;
     bool TryGetInspectorItemColor(UObject* ItemObject, FLinearColor& OutColor) const;
     bool ApplyInspectorItemColor(UObject* ItemObject, const FLinearColor& InColor, FString& OutError);
+    bool ApplyInspectorItemColorInternal(UObject* ItemObject, const FLinearColor& InColor, FString& OutError, bool bSuppressHistory);
     bool OpenColorEditorForItemInternal(UObject* ItemObject);
     void ApplyActiveColorEditItemIfNeeded(const FLinearColor& InColor);
+    void SyncActiveConfirmDialogColorPreview();
+    void FinalizeActiveColorEdit(bool bAccept);
     void ApplyActiveConfirmDialogChannels();
     void HandleConfirmDialogNumericTextChanged(UEditableTextBox* SourceTextBox, int32 ChannelIndex, const FText& InText);
     void HandleConfirmDialogHexTextChanged(const FText& InText);
+
+    UFUNCTION()
+    void HandleActiveConfirmDialogAccepted();
+
+    UFUNCTION()
+    void HandleActiveConfirmDialogCanceled();
     //void RefreshPanel();
 
     // <<< ADD���۵�״̬����
@@ -1056,6 +1073,8 @@ private:
     TWeakObjectPtr<UUserWidget> PanelWidget;
     TWeakObjectPtr<UUserWidget> ActiveConfirmDialogWidget;
     TWeakObjectPtr<UObject> ActiveColorEditItem;
+    TWeakObjectPtr<UButton> ActiveConfirmDialogYesButton;
+    TWeakObjectPtr<UButton> ActiveConfirmDialogNoButton;
 
     TWeakObjectPtr<UEditableTextBox> ActiveConfirmDialogInputR;
     TWeakObjectPtr<UEditableTextBox> ActiveConfirmDialogInputG;
@@ -1067,7 +1086,15 @@ private:
     TSoftClassPtr<UUserWidget> ConfirmDialogWidgetClass;
 
     float ConfirmDialogBindAccum = 0.f;
+    float ConfirmDialogPreviewAccum = 0.f;
     bool bUpdatingConfirmDialogText = false;
+    bool bApplyingColorDialogPreview = false;
+    bool bActiveColorEditPreviewDirty = false;
+    bool bActiveColorEditCanceled = false;
+    bool bHasActiveColorEditOriginalColor = false;
+    bool bHasActiveColorEditLastPreviewColor = false;
+    FLinearColor ActiveColorEditOriginalColor = FLinearColor::Black;
+    FLinearColor ActiveColorEditLastPreviewColor = FLinearColor::Black;
 
     // ����Ժ��������������Ӳ����һ��Ĭ��·��
     UPROPERTY()
@@ -1527,10 +1554,25 @@ private:
         TObjectPtr<UInspectorFunctionsSectionWidget> ActorFunctionsSectionWidgetStrong = nullptr;
 
         UPROPERTY(Transient)
+        TObjectPtr<UBorder> ActorWorkspaceSelectionBandStrong = nullptr;
+
+        UPROPERTY(Transient)
+        TObjectPtr<UTextBlock> ActorWorkspaceSelectionActorTextStrong = nullptr;
+
+        UPROPERTY(Transient)
+        TObjectPtr<UTextBlock> ActorWorkspaceSelectionSourceTextStrong = nullptr;
+
+        UPROPERTY(Transient)
+        TObjectPtr<UTextBlock> ActorWorkspaceSelectionStateTextStrong = nullptr;
+
+        UPROPERTY(Transient)
         TObjectPtr<UVerticalBox> ActorPropertyFunctionHostBoxStrong = nullptr;
 
         UPROPERTY(Transient)
         TObjectPtr<UHorizontalBox> ActorWorkbenchBodyHostStrong = nullptr;
+
+        UPROPERTY(Transient)
+        TObjectPtr<UVerticalBox> ActorWorkbenchPageStackHostStrong = nullptr;
 
         UPROPERTY(Transient)
         TObjectPtr<UVerticalBox> ActorWorkbenchSidebarHostStrong = nullptr;
@@ -1546,8 +1588,13 @@ private:
         TWeakObjectPtr<UVerticalBox> ActorPinnedEntriesBox;
         TWeakObjectPtr<UInspectorPropertiesSectionWidget> ActorPropertiesSectionWidget;
         TWeakObjectPtr<UInspectorFunctionsSectionWidget> ActorFunctionsSectionWidget;
+        TWeakObjectPtr<UBorder> ActorWorkspaceSelectionBand;
+        TWeakObjectPtr<UTextBlock> ActorWorkspaceSelectionActorText;
+        TWeakObjectPtr<UTextBlock> ActorWorkspaceSelectionSourceText;
+        TWeakObjectPtr<UTextBlock> ActorWorkspaceSelectionStateText;
         TWeakObjectPtr<UVerticalBox> ActorPropertyFunctionHostBox;
         TWeakObjectPtr<UHorizontalBox> ActorWorkbenchBodyHost;
+        TWeakObjectPtr<UVerticalBox> ActorWorkbenchPageStackHost;
         TWeakObjectPtr<UVerticalBox> ActorWorkbenchSidebarHost;
         TWeakObjectPtr<UVerticalBox> ActorWorkbenchContentHost;
         TArray<FRIHostPanelMountState> HostPanelMountStates;

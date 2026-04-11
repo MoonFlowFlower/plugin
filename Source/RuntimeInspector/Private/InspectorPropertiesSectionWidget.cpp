@@ -3,6 +3,7 @@
 #include "InspectorCompactWidgetUtils.h"
 #include "InspectorGroupItem.h"
 #include "InspectorMaterialParamItem.h"
+#include "InspectorMaterialParamRowWidget.h"
 #include "InspectorPropertyItem.h"
 #include "InspectorPropertyRowWidget.h"
 #include "InspectorWorldSubsystem.h"
@@ -137,89 +138,55 @@ void UInspectorPropertiesSectionWidget::BuildWidgetTree()
     }
 
     RootBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("RI_ActorPropertiesBorder"));
-    RootBorder->SetPadding(FMargin(6.f, 5.f));
+    RootBorder->SetPadding(RICompactUI::GetSurfaceCardPadding(true));
     RootBorder->SetBrushColor(RI_PropertySectionColor());
 
     RootBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ActorPropertiesRoot"));
     RootBorder->SetContent(RootBox);
 
-    HeaderBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("RI_InspectHeaderBorder"));
-    HeaderBorder->SetPadding(FMargin(7.f, 6.f));
-    HeaderBorder->SetBrushColor(RICompactUI::GetContextStripBackgroundColor());
-
-    UVerticalBox* HeaderRoot = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_InspectHeaderRoot"));
-    HeaderBorder->SetContent(HeaderRoot);
-
-    if (UVerticalBoxSlot* HeaderTitleSlot = HeaderRoot->AddChildToVerticalBox(
-        RICompactUI::MakeText(WidgetTree, TEXT("Selection"), RICompactUI::GetMutedFontSize(), true, RICompactUI::GetMutedTextColor())))
-    {
-        HeaderTitleSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
-    }
-
-    HeaderActorText = RICompactUI::MakeText(WidgetTree, TEXT("No selected actor"), 10, true, RICompactUI::GetStrongTextColor(), true);
-    if (UVerticalBoxSlot* ActorSlot = HeaderRoot->AddChildToVerticalBox(HeaderActorText))
-    {
-        ActorSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
-    }
-
-    UHorizontalBox* HeaderInfoRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_InspectHeaderInfoRow"));
-    if (UVerticalBoxSlot* InfoRowSlot = HeaderRoot->AddChildToVerticalBox(HeaderInfoRow))
-    {
-        InfoRowSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 2.f));
-    }
-
-    auto AddHeaderCell = [HeaderInfoRow](UWidget* Cell, float FillWeight)
-    {
-        if (!HeaderInfoRow || !Cell)
-        {
-            return;
-        }
-
-        if (UHorizontalBoxSlot* Slot = HeaderInfoRow->AddChildToHorizontalBox(Cell))
-        {
-            FSlateChildSize SizeRule(ESlateSizeRule::Fill);
-            SizeRule.Value = FillWeight;
-            Slot->SetSize(SizeRule);
-            Slot->SetPadding(FMargin(0.f, 0.f, 4.f, 0.f));
-            Slot->SetVerticalAlignment(VAlign_Fill);
-        }
-    };
-
-    AddHeaderCell(
-        RI_CreateHeaderInfoCell(
-            WidgetTree,
-            TEXT("Focus"),
-            HeaderFocusText,
-            RICompactUI::GetContextPrimaryCellBackgroundColor()),
-        1.0f);
-    AddHeaderCell(
-        RI_CreateHeaderInfoCell(
-            WidgetTree,
-            TEXT("Source Asset"),
-            HeaderSourceText,
-            RICompactUI::GetContextSecondaryCellBackgroundColor()),
-        1.4f);
-    AddHeaderCell(
-        RI_CreateHeaderInfoCell(
-            WidgetTree,
-            TEXT("Snapshot"),
-            HeaderStatusText,
-            RICompactUI::GetContextStatusCellBackgroundColor()),
-        0.9f);
-
-    HeaderBorder->SetVisibility(ESlateVisibility::Collapsed);
-
-    if (UVerticalBoxSlot* HeaderSlot = RootBox->AddChildToVerticalBox(
+    if (UVerticalBoxSlot* TitleSlot = RootBox->AddChildToVerticalBox(
         RICompactUI::MakeSectionTitle(WidgetTree, TEXT("Property"), RICompactUI::ERISectionVisualStyle::Emphasis)))
     {
-        HeaderSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+        TitleSlot->SetPadding(FMargin(0.f, 0.f, 0.f, RICompactUI::GetInlineGap()));
     }
+
+    HeaderBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("RI_InspectHeaderBorder"));
+    HeaderBorder->SetPadding(FMargin(8.f, 6.f));
+    HeaderBorder->SetBrushColor(RICompactUI::GetCellSurfaceBackgroundColor());
+
+    UVerticalBox* HeaderInfoBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_InspectHeaderInfoBox"));
+    HeaderBorder->SetContent(HeaderInfoBox);
+
+    HeaderFocusText = RICompactUI::MakeText(WidgetTree, TEXT("Actor"), RICompactUI::GetValueFontSize(), true, RICompactUI::GetStrongTextColor(), true);
+    if (UVerticalBoxSlot* HeaderSlot = HeaderInfoBox->AddChildToVerticalBox(HeaderFocusText))
+    {
+        HeaderSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 2.f));
+    }
+
+    HeaderSourceText = RICompactUI::MakeText(WidgetTree, TEXT("No source asset"), RICompactUI::GetMutedFontSize(), false, RICompactUI::GetMutedTextColor(), true);
+    if (UVerticalBoxSlot* HeaderSlot = HeaderInfoBox->AddChildToVerticalBox(HeaderSourceText))
+    {
+        HeaderSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 2.f));
+    }
+
+    HeaderStatusText = RICompactUI::MakeText(WidgetTree, TEXT("Live only"), RICompactUI::GetLabelFontSize(), true, RICompactUI::GetStrongTextColor(), false);
+    HeaderInfoBox->AddChildToVerticalBox(HeaderStatusText);
+
+    if (UVerticalBoxSlot* HeaderSlot = RootBox->AddChildToVerticalBox(HeaderBorder))
+    {
+        HeaderSlot->SetPadding(FMargin(0.f, 0.f, 0.f, RICompactUI::GetInlineGap()));
+    }
+
+    UBorder* BodyBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("RI_ActorPropertiesBodyBorder"));
+    BodyBorder->SetPadding(RICompactUI::GetSurfaceCardPadding(true));
+    BodyBorder->SetBrushColor(RICompactUI::GetRowSurfaceBackgroundColor());
 
     ScrollBox = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("RI_ActorPropertiesScroll"));
     EntriesBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ActorPropertiesEntries"));
     ScrollBox->AddChild(EntriesBox);
+    BodyBorder->SetContent(ScrollBox);
 
-    if (UVerticalBoxSlot* BodySlot = RootBox->AddChildToVerticalBox(ScrollBox))
+    if (UVerticalBoxSlot* BodySlot = RootBox->AddChildToVerticalBox(BodyBorder))
     {
         BodySlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
         BodySlot->SetPadding(FMargin(0.f, 0.f, 0.f, 0.f));
@@ -236,7 +203,25 @@ UWidget* UInspectorPropertiesSectionWidget::CreatePropertyRow(UObject* ItemObjec
 
     if (UInspectorMaterialParamItem* MaterialItem = Cast<UInspectorMaterialParamItem>(ItemObject))
     {
-        return RI_CreateReadOnlyRow(WidgetTree, MaterialItem->GetPropertyName(), MaterialItem->GetValueText());
+        UInspectorMaterialParamRowWidget* Row = nullptr;
+        if (APlayerController* PC = GetOwningPlayer())
+        {
+            Row = CreateWidget<UInspectorMaterialParamRowWidget>(PC, UInspectorMaterialParamRowWidget::StaticClass());
+        }
+        else if (UWorld* World = GetWorld())
+        {
+            Row = CreateWidget<UInspectorMaterialParamRowWidget>(World, UInspectorMaterialParamRowWidget::StaticClass());
+        }
+
+        if (!Row)
+        {
+            return nullptr;
+        }
+
+        Row->SetInspectorSubsystem(Subsystem.Get());
+        Row->SetMaterialItem(MaterialItem);
+        Row->TakeWidget();
+        return Row;
     }
 
     UInspectorPropertyItem* PropertyItem = Cast<UInspectorPropertyItem>(ItemObject);
@@ -316,7 +301,6 @@ void UInspectorPropertiesSectionWidget::RefreshHeaderFromSubsystem()
     const AActor* SelectedActor = InspectorSubsystem ? InspectorSubsystem->GetSelectedActor() : nullptr;
     const UObject* FocusedObject = InspectorSubsystem ? InspectorSubsystem->GetFocusedInspectObject() : nullptr;
 
-    const FString ActorLabel = SelectedActor ? SelectedActor->GetActorLabel() : TEXT("No selected actor");
     const FString FocusLabel = FocusedObject
         ? FocusedObject->GetName()
         : TEXT("Actor");
@@ -325,13 +309,7 @@ void UInspectorPropertiesSectionWidget::RefreshHeaderFromSubsystem()
         : TEXT("No source asset");
     const FString SnapshotLabel = (InspectorSubsystem && InspectorSubsystem->HasStagedPatch())
         ? FString::Printf(TEXT("Staged (%d ops)"), InspectorSubsystem->GetStagedPatch().Operations.Num())
-        : TEXT("No staged patch");
-
-    if (HeaderActorText)
-    {
-        HeaderActorText->SetText(FText::FromString(ActorLabel));
-        HeaderActorText->SetColorAndOpacity(SelectedActor ? RICompactUI::GetStrongTextColor() : RICompactUI::GetMutedTextColor());
-    }
+        : TEXT("Live only");
 
     auto ApplyHeaderValue = [](UTextBlock* TextWidget, const FString& Value, const FLinearColor& Color)
     {
