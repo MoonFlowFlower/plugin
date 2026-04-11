@@ -13,6 +13,27 @@
 // For TBaseStructure<>
 #include "UObject/NoExportTypes.h"
 
+namespace
+{
+    static FString RI_GetPropertyDisplayNameRuntimeSafe(const FProperty* Prop)
+    {
+        if (!Prop)
+        {
+            return FString();
+        }
+
+#if WITH_EDITOR
+        const FString FriendlyName = Prop->GetDisplayNameText().ToString();
+        if (!FriendlyName.IsEmpty())
+        {
+            return FriendlyName;
+        }
+#endif
+
+        const FString AuthoredName = Prop->GetAuthoredName();
+        return AuthoredName.IsEmpty() ? Prop->GetName() : AuthoredName;
+    }
+}
 
 void UInspectorPropertyItem::Init(UObject* InTarget, FName InPropertyName)
 {
@@ -32,18 +53,10 @@ FString UInspectorPropertyItem::GetPropertyName() const
     FString DisplayName = PropertyName.ToString();
     if (Prop)
     {
-        const FString Friendly = Prop->GetDisplayNameText().ToString();
+        const FString Friendly = RI_GetPropertyDisplayNameRuntimeSafe(Prop);
         if (!Friendly.IsEmpty())
         {
             DisplayName = Friendly;
-        }
-        else
-        {
-            const FString Authored = Prop->GetAuthoredName();
-            if (!Authored.IsEmpty())
-            {
-                DisplayName = Authored;
-            }
         }
     }
 

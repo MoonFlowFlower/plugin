@@ -26,6 +26,10 @@ public:
     UFUNCTION()
     void HandleClicked();
 
+    bool MatchesStableKey(const FString& InStableKey) const;
+    FString GetStableKey() const;
+    void InvokeForAutomation();
+
 private:
     TWeakObjectPtr<UInspectorWorldSubsystem> Subsystem;
     TWeakObjectPtr<UInspectorGroupItem> Item;
@@ -59,6 +63,8 @@ public:
     void RefreshFromSubsystem();
     int32 GetEntryWidgetCountForDebug() const;
     int32 GetPinnedEntryWidgetCountForDebug() const;
+    bool InvokeGroupItemClickForAutomation(const FString& StableKey);
+    void GetVisibleGroupStableKeysForAutomation(TArray<FString>& OutKeys) const;
 
 protected:
     virtual TSharedRef<SWidget> RebuildWidget() override;

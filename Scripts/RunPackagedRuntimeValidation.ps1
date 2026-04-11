@@ -125,7 +125,12 @@ function Ensure-PackagedBuild {
         return
     }
 
-    & (Join-Path $ScriptRoot "BuildPackagedRuntimeValidation.ps1") -EngineRoot $EngineRoot
+    $BuildScript = Join-Path $ScriptRoot "BuildPackagedRuntimeValidation.ps1"
+    if ($BuildIfMissing) {
+        & $BuildScript -EngineRoot $EngineRoot -ForceRebuild
+    } else {
+        & $BuildScript -EngineRoot $EngineRoot
+    }
 }
 
 Remove-Item -LiteralPath $RunLogPath -Force -ErrorAction SilentlyContinue

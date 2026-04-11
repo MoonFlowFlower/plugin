@@ -414,6 +414,111 @@ namespace
             && FJsonObjectConverter::JsonObjectToUStruct<TStructType>(Object.ToSharedRef(), &OutStruct, 0, 0);
     }
 
+    static ERIRuntimeSessionOrigin RI_RemoteParseSessionOriginLabel(const FString& Value)
+    {
+        if (Value.Equals(TEXT("LocalPIE"), ESearchCase::IgnoreCase))
+        {
+            return ERIRuntimeSessionOrigin::LocalPIE;
+        }
+        if (Value.Equals(TEXT("ExternalPackaged"), ESearchCase::IgnoreCase))
+        {
+            return ERIRuntimeSessionOrigin::ExternalPackaged;
+        }
+        return ERIRuntimeSessionOrigin::LocalEditor;
+    }
+
+    static ERIRuntimeSessionConnectionState RI_RemoteParseConnectionStateLabel(const FString& Value)
+    {
+        if (Value.Equals(TEXT("Connected"), ESearchCase::IgnoreCase))
+        {
+            return ERIRuntimeSessionConnectionState::Connected;
+        }
+        if (Value.Equals(TEXT("Error"), ESearchCase::IgnoreCase))
+        {
+            return ERIRuntimeSessionConnectionState::Error;
+        }
+        return ERIRuntimeSessionConnectionState::Disconnected;
+    }
+
+    static bool RI_RemoteTryGetStringArray(const TSharedPtr<FJsonObject>& Object, const TCHAR* FieldName, TArray<FString>& OutValues)
+    {
+        OutValues.Reset();
+        if (!Object.IsValid())
+        {
+            return false;
+        }
+
+        const TArray<TSharedPtr<FJsonValue>>* RawArray = nullptr;
+        if (!Object->TryGetArrayField(FieldName, RawArray) || !RawArray)
+        {
+            return false;
+        }
+
+        for (const TSharedPtr<FJsonValue>& Entry : *RawArray)
+        {
+            FString Value;
+            if (Entry.IsValid() && Entry->TryGetString(Value))
+            {
+                OutValues.Add(Value);
+            }
+        }
+        return true;
+    }
+
+    static bool RI_RemoteParseRuntimeSessionInfo(const TSharedPtr<FJsonObject>& Object, FRIRuntimeSessionInfo& OutSession)
+    {
+        OutSession = FRIRuntimeSessionInfo();
+        if (!Object.IsValid())
+        {
+            return false;
+        }
+
+        const bool bStructOk = RI_RemoteJsonObjectToStruct<FRIRuntimeSessionInfo>(Object, OutSession);
+        if (bStructOk && !OutSession.SessionId.IsEmpty())
+        {
+            return true;
+        }
+
+        Object->TryGetStringField(TEXT("sessionId"), OutSession.SessionId);
+        Object->TryGetStringField(TEXT("displayName"), OutSession.DisplayName);
+        Object->TryGetStringField(TEXT("sessionType"), OutSession.SessionType);
+        Object->TryGetStringField(TEXT("host"), OutSession.Host);
+        Object->TryGetNumberField(TEXT("port"), OutSession.Port);
+        Object->TryGetNumberField(TEXT("protocolVersion"), OutSession.ProtocolVersion);
+        Object->TryGetStringField(TEXT("buildConfiguration"), OutSession.BuildConfiguration);
+        Object->TryGetStringField(TEXT("worldPath"), OutSession.WorldPath);
+        Object->TryGetStringField(TEXT("mapName"), OutSession.MapName);
+        Object->TryGetStringField(TEXT("worldTypeLabel"), OutSession.WorldTypeLabel);
+        Object->TryGetStringField(TEXT("netModeLabel"), OutSession.NetModeLabel);
+        Object->TryGetStringField(TEXT("lastError"), OutSession.LastError);
+        Object->TryGetStringField(TEXT("summary"), OutSession.Summary);
+        Object->TryGetBoolField(TEXT("bIsExternal"), OutSession.bIsExternal);
+        Object->TryGetBoolField(TEXT("bLoopbackOnly"), OutSession.bLoopbackOnly);
+        Object->TryGetBoolField(TEXT("bSessionAvailable"), OutSession.bSessionAvailable);
+        Object->TryGetBoolField(TEXT("bRequiresExplicitConnect"), OutSession.bRequiresExplicitConnect);
+        Object->TryGetBoolField(TEXT("bRuntimeEnabled"), OutSession.bRuntimeEnabled);
+        Object->TryGetBoolField(TEXT("bUnlockRequired"), OutSession.bUnlockRequired);
+        Object->TryGetBoolField(TEXT("bUnlocked"), OutSession.bUnlocked);
+        Object->TryGetBoolField(TEXT("bSupportsTargetListing"), OutSession.bSupportsTargetListing);
+        Object->TryGetBoolField(TEXT("bSupportsPatchApply"), OutSession.bSupportsPatchApply);
+        Object->TryGetBoolField(TEXT("bSupportsVerification"), OutSession.bSupportsVerification);
+        RI_RemoteTryGetStringArray(Object, TEXT("capabilityTags"), OutSession.CapabilityTags);
+
+        FString SessionOriginLabel;
+        if (Object->TryGetStringField(TEXT("sessionOrigin"), SessionOriginLabel))
+        {
+            OutSession.SessionOrigin = RI_RemoteParseSessionOriginLabel(SessionOriginLabel);
+        }
+
+        FString ConnectionStateLabel;
+        if (Object->TryGetStringField(TEXT("connectionState"), ConnectionStateLabel))
+        {
+            OutSession.ConnectionState = RI_RemoteParseConnectionStateLabel(ConnectionStateLabel);
+        }
+
+        return !OutSession.SessionId.IsEmpty();
+    }
+
     static bool RI_RemoteSendAll(FSocket* Socket, const uint8* Data, int32 ByteCount, FString& OutError)
     {
         OutError.Reset();
@@ -1327,7 +1432,7 @@ TArray<FRIRuntimeSessionInfo> UInspectorWorldSubsystem::QueryAvailableRuntimeSes
             if (!CapabilityObject->TryGetObjectField(TEXT("session"), SessionObject)
                 || !SessionObject
                 || !SessionObject->IsValid()
-                || !RI_RemoteJsonObjectToStruct<FRIRuntimeSessionInfo>(*SessionObject, ExternalSession))
+                || !RI_RemoteParseRuntimeSessionInfo(*SessionObject, ExternalSession))
             {
                 continue;
             }
@@ -1581,7 +1686,7 @@ bool UInspectorWorldSubsystem::ConnectRemoteRuntimeSession(const FString& Sessio
             || !ResultObject->TryGetObjectField(TEXT("session"), SessionObject)
             || !SessionObject
             || !SessionObject->IsValid()
-            || !RI_RemoteJsonObjectToStruct<FRIRuntimeSessionInfo>(*SessionObject, OutSession))
+            || !RI_RemoteParseRuntimeSessionInfo(*SessionObject, OutSession))
         {
             if (OutError.IsEmpty() && ResultObject.IsValid())
             {

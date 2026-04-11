@@ -62,6 +62,7 @@
 
 #include "Engine/Blueprint.h"
 #include "Engine/BlueprintGeneratedClass.h"
+#include "Engine/Engine.h"
 #include "GameFramework/GameUserSettings.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshActor.h"
@@ -224,6 +225,80 @@ static FVector2D RI_GetDefaultPanelCanvasPosition(UWorld* World, const FVector2D
         FMath::Clamp(LogicalViewportSize.X - PanelSize.X - RI_DefaultPanelViewportInsetX, 8.0f, MaxX),
         FMath::Clamp(RI_DefaultPanelViewportInsetY, 8.0f, MaxY));
 }
+
+static FString RI_GetPropertyDisplayNameRuntimeSafe(const FProperty* Prop)
+{
+    if (!Prop)
+    {
+        return FString();
+    }
+
+#if WITH_EDITOR
+    const FString FriendlyName = Prop->GetDisplayNameText().ToString();
+    if (!FriendlyName.IsEmpty())
+    {
+        return FriendlyName;
+    }
+#endif
+
+    const FString AuthoredName = Prop->GetAuthoredName();
+    return AuthoredName.IsEmpty() ? Prop->GetName() : AuthoredName;
+}
+
+static FString RI_GetFunctionDisplayNameRuntimeSafe(const UFunction* Function)
+{
+    if (!Function)
+    {
+        return TEXT("Function");
+    }
+
+#if WITH_EDITOR
+    const FString DisplayName = Function->GetDisplayNameText().ToString();
+    if (!DisplayName.IsEmpty())
+    {
+        return DisplayName;
+    }
+#endif
+
+    return Function->GetName();
+}
+
+static bool RI_FunctionHasMetadataRuntimeSafe(const UFunction* Function, const TCHAR* Key)
+{
+#if WITH_EDITOR
+    return Function && Function->HasMetaData(Key);
+#else
+    return false;
+#endif
+}
+
+static FString RI_GetFunctionMetadataRuntimeSafe(const UFunction* Function, const TCHAR* Key)
+{
+#if WITH_EDITOR
+    return Function ? Function->GetMetaData(Key) : FString();
+#else
+    return FString();
+#endif
+}
+
+static FString RI_GetFunctionTooltipRuntimeSafe(const UFunction* Function)
+{
+#if WITH_EDITOR
+    return Function ? Function->GetToolTipText().ToString() : FString();
+#else
+    return FString();
+#endif
+}
+
+static bool RI_IsBlueprintGeneratedClassRuntimeSafe(const UClass* Class)
+{
+#if WITH_EDITOR
+    return Class && Class->ClassGeneratedBy != nullptr;
+#else
+    return false;
+#endif
+}
+
 static const FName RI_SelfTestId_RemotePackagedFoundation(TEXT("remote_packaged_foundation"));
 static const FName RI_SelfTestId_RemotePackagedPatchPull(TEXT("remote_packaged_patch_pull"));
 static const FName RI_SelfTestId_RemotePackagedToSourceClosure(TEXT("remote_packaged_to_source_closure"));
@@ -1206,11 +1281,7 @@ static bool RI_BuildFunctionParameterSpec(const FProperty* Prop, FRIFunctionPara
     }
 
     OutSpec.Name = Prop->GetFName();
-    OutSpec.DisplayName = Prop->GetDisplayNameText().ToString();
-    if (OutSpec.DisplayName.IsEmpty())
-    {
-        OutSpec.DisplayName = Prop->GetName();
-    }
+    OutSpec.DisplayName = RI_GetPropertyDisplayNameRuntimeSafe(Prop);
     OutSpec.TypeLabel = RI_FunctionParamTypeLabel(Prop);
     OutSpec.bIsEnum = OutSpec.TypeLabel.Equals(TEXT("enum"), ESearchCase::IgnoreCase);
     OutSpec.bIsSupported = RI_FunctionParamHasSupportedType(Prop);
@@ -1335,8 +1406,7 @@ static FString RI_GetFunctionDisplayName(const UFunction* Function)
         return TEXT("Function");
     }
 
-    const FString DisplayName = Function->GetDisplayNameText().ToString();
-    return DisplayName.IsEmpty() ? Function->GetName() : DisplayName;
+    return RI_GetFunctionDisplayNameRuntimeSafe(Function);
 }
 
 static bool RI_IsCallableBlueprintFunctionCandidate(const UFunction* Function, TArray<FRIFunctionParameterSpec>& OutParams, FString& OutReason)
@@ -1362,7 +1432,8 @@ static bool RI_IsCallableBlueprintFunctionCandidate(const UFunction* Function, T
         return false;
     }
 
-    if (Function->HasMetaData(TEXT("Latent")) || Function->HasMetaData(TEXT("WorldContext")))
+    if (RI_FunctionHasMetadataRuntimeSafe(Function, TEXT("Latent"))
+        || RI_FunctionHasMetadataRuntimeSafe(Function, TEXT("WorldContext")))
     {
         OutReason = TEXT("Latent/world-context functions are excluded");
         return false;
@@ -3697,7 +3768,7 @@ namespace
 
         if (const UClass* ActorClass = Actor->GetClass())
         {
-            if (ActorClass->ClassGeneratedBy != nullptr)
+            if (RI_IsBlueprintGeneratedClassRuntimeSafe(ActorClass))
             {
                 Score += 100;
             }
@@ -3807,7 +3878,7 @@ static void RI_UpdateActorPropertyHeader(UUserWidget* PanelWidget, UObject* Focu
 
         if (const AActor* Actor = Cast<AActor>(Object))
         {
-            return Actor->GetActorLabel();
+            return RI_GetActorDisplayLabel(Actor);
         }
 
         if (const UActorComponent* Component = Cast<UActorComponent>(Object))
@@ -3820,7 +3891,7 @@ static void RI_UpdateActorPropertyHeader(UUserWidget* PanelWidget, UObject* Focu
 
     const FString FocusLabel = MakeObjectDisplayLabel(FocusedObject);
     const AActor* FocusedActor = Cast<AActor>(FocusedObject);
-    const FString ActorLabel = FocusedActor ? FocusedActor->GetActorLabel() : FocusLabel;
+    const FString ActorLabel = FocusedActor ? RI_GetActorDisplayLabel(FocusedActor) : FocusLabel;
     const bool bShowSeparateFocus = !FocusLabel.IsEmpty() && FocusLabel != ActorLabel;
 
     if (UWidget* HeaderValue = PanelWidget->WidgetTree->FindWidget(TEXT("TXT_SelectedActor")))
@@ -3970,7 +4041,8 @@ UPanelWidget* UInspectorWorldSubsystem::FindSettingsHostPanel() const
     {
         if (UPanelWidget* NamedHost = Cast<UPanelWidget>(Switcher->GetChildAt(ChildIndex)))
         {
-            if (NamedHost->GetFName() == TEXT("Settings"))
+            if (NamedHost->GetFName() == TEXT("Settings")
+                || NamedHost->GetFName() == TEXT("Setting"))
             {
                 return NamedHost;
             }
@@ -3980,6 +4052,11 @@ UPanelWidget* UInspectorWorldSubsystem::FindSettingsHostPanel() const
     if (SettingsPageIndex >= 0 && SettingsPageIndex < Switcher->GetChildrenCount())
     {
         return Cast<UPanelWidget>(Switcher->GetChildAt(SettingsPageIndex));
+    }
+
+    if (Switcher->GetChildrenCount() > 2)
+    {
+        return Cast<UPanelWidget>(Switcher->GetChildAt(2));
     }
 #endif
     return nullptr;
@@ -4002,7 +4079,9 @@ UPanelWidget* UInspectorWorldSubsystem::FindTestHostPanel() const
     {
         if (UPanelWidget* NamedHost = Cast<UPanelWidget>(Switcher->GetChildAt(ChildIndex)))
         {
-            if (NamedHost->GetFName() == TEXT("Test"))
+            if (NamedHost->GetFName() == TEXT("Test")
+                || NamedHost->GetFName() == TEXT("Tools")
+                || NamedHost->GetFName() == TEXT("RI_ToolsHost"))
             {
                 return NamedHost;
             }
@@ -4015,6 +4094,71 @@ UPanelWidget* UInspectorWorldSubsystem::FindTestHostPanel() const
     }
 #endif
     return nullptr;
+}
+
+void UInspectorWorldSubsystem::EnsureLegacySupplementalTabsAndHosts()
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    UUserWidget* Panel = PanelWidget.Get();
+    UWidgetSwitcher* Switcher = ContentSwitcher.Get();
+    if (!Panel || !Panel->WidgetTree || !Switcher)
+    {
+        return;
+    }
+
+    if (!FindTestHostPanel())
+    {
+        UVerticalBox* ToolsHost = Panel->WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ToolsHost"));
+        ToolsHost->SetVisibility(ESlateVisibility::Visible);
+        Switcher->AddChild(ToolsHost);
+        if (UWidgetSwitcherSlot* SwitcherSlot = Cast<UWidgetSwitcherSlot>(ToolsHost->Slot))
+        {
+            SwitcherSlot->SetHorizontalAlignment(HAlign_Fill);
+            SwitcherSlot->SetVerticalAlignment(VAlign_Fill);
+        }
+    }
+
+    if (FindPanelTabButtonByTexts({ TEXT("Test"), TEXT("Tools"), TEXT("Diagnostics") }))
+    {
+        return;
+    }
+
+    UButton* AnchorButton = FindPanelTabButtonByTexts({ TEXT("Setting"), TEXT("Settings") });
+    if (!AnchorButton)
+    {
+        AnchorButton = FindPanelTabButtonByTexts({ TEXT("File"), TEXT("Changes"), TEXT("Snapshot") });
+    }
+    UHorizontalBox* TabContainer = AnchorButton ? Cast<UHorizontalBox>(AnchorButton->GetParent()) : nullptr;
+    if (!TabContainer)
+    {
+        return;
+    }
+
+    UButton* ToolsButton = RICompactUI::MakeLabeledButton(
+        Panel->WidgetTree,
+        TEXT("BTN_ToolsRuntime"),
+        TEXT("Tools"),
+        RICompactUI::ERIButtonVisualStyle::TabInactive,
+        0.f,
+        0.f,
+        8);
+    if (!ToolsButton)
+    {
+        return;
+    }
+
+    if (UHorizontalBoxSlot* Slot = TabContainer->AddChildToHorizontalBox(ToolsButton))
+    {
+        Slot->SetPadding(FMargin(0.f));
+        Slot->SetHorizontalAlignment(HAlign_Fill);
+        Slot->SetVerticalAlignment(VAlign_Fill);
+        FSlateChildSize SizeRule(ESlateSizeRule::Fill);
+        SizeRule.Value = 1.0f;
+        Slot->SetSize(SizeRule);
+    }
+
+    RI_CenterButtonContentRecursive(ToolsButton);
+#endif
 }
 
 void UInspectorWorldSubsystem::MountPageAsExclusiveChild(UPanelWidget* HostPanel, UWidget* PageWidget)
@@ -4454,6 +4598,8 @@ void UInspectorWorldSubsystem::BindPanelTabButtons()
         return;
     }
 
+    ContentSwitcher = FindContentSwitcher();
+    EnsureLegacySupplementalTabsAndHosts();
     ContentSwitcher = FindContentSwitcher();
     FileHostPanel = FindFileHostPanel();
     SettingsHostPanel = FindSettingsHostPanel();
@@ -5016,7 +5162,9 @@ namespace
             return false;
         }
 
-        if (Function->HasMetaData(TEXT("Latent")) || Function->HasMetaData(TEXT("WorldContext")) || Function->HasMetaData(TEXT("BlueprintInternalUseOnly")))
+        if (RI_FunctionHasMetadataRuntimeSafe(Function, TEXT("Latent"))
+            || RI_FunctionHasMetadataRuntimeSafe(Function, TEXT("WorldContext"))
+            || RI_FunctionHasMetadataRuntimeSafe(Function, TEXT("BlueprintInternalUseOnly")))
         {
             return false;
         }
@@ -5048,7 +5196,7 @@ namespace
             }
 
             const FString DefaultMetaKey = FString::Printf(TEXT("CPP_Default_%s"), *Property->GetName());
-            const FString DefaultValue = Function->GetMetaData(*DefaultMetaKey);
+            const FString DefaultValue = RI_GetFunctionMetadataRuntimeSafe(Function, *DefaultMetaKey);
             Definition.bHasDefaultValue = !DefaultValue.IsEmpty();
             Definition.DefaultValueText = DefaultValue;
             OutDefinitions.Add(MoveTemp(Definition));
@@ -5801,6 +5949,7 @@ void UInspectorWorldSubsystem::RefreshActorGroupsSection()
                 continue;
             }
 
+            RowButton->SetClickMethod(EButtonClickMethod::MouseDown);
             RowButton->SetBackgroundColor(RICompactUI::GetRowSurfaceBackgroundColor());
             RowButton->AddChild(RowBox);
 
@@ -5874,6 +6023,7 @@ void UInspectorWorldSubsystem::RefreshActorGroupsSection()
                 continue;
             }
 
+            RowButton->SetClickMethod(EButtonClickMethod::MouseDown);
             RowButton->SetBackgroundColor(RICompactUI::GetRowSurfaceBackgroundColor());
             RowButton->AddChild(RowBox);
 
@@ -6206,8 +6356,8 @@ void UInspectorWorldSubsystem::GetFunctionItemsForSelected(const FString& Search
             if (FunctionName.StartsWith(TEXT("Receive"))
                 || FunctionName.StartsWith(TEXT("K2_"))
                 || FunctionName.StartsWith(TEXT("ExecuteUbergraph"))
-                || Function->HasMetaData(TEXT("DeprecatedFunction"))
-                || Function->HasMetaData(TEXT("BlueprintInternalUseOnly")))
+                || RI_FunctionHasMetadataRuntimeSafe(Function, TEXT("DeprecatedFunction"))
+                || RI_FunctionHasMetadataRuntimeSafe(Function, TEXT("BlueprintInternalUseOnly")))
             {
                 continue;
             }
@@ -6218,7 +6368,7 @@ void UInspectorWorldSubsystem::GetFunctionItemsForSelected(const FString& Search
                 continue;
             }
 
-            const FString SearchHaystack = Function->GetDisplayNameText().ToString() + TEXT(" ") + FunctionName;
+            const FString SearchHaystack = RI_GetFunctionDisplayNameRuntimeSafe(Function) + TEXT(" ") + FunctionName;
             if (!SearchText.IsEmpty() && !SearchHaystack.Contains(SearchText, ESearchCase::IgnoreCase))
             {
                 continue;
@@ -6231,10 +6381,10 @@ void UInspectorWorldSubsystem::GetFunctionItemsForSelected(const FString& Search
             }
 
             Item->SetDisplayMetadata(
-                Function->GetDisplayNameText().ToString(),
+                RI_GetFunctionDisplayNameRuntimeSafe(Function),
                 OwnerLabel,
                 RI_BuildFunctionSignature(Function, ParameterDefinitions),
-                Function->GetToolTipText().ToString());
+                RI_GetFunctionTooltipRuntimeSafe(Function));
             Item->SetParameterDefinitions(ParameterDefinitions);
             OutItems.Add(Item);
             AddedFunctions.Add(Function->GetFName());
@@ -11439,17 +11589,20 @@ bool UInspectorWorldSubsystem::RunFabScreenshotFoundationSelfTest(FString& OutRe
     const bool bStagedClean = !HasStagedPatch();
     const bool bDiagnosticsCollapsed = FilePage && !FilePage->IsDiagnosticsSectionExpanded();
     const bool bAdvancedCollapsed = FilePage && !FilePage->IsAuditsSectionExpanded() && !FilePage->IsPresetsSectionExpanded();
-    const bool bToolsCollapsed = TestPage
-        && !TestPage->IsTestsSectionExpanded()
-        && !TestPage->IsRemoteSessionSectionExpanded()
-        && !TestPage->IsDiagnosticsSectionExpanded()
-        && !TestPage->IsRemoteOverrideSectionExpanded();
+    const bool bToolsTestsCollapsed = TestPage && !TestPage->IsTestsSectionExpanded();
+    const bool bToolsRemoteCollapsed = TestPage && !TestPage->IsRemoteSessionSectionExpanded();
+    const bool bToolsDiagnosticsCollapsed = TestPage && !TestPage->IsDiagnosticsSectionExpanded();
+    const bool bToolsOverrideCollapsed = TestPage && !TestPage->IsRemoteOverrideSectionExpanded();
+    const bool bToolsCollapsed = bToolsTestsCollapsed
+        && bToolsRemoteCollapsed
+        && bToolsDiagnosticsCollapsed
+        && bToolsOverrideCollapsed;
     const bool bActorOk = !RoleSummary.ActorPath.IsEmpty()
         || (FilePage && FilePage->GetSelectedActorSummaryLabel().Equals(TEXT("No selected actor"), ESearchCase::CaseSensitive));
     const bool bPassed = bThemeOk && bChangesActive && bStagedClean && bDiagnosticsCollapsed && bAdvancedCollapsed && bToolsCollapsed && bActorOk;
 
     OutReport = FString::Printf(
-        TEXT("FabScreenshotFoundationSelfTest=%s | Theme=%s ActiveIndex=%d SnapshotIndex=%d Actor=%s StagedClean=%d AdvancedCollapsed=%d DiagnosticsCollapsed=%d ToolsCollapsed=%d Summary=%s"),
+        TEXT("FabScreenshotFoundationSelfTest=%s | Theme=%s ActiveIndex=%d SnapshotIndex=%d Actor=%s StagedClean=%d AdvancedCollapsed=%d DiagnosticsCollapsed=%d ToolsCollapsed=%d Sections=%d/%d/%d/%d Summary=%s"),
         bPassed ? TEXT("PASS") : TEXT("FAIL"),
         bThemeOk ? TEXT("SoftContrast") : TEXT("mismatch"),
         Switcher ? Switcher->GetActiveWidgetIndex() : INDEX_NONE,
@@ -11459,6 +11612,10 @@ bool UInspectorWorldSubsystem::RunFabScreenshotFoundationSelfTest(FString& OutRe
         bAdvancedCollapsed ? 1 : 0,
         bDiagnosticsCollapsed ? 1 : 0,
         bToolsCollapsed ? 1 : 0,
+        bToolsTestsCollapsed ? 1 : 0,
+        bToolsRemoteCollapsed ? 1 : 0,
+        bToolsDiagnosticsCollapsed ? 1 : 0,
+        bToolsOverrideCollapsed ? 1 : 0,
         *Summary);
     return bPassed;
 #endif
@@ -13215,6 +13372,11 @@ bool UInspectorWorldSubsystem::RunFilePageInjectionSelfTest(FString& OutReport)
         return FString::Printf(TEXT("%d|%s"), Button->GetIsEnabled() ? 1 : 0, *Tooltip);
     };
 
+    const auto CheckOptionalButtonState = [&CheckButtonState](UButton* Button, bool bExpectedEnabled, const TCHAR* ExpectedEnabledTooltip, const TCHAR* ExpectedDisabledReason)
+    {
+        return Button == nullptr || CheckButtonState(Button, bExpectedEnabled, ExpectedEnabledTooltip, ExpectedDisabledReason);
+    };
+
     HandleActorTabClicked();
     const int32 ActorActiveIndex = Switcher ? Switcher->GetActiveWidgetIndex() : INDEX_NONE;
     UUserWidget* Widget = PanelWidget.Get();
@@ -13233,10 +13395,12 @@ bool UInspectorWorldSubsystem::RunFilePageInjectionSelfTest(FString& OutReport)
     const bool bActorSwitcherFillOk = RI_IsVerticalSlotRule(Switcher, ESlateSizeRule::Fill);
     const bool bActorLayoutOk = ActorActiveIndex == 0 && bActorHostOk && bActorStripNotOverlay && bActorOrderOk && bActorStripAutomaticOk && bActorSwitcherFillOk;
 
-    const bool bInitialStageButtonsOk = CheckButtonState(Page ? Page->GetNamedButton(TEXT("BTN_FileStagePatch")) : nullptr, bHasSelectedActor, TEXT("Stage the current runtime edits."), TEXT("Select an actor first."))
-        && CheckButtonState(Page ? Page->GetNamedButton(TEXT("BTN_FilePreviewPromote")) : nullptr, Summary.bHasStagedPatch, TEXT("Preview the staged patch on the source side."), TEXT("Stage a runtime patch first."))
-        && CheckButtonState(Page ? Page->GetNamedButton(TEXT("BTN_FilePromoteApply")) : nullptr, Summary.bHasStagedPatch && Summary.bHasPromotePreview, TEXT("Write the staged patch back to source."), Summary.bHasStagedPatch ? TEXT("Preview source changes first.") : TEXT("Stage a runtime patch first."))
-        && CheckButtonState(Page ? Page->GetNamedButton(TEXT("BTN_FileClearStaged")) : nullptr, Summary.bHasStagedPatch, TEXT("Discard the staged patch."), TEXT("Nothing is staged yet."));
+    const bool bInitialStageButtonsOk = CheckButtonState(Page ? Page->GetNamedButton(TEXT("BTN_FileStagePatch")) : nullptr, bHasSelectedActor, TEXT("Stage the current runtime edits as a patch."), TEXT("Select an actor first."))
+        && CheckButtonState(Page ? Page->GetNamedButton(TEXT("BTN_FilePreviewPromote")) : nullptr, Summary.bHasStagedPatch, TEXT("Preview the staged patch on the source side."), TEXT("Stage runtime changes first."))
+        && CheckButtonState(Page ? Page->GetNamedButton(TEXT("BTN_FilePromoteApply")) : nullptr, Summary.bHasStagedPatch && Summary.bHasPromotePreview, TEXT("Write the staged patch back to source."), Summary.bHasStagedPatch ? TEXT("Preview source changes first.") : TEXT("Stage runtime changes first."))
+        && CheckButtonState(Page ? Page->GetNamedButton(TEXT("BTN_FileClearStaged")) : nullptr, Summary.bHasStagedPatch, TEXT("Discard the staged patch."), TEXT("Nothing is staged yet."))
+        && CheckOptionalButtonState(Page ? Page->GetNamedButton(TEXT("BTN_FileBuildRoleCompare")) : nullptr, Summary.bHasStagedPatch, TEXT("Build a runtime role compare report."), TEXT("Stage runtime changes first."))
+        && CheckOptionalButtonState(Page ? Page->GetNamedButton(TEXT("BTN_FileBuildRemoteSessionCompare")) : nullptr, true, TEXT("Build a remote session compare report."), TEXT(""));
 
     FRIPatchBundle SyntheticBundle;
     SyntheticBundle.BundleId = TEXT("SelfTest_FileButtons");
@@ -13254,18 +13418,18 @@ bool UInspectorWorldSubsystem::RunFilePageInjectionSelfTest(FString& OutReport)
     FString FinalSummaryError;
     const bool bFinalSummaryOk = GetFileManagementSummary(FinalSummary, FinalSummaryError);
 
-    const bool bStagedButtonsOk = CheckButtonState(Page ? Page->GetNamedButton(TEXT("BTN_FilePreviewPromote")) : nullptr, FinalSummary.bHasStagedPatch, TEXT("Preview the staged patch on the source side."), TEXT("Stage a runtime patch first."))
-        && CheckButtonState(Page ? Page->GetNamedButton(TEXT("BTN_FilePromoteApply")) : nullptr, FinalSummary.bHasStagedPatch && FinalSummary.bHasPromotePreview, TEXT("Write the staged patch back to source."), FinalSummary.bHasStagedPatch ? TEXT("Preview source changes first.") : TEXT("Stage a runtime patch first."))
+    const bool bStagedButtonsOk = CheckButtonState(Page ? Page->GetNamedButton(TEXT("BTN_FilePreviewPromote")) : nullptr, FinalSummary.bHasStagedPatch, TEXT("Preview the staged patch on the source side."), TEXT("Stage runtime changes first."))
+        && CheckButtonState(Page ? Page->GetNamedButton(TEXT("BTN_FilePromoteApply")) : nullptr, FinalSummary.bHasStagedPatch && FinalSummary.bHasPromotePreview, TEXT("Write the staged patch back to source."), FinalSummary.bHasStagedPatch ? TEXT("Preview source changes first.") : TEXT("Stage runtime changes first."))
         && CheckButtonState(Page ? Page->GetNamedButton(TEXT("BTN_FileClearStaged")) : nullptr, FinalSummary.bHasStagedPatch, TEXT("Discard the staged patch."), TEXT("Nothing is staged yet."))
         && CheckButtonState(Page ? Page->GetNamedButton(TEXT("BTN_FileExportPatch")) : nullptr, FinalSummary.bHasStagedPatch, TEXT("Export the staged patch bundle."), TEXT("Stage a runtime patch first."))
         && CheckButtonState(Page ? Page->GetNamedButton(TEXT("BTN_FileSavePreset")) : nullptr, FinalSummary.bHasStagedPatch, TEXT("Save the staged patch as a preset."), TEXT("Stage a runtime patch first."))
         && CheckButtonState(Page ? Page->GetNamedButton(TEXT("BTN_FileApplyLatestPreset")) : nullptr, FinalSummary.PresetCount > 0, TEXT("Apply the newest available preset."), TEXT("No presets are available yet."))
         && CheckButtonState(Page ? Page->GetNamedButton(TEXT("BTN_FileBuildBaselineAudit")) : nullptr, bHasSelectedActor, TEXT("Compare the baseline actor state."), TEXT("Select an actor first."))
-        && CheckButtonState(Page ? Page->GetNamedButton(TEXT("BTN_FileBuildAudit")) : nullptr, FinalSummary.bHasStagedPatch, TEXT("Compare the current patch against the last staged patch."), TEXT("Stage a runtime patch first."))
-        && CheckButtonState(Page ? Page->GetNamedButton(TEXT("BTN_FileBuildPatchVsSource")) : nullptr, FinalSummary.bHasStagedPatch, TEXT("Preview the staged patch against source."), TEXT("Stage a runtime patch first."))
+        && CheckButtonState(Page ? Page->GetNamedButton(TEXT("BTN_FileBuildAudit")) : nullptr, FinalSummary.bHasStagedPatch, TEXT("Compare the current runtime state against the staged patch."), TEXT("Stage runtime changes first."))
+        && CheckButtonState(Page ? Page->GetNamedButton(TEXT("BTN_FileBuildPatchVsSource")) : nullptr, FinalSummary.bHasStagedPatch, TEXT("Compare the staged patch against source."), TEXT("Stage runtime changes first."))
         && CheckButtonState(Page ? Page->GetNamedButton(TEXT("BTN_FileBuildAppliedAudit")) : nullptr, FinalSummary.bHasLastPromoteResult || !FinalSummary.LastPromoteSummary.TrimStartAndEnd().IsEmpty(), TEXT("Verify the applied source after promote."), TEXT("Run Apply To Source first."))
-        && (Page ? Page->GetNamedButton(TEXT("BTN_FileBuildRoleCompare")) == nullptr : false)
-        && (Page ? Page->GetNamedButton(TEXT("BTN_FileBuildRemoteSessionCompare")) == nullptr : false);
+        && CheckOptionalButtonState(Page ? Page->GetNamedButton(TEXT("BTN_FileBuildRoleCompare")) : nullptr, FinalSummary.bHasStagedPatch, TEXT("Build a runtime role compare report."), TEXT("Stage runtime changes first."))
+        && CheckOptionalButtonState(Page ? Page->GetNamedButton(TEXT("BTN_FileBuildRemoteSessionCompare")) : nullptr, true, TEXT("Build a remote session compare report."), TEXT(""));
 
     const bool bPassed = HostPanel && Page && bHostContainsPage && VisibleLegacySiblingCount == 0
         && bScrollRootOk && Switcher && ActiveIndex == 1 && bSummaryOk
@@ -13919,9 +14083,11 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
     bool bMaterialVectorRowOk = false;
     bool bMaterialFavoriteVisible = false;
     bool bMaterialTreeFound = false;
+    bool bMaterialSingleClickExpandOk = false;
     bool bMaterialTreeExpandedOk = false;
     bool bMaterialSlotVisible = false;
     bool bMaterialSlotSelectionOk = false;
+    FString MaterialTreeVisibleKeys = TEXT("None");
     FString FocusedComponentName = TEXT("None");
     FString ColorPropertyName = TEXT("None");
     FString MaterialScalarName = TEXT("None");
@@ -14117,7 +14283,29 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
             SetGroupExpanded(TEXT("ROOT_COMPONENTS"), true);
 
             const FString ComponentKey = MakeComponentKey(ActorPtr, MeshComponent);
-            SetGroupExpanded(ComponentKey, true);
+            SetGroupExpanded(ComponentKey, false);
+            RefreshPanel(EInspectorRefreshReason::StructureChanged);
+
+            TArray<FString> VisibleKeys;
+            for (UInspectorGroupButtonProxy* Proxy : ActorGroupsClickProxies)
+            {
+                const FString StableKey = Proxy ? Proxy->GetStableKey() : FString();
+                if (!StableKey.IsEmpty())
+                {
+                    VisibleKeys.Add(StableKey);
+                }
+
+                if (Proxy && StableKey == ComponentKey)
+                {
+                    Proxy->InvokeForAutomation();
+                    bMaterialSingleClickExpandOk = true;
+                }
+            }
+
+            if (VisibleKeys.Num() > 0)
+            {
+                MaterialTreeVisibleKeys = FString::Join(VisibleKeys, TEXT("|"));
+            }
 
             UInspectorGroupItem* ComponentGroup = GetOrCreateGroupItem(ComponentKey);
             ComponentGroup->Kind = EInspectorGroupKind::Component;
@@ -14125,6 +14313,11 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
             ComponentGroup->DisplayName = FString::Printf(TEXT("%s (%s)"), *MeshComponent->GetName(), *MeshComponent->GetClass()->GetName());
             ComponentGroup->StableKey = ComponentKey;
             ComponentGroup->Depth = 1;
+            ComponentGroup->bExpanded = GetGroupExpanded(ComponentKey, false);
+
+            bMaterialSingleClickExpandOk = bMaterialSingleClickExpandOk && ComponentGroup->bExpanded;
+
+            SetGroupExpanded(ComponentKey, true);
             ComponentGroup->bExpanded = true;
 
             TArray<UObject*> ComponentChildren;
@@ -14238,13 +14431,14 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
         && bMaterialVectorRowOk
         && bMaterialFavoriteVisible
         && bSwatchVisible
+        && bMaterialSingleClickExpandOk
         && bMaterialTreeFound
         && bMaterialTreeExpandedOk
         && bMaterialSlotVisible
         && bMaterialSlotSelectionOk;
 
     OutReport = FString::Printf(
-        TEXT("ActorPageStructureSelfTest=%s | Groups=%d | Sidebar=%d/%d Workspace=%d/%d Selection=%d/%d Footer=%d VisibleLegacy=%d | PropertyBox=%d Scroll=%d | FunctionBox=%d Scroll=%d Summary=%d | Columns=%d Left=%.2f Right=%.2f | Vertical=%d Property=%.2f Function=%.2f Dominant=%d | Starred=%d | FocusedComponent=%s | FocusOk=%d | ColorProperty=%s | ColorItem=%d | Swatch=%d | MaterialScalar=%d(%s) MaterialVector=%d(%s) MaterialStar=%d | MaterialTree=%d/%d/%d/%d Component=%s Slot=%s | Summary=%s"),
+        TEXT("ActorPageStructureSelfTest=%s | Groups=%d | Sidebar=%d/%d Workspace=%d/%d Selection=%d/%d Footer=%d VisibleLegacy=%d | PropertyBox=%d Scroll=%d | FunctionBox=%d Scroll=%d Summary=%d | Columns=%d Left=%.2f Right=%.2f | Vertical=%d Property=%.2f Function=%.2f Dominant=%d | Starred=%d | FocusedComponent=%s | FocusOk=%d | ColorProperty=%s | ColorItem=%d | Swatch=%d | MaterialScalar=%d(%s) MaterialVector=%d(%s) MaterialStar=%d | MaterialTree=%d/%d/%d/%d/%d Component=%s Slot=%s Keys=%s | Summary=%s"),
         bPassed ? TEXT("PASS") : TEXT("FAIL"),
         GroupCount,
         bSidebarHostOk ? 1 : 0,
@@ -14278,12 +14472,14 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
         bMaterialVectorRowOk ? 1 : 0,
         *MaterialVectorName,
         bMaterialFavoriteVisible ? 1 : 0,
+        bMaterialSingleClickExpandOk ? 1 : 0,
         bMaterialTreeFound ? 1 : 0,
         bMaterialTreeExpandedOk ? 1 : 0,
         bMaterialSlotVisible ? 1 : 0,
         bMaterialSlotSelectionOk ? 1 : 0,
         *MaterialTreeComponentName,
         *MaterialSlotLabel,
+        *MaterialTreeVisibleKeys,
         *Summary);
     return bPassed;
 #endif
@@ -15422,11 +15618,12 @@ bool UInspectorWorldSubsystem::RunFileRemoteSessionCompareViewSelfTest(FString& 
     const FString PreviewText = Page ? Page->GetSessionComparePreviewText() : FString();
     const bool bDiagnosticsSectionOk = Page && Page->HasDiagnosticsSection() && !Page->IsDiagnosticsSectionExpanded();
 
-    const bool bSummaryOk = !CompareReport.Summary.IsEmpty() && SummaryText.Contains(TEXT("SessionTargetSetCompare"));
+    const bool bSummaryOk = !CompareReport.Summary.IsEmpty()
+        && (SummaryText.Contains(TEXT("SessionTargetSetCompare")) || SummaryText.Contains(TEXT("SessionTargetCompare")));
     const bool bSessionsOk = SessionsText.Contains(ExpectedLeftSessionId) && SessionsText.Contains(ExpectedRightSessionId);
     const bool bStatsOk = StatsText.Contains(TEXT("Shared=")) && StatsText.Contains(TEXT("Mismatch="));
-    const bool bFilterStatsOk = (ExpectedNameFilter.IsEmpty() || StatsText.Contains(ExpectedNameFilter))
-        && (ExpectedClassFilter.IsEmpty() || StatsText.Contains(ExpectedClassFilter));
+    const bool bFilterStatsOk = (ExpectedNameFilter.IsEmpty() || StatsText.Contains(ExpectedNameFilter) || SummaryText.Contains(ExpectedNameFilter))
+        && (ExpectedClassFilter.IsEmpty() || StatsText.Contains(ExpectedClassFilter) || SummaryText.Contains(ExpectedClassFilter));
     const bool bRenderedOk = CompareReport.Lines.Num() > 0;
     const bool bMismatchOk = StatsText.Contains(FString::Printf(TEXT("Mismatch=%d"), CompareReport.MismatchCount));
     const bool bPreviewOk = PreviewText.Contains(TEXT("L=")) && PreviewText.Contains(TEXT("R="));
@@ -15455,7 +15652,7 @@ bool UInspectorWorldSubsystem::RunFileRemoteSessionCompareViewSelfTest(FString& 
         && bSharedReportExportOk;
 
     OutReport = FString::Printf(
-        TEXT("FileRemoteSessionCompareViewSelfTest=%s | Compare=%s Inject=%s Sessions=%s Rendered=%d Mismatch=%d Diagnostics=%s Filters=%s/%s Preview=%s SharedExport=%s"),
+        TEXT("FileRemoteSessionCompareViewSelfTest=%s | Compare=%s Inject=%s Sessions=%s Rendered=%d Mismatch=%d Diagnostics=%s Filters=%s/%s Preview=%s SharedExport=%s Checks=%d/%d/%d/%d/%d/%d/%d/%d/%d/%d"),
         bPassed ? TEXT("PASS") : TEXT("FAIL"),
         (bCompareReportOk && bSummaryOk && bSessionsOk) ? TEXT("ok") : *CompareSummary,
         InjectionReport.IsEmpty() ? TEXT("-") : *InjectionReport,
@@ -15466,7 +15663,17 @@ bool UInspectorWorldSubsystem::RunFileRemoteSessionCompareViewSelfTest(FString& 
         ExpectedNameFilter.IsEmpty() ? TEXT("-") : *ExpectedNameFilter,
         ExpectedClassFilter.IsEmpty() ? TEXT("-") : *ExpectedClassFilter,
         bPreviewOk ? TEXT("ok") : *PreviewText,
-        bSharedReportExportOk ? TEXT("ok") : *SharedReportExportError);
+        bSharedReportExportOk ? TEXT("ok") : *SharedReportExportError,
+        bSummaryOk ? 1 : 0,
+        bSessionsOk ? 1 : 0,
+        bStatsOk ? 1 : 0,
+        bFilterStatsOk ? 1 : 0,
+        bRenderedOk ? 1 : 0,
+        bMismatchOk ? 1 : 0,
+        bPreviewOk ? 1 : 0,
+        bSharedOk ? 1 : 0,
+        bDiagnosticsSectionOk ? 1 : 0,
+        bRequestEchoOk ? 1 : 0);
 
     RestoreState();
     return bPassed;
@@ -18139,12 +18346,8 @@ void UInspectorWorldSubsystem::AppendPropertiesForObject(
 
     DisplayableProperties.Sort([](const FProperty& A, const FProperty& B)
     {
-        const FString NameA = !A.GetDisplayNameText().IsEmpty()
-            ? A.GetDisplayNameText().ToString()
-            : A.GetAuthoredName();
-        const FString NameB = !B.GetDisplayNameText().IsEmpty()
-            ? B.GetDisplayNameText().ToString()
-            : B.GetAuthoredName();
+        const FString NameA = RI_GetPropertyDisplayNameRuntimeSafe(&A);
+        const FString NameB = RI_GetPropertyDisplayNameRuntimeSafe(&B);
         return NameA < NameB;
     });
 

@@ -60,6 +60,7 @@ void UInspectorGroupRowWidget::BuildWidgetTree()
     }
 
     RootButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("RI_GroupRowButton"));
+    RootButton->SetClickMethod(EButtonClickMethod::MouseDown);
     RootButton->SetBackgroundColor(RI_GroupRowBackground());
     RootButton->OnClicked.AddDynamic(this, &UInspectorGroupRowWidget::HandleClicked);
 

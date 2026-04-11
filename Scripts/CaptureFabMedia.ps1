@@ -215,6 +215,23 @@ function Get-FabCaptureSelfTestId {
     }
 }
 
+function Get-InspectorHostWindowTitle {
+    param(
+        [object]$BridgeState
+    )
+
+    $Summary = Invoke-BridgeRequest -BridgeState $BridgeState -Method "get_runtime_inspector_automation_summary" -TimeoutSeconds 30
+    $RawDebug = if ($Summary.PSObject.Properties.Match("panelHostWindowDebug").Count -gt 0) { [string]$Summary.panelHostWindowDebug } else { "" }
+    if (-not [string]::IsNullOrWhiteSpace($RawDebug)) {
+        $Match = [regex]::Match($RawDebug, '^Title=(.+?)\s+\|')
+        if ($Match.Success -and -not [string]::IsNullOrWhiteSpace($Match.Groups[1].Value)) {
+            return $Match.Groups[1].Value.Trim()
+        }
+    }
+
+    return "Preview"
+}
+
 function Invoke-FabCaptureSelfTest {
     param(
         [string]$ShotName,
@@ -245,12 +262,20 @@ function Capture-InspectorShot {
     )
 
     Invoke-FabCaptureSelfTest -ShotName $ShotName -PageName $PageName
+    $HostWindowTitle = Get-InspectorHostWindowTitle -BridgeState $BridgeState
 
     $TargetPath = Join-Path $OutputRoot $FileName
-    $CaptureResult = Invoke-BridgeRequest -BridgeState $BridgeState -Method "capture_window_screenshot" -Params @{
-        filename = $TargetPath
-        windowTitleContains = "Preview"
-    } -TimeoutSeconds 30
+    if ($HostWindowTitle -like "*Preview*") {
+        $CaptureResult = Invoke-BridgeRequest -BridgeState $BridgeState -Method "capture_screenshot" -Params @{
+            filename = $TargetPath
+            showUI = $true
+        } -TimeoutSeconds 30
+    } else {
+        $CaptureResult = Invoke-BridgeRequest -BridgeState $BridgeState -Method "capture_window_screenshot" -Params @{
+            filename = $TargetPath
+            windowTitleContains = $HostWindowTitle
+        } -TimeoutSeconds 30
+    }
     if (-not $CaptureResult.success) {
         throw "capture_window_screenshot failed for $FileName"
     }
@@ -276,17 +301,17 @@ Remove-Item -LiteralPath $CaptureLogPath -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath $ManifestPath -Force -ErrorAction SilentlyContinue
 
 $BridgeState = Ensure-EditorReady
-$PieStatus = Invoke-BridgeRequest -BridgeState $BridgeState -Method "pie_control" -Params @{ action = "status" }
+$PieStatus = Invoke-BridgeRequest -BridgeState $BridgeState -Method "pie_control" -Params @{ action = "status" } -TimeoutSeconds 90
 if (-not $PieStatus.success) {
     throw "Failed to query PIE status."
 }
 
 if (-not $PieStatus.isPlaying) {
-    [void](Invoke-BridgeRequest -BridgeState $BridgeState -Method "pie_control" -Params @{ action = "start" })
+    [void](Invoke-BridgeRequest -BridgeState $BridgeState -Method "pie_control" -Params @{ action = "start" } -TimeoutSeconds 120)
     $PieDeadline = (Get-Date).AddSeconds(60)
     do {
         Start-Sleep -Seconds 1
-        $PieStatus = Invoke-BridgeRequest -BridgeState $BridgeState -Method "pie_control" -Params @{ action = "status" }
+        $PieStatus = Invoke-BridgeRequest -BridgeState $BridgeState -Method "pie_control" -Params @{ action = "status" } -TimeoutSeconds 90
         if ($PieStatus.isPlaying) {
             break
         }

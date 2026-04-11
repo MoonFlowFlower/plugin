@@ -13,6 +13,7 @@
 #include "Components/Border.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
+#include "Components/StaticMeshComponent.h"
 #include "Engine/GameInstance.h"
 #include "Components/ScrollBox.h"
 #include "Components/SizeBox.h"
@@ -66,6 +67,23 @@ void UInspectorGroupButtonProxy::HandleClicked()
 
     InspectorSubsystem->SetSelectedGroupItem(GroupItem);
     InspectorSubsystem->RequestActorPageRefresh();
+}
+
+bool UInspectorGroupButtonProxy::MatchesStableKey(const FString& InStableKey) const
+{
+    const UInspectorGroupItem* GroupItem = Item.Get();
+    return GroupItem && GroupItem->StableKey == InStableKey;
+}
+
+FString UInspectorGroupButtonProxy::GetStableKey() const
+{
+    const UInspectorGroupItem* GroupItem = Item.Get();
+    return GroupItem ? GroupItem->StableKey : FString();
+}
+
+void UInspectorGroupButtonProxy::InvokeForAutomation()
+{
+    HandleClicked();
 }
 
 void UInspectorPinnedItemButtonProxy::Initialize(UInspectorWorldSubsystem* InSubsystem, UObject* InItem)
@@ -132,6 +150,39 @@ int32 UInspectorGroupsSectionWidget::GetEntryWidgetCountForDebug() const
 int32 UInspectorGroupsSectionWidget::GetPinnedEntryWidgetCountForDebug() const
 {
     return LastPinnedEntryWidgetCount;
+}
+
+bool UInspectorGroupsSectionWidget::InvokeGroupItemClickForAutomation(const FString& StableKey)
+{
+    if (StableKey.IsEmpty())
+    {
+        return false;
+    }
+
+    for (UInspectorGroupButtonProxy* Proxy : ClickProxies)
+    {
+        if (Proxy && Proxy->MatchesStableKey(StableKey))
+        {
+            Proxy->InvokeForAutomation();
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void UInspectorGroupsSectionWidget::GetVisibleGroupStableKeysForAutomation(TArray<FString>& OutKeys) const
+{
+    OutKeys.Reset();
+
+    for (UInspectorGroupButtonProxy* Proxy : ClickProxies)
+    {
+        const FString StableKey = Proxy ? Proxy->GetStableKey() : FString();
+        if (!StableKey.IsEmpty())
+        {
+            OutKeys.Add(StableKey);
+        }
+    }
 }
 
 TSharedRef<SWidget> UInspectorGroupsSectionWidget::RebuildWidget()
@@ -298,6 +349,7 @@ UWidget* UInspectorGroupsSectionWidget::CreatePinnedRow(UObject* ItemObject)
         return nullptr;
     }
 
+    RowButton->SetClickMethod(EButtonClickMethod::MouseDown);
     RowButton->SetBackgroundColor(RICompactUI::GetRowSurfaceBackgroundColor());
 
     UHorizontalBox* RowBox = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
@@ -423,6 +475,7 @@ void UInspectorGroupsSectionWidget::RefreshFromSubsystem()
             continue;
         }
 
+        RowButton->SetClickMethod(EButtonClickMethod::MouseDown);
         RowButton->SetBackgroundColor(RICompactUI::GetRowSurfaceBackgroundColor());
         RowButton->AddChild(RowBox);
 

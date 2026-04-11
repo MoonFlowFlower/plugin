@@ -30,6 +30,17 @@ $ValidationLogPath = Join-Path $ProjectRoot "Saved\fab_blank_project_validation.
 $ValidationStdOutLogPath = Join-Path $ProjectRoot "Saved\fab_blank_project_validation_stdout.log"
 $ValidationStdErrLogPath = Join-Path $ProjectRoot "Saved\fab_blank_project_validation_stderr.log"
 
+function Get-ValidationLifecycleLogSnapshot {
+    $LogChunks = @()
+    foreach ($Path in @($ValidationProjectLogPath, $ValidationStdOutLogPath, $ValidationStdErrLogPath)) {
+        if (Test-Path $Path) {
+            $LogChunks += Get-Content -LiteralPath $Path -Raw
+        }
+    }
+
+    return ($LogChunks -join "`n")
+}
+
 $EditorCmd = Join-Path $EngineRoot "Engine\Binaries\Win64\UnrealEditor-Cmd.exe"
 if (-not (Test-Path $EditorCmd -PathType Leaf)) {
     throw "UnrealEditor-Cmd.exe not found at: $EditorCmd"
@@ -102,14 +113,14 @@ $EditorProcess = Start-Process `
     -RedirectStandardError $ValidationStdErrLogPath
 
 $TimedOutAfterQuit = $false
-Wait-Process -Id $EditorProcess.Id -Timeout $EditorQuitTimeoutSeconds -ErrorAction SilentlyContinue
-
-if (-not $EditorProcess.HasExited) {
-    $ProjectLogSnapshot = if (Test-Path $ValidationProjectLogPath) {
-        Get-Content -LiteralPath $ValidationProjectLogPath -Raw
-    } else {
-        ""
+$Deadline = (Get-Date).AddSeconds($EditorQuitTimeoutSeconds)
+while ($true) {
+    $EditorProcess.Refresh()
+    if ($EditorProcess.HasExited) {
+        break
     }
+
+    $ProjectLogSnapshot = Get-ValidationLifecycleLogSnapshot
 
     $MountedBeforeTimeout = $ProjectLogSnapshot -match "Mounting Project plugin RuntimeInspector"
     $ObservedQuitBeforeTimeout = $ProjectLogSnapshot -match "Cmd:\s+QUIT"
@@ -117,25 +128,49 @@ if (-not $EditorProcess.HasExited) {
     if ($MountedBeforeTimeout -and $ObservedQuitBeforeTimeout) {
         Stop-Process -Id $EditorProcess.Id -Force -ErrorAction SilentlyContinue
         $TimedOutAfterQuit = $true
-    } else {
-        Stop-Process -Id $EditorProcess.Id -Force -ErrorAction SilentlyContinue
-        throw "Blank project validation timed out before observing plugin mount + QUIT. See project log: $ValidationProjectLogPath"
+        break
     }
+
+    if ((Get-Date) -ge $Deadline) {
+        $ProjectLogSnapshot = Get-ValidationLifecycleLogSnapshot
+
+        $MountedBeforeTimeout = $ProjectLogSnapshot -match "Mounting Project plugin RuntimeInspector"
+        $ObservedQuitBeforeTimeout = $ProjectLogSnapshot -match "Cmd:\s+QUIT"
+
+        if ($MountedBeforeTimeout -and $ObservedQuitBeforeTimeout) {
+            Stop-Process -Id $EditorProcess.Id -Force -ErrorAction SilentlyContinue
+            $TimedOutAfterQuit = $true
+            break
+        }
+
+        Stop-Process -Id $EditorProcess.Id -Force -ErrorAction SilentlyContinue
+        throw "Blank project validation timed out before observing plugin mount + QUIT. See log: $ValidationProjectLogPath"
+    }
+
+    Start-Sleep -Milliseconds 500
 }
 
-Wait-Process -Id $EditorProcess.Id -ErrorAction SilentlyContinue
+Start-Sleep -Milliseconds 200
 $EditorProcess.Refresh()
 
+function Append-ValidationLog {
+    param(
+        [string]$SourcePath,
+        [string]$DestinationPath
+    )
+
+    if (-not (Test-Path $SourcePath)) {
+        return
+    }
+
+    Add-Content -LiteralPath $DestinationPath -Value ("===== {0} =====" -f $SourcePath)
+    Get-Content -LiteralPath $SourcePath | Add-Content -LiteralPath $DestinationPath
+}
+
 New-Item -ItemType File -Path $ValidationLogPath -Force | Out-Null
-if (Test-Path $ValidationProjectLogPath) {
-    Get-Content -LiteralPath $ValidationProjectLogPath | Tee-Object -FilePath $ValidationLogPath -Append | Out-Host
-}
-if (Test-Path $ValidationStdOutLogPath) {
-    Get-Content -LiteralPath $ValidationStdOutLogPath | Tee-Object -FilePath $ValidationLogPath -Append | Out-Host
-}
-if (Test-Path $ValidationStdErrLogPath) {
-    Get-Content -LiteralPath $ValidationStdErrLogPath | Tee-Object -FilePath $ValidationLogPath -Append | Out-Host
-}
+Append-ValidationLog -SourcePath $ValidationProjectLogPath -DestinationPath $ValidationLogPath
+Append-ValidationLog -SourcePath $ValidationStdOutLogPath -DestinationPath $ValidationLogPath
+Append-ValidationLog -SourcePath $ValidationStdErrLogPath -DestinationPath $ValidationLogPath
 
 if (($EditorProcess.ExitCode -ne 0) -and (-not $TimedOutAfterQuit)) {
     throw "Blank project validation failed. See log: $ValidationLogPath"

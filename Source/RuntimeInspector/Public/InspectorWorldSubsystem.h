@@ -964,6 +964,7 @@ private:
     void EnsureSettingsPageInjected();
     void EnsureTestPageInjected();
     void BindPanelTabButtons();
+    void EnsureLegacySupplementalTabsAndHosts();
     void ShowFilePage();
     void ShowSettingsPage();
     void ShowTestPage();
