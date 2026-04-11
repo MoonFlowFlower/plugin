@@ -1,7 +1,6 @@
 #include "InspectorFilePageWidget.h"
 
 #include "InspectorCompactWidgetUtils.h"
-#include "InspectorSettingsPageWidget.h"
 #include "InspectorWorldSubsystem.h"
 
 #include "Blueprint/WidgetTree.h"
@@ -445,10 +444,6 @@ void UInspectorFilePageWidget::SetInspectorSubsystem(UInspectorWorldSubsystem* I
 {
     CancelDeferredRefresh();
     Subsystem = InSubsystem;
-    if (UInspectorSettingsPageWidget* SettingsSection = SnapshotSettingsSectionWidget.Get())
-    {
-        SettingsSection->SetInspectorSubsystem(InSubsystem);
-    }
 }
 
 FString UInspectorFilePageWidget::GetCompareDebugSummary() const
@@ -674,11 +669,6 @@ void UInspectorFilePageWidget::BuildWidgetTree()
     }
 
     if (UVerticalBoxSlot* VBoxSlot = MainBox->AddChildToVerticalBox(CreatePresetsSection()))
-    {
-        VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, RICompactUI::GetSectionGap()));
-    }
-
-    if (UVerticalBoxSlot* VBoxSlot = MainBox->AddChildToVerticalBox(CreateSnapshotSettingsSection()))
     {
         VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, RICompactUI::GetSectionGap()));
     }
@@ -1316,27 +1306,6 @@ UWidget* UInspectorFilePageWidget::CreateDiagnosticsSection()
     UVerticalBox* Outer = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
     DiagnosticsSectionBody = nullptr;
     return Outer;
-}
-
-UWidget* UInspectorFilePageWidget::CreateSnapshotSettingsSection()
-{
-    if (SnapshotSettingsSectionWidget.Get() == nullptr && GetWorld())
-    {
-        UInspectorSettingsPageWidget* SettingsSection = CreateWidget<UInspectorSettingsPageWidget>(GetWorld(), UInspectorSettingsPageWidget::StaticClass());
-        SnapshotSettingsSectionWidget = SettingsSection;
-        if (SettingsSection)
-        {
-            SettingsSection->SetPresentationMode(UInspectorSettingsPageWidget::ERISettingsPresentationMode::EmbeddedSection);
-        }
-    }
-
-    if (UInspectorSettingsPageWidget* SettingsSection = SnapshotSettingsSectionWidget.Get())
-    {
-        SettingsSection->SetInspectorSubsystem(Subsystem.Get());
-        SettingsSection->RefreshFromSubsystem();
-    }
-
-    return SnapshotSettingsSectionWidget.Get();
 }
 
 void UInspectorFilePageWidget::UpdateRemoteSessionSelectionState()
@@ -2052,12 +2021,6 @@ void UInspectorFilePageWidget::RefreshFromSubsystemInternal(bool bForceSessionRe
     RebuildRemoteSessionCompareLineCards(RemoteSessionCompareReport);
 
     ApplyPrimaryActionButtonStates(SelectedActor, &Summary);
-
-    if (UInspectorSettingsPageWidget* SettingsSection = SnapshotSettingsSectionWidget.Get())
-    {
-        SettingsSection->SetInspectorSubsystem(InspectorSubsystem);
-        SettingsSection->RefreshFromSubsystem();
-    }
 
     SetValueText(StatusText, TEXT("Ready"));
     InspectorSubsystem->RefreshSharedContextStrip();

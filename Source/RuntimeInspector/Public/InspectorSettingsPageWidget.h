@@ -28,16 +28,9 @@ class RUNTIMEINSPECTOR_API UInspectorSettingsPageWidget : public UUserWidget
     GENERATED_BODY()
 
 public:
-    enum class ERISettingsPresentationMode : uint8
-    {
-        Page,
-        EmbeddedSection
-    };
-
     UInspectorSettingsPageWidget(const FObjectInitializer& ObjectInitializer);
 
     void SetInspectorSubsystem(UInspectorWorldSubsystem* InSubsystem);
-    void SetPresentationMode(ERISettingsPresentationMode InMode);
     FString GetSessionValueText() const { return SessionValueText ? SessionValueText->GetText().ToString() : FString(); }
     FString GetNetModeValueText() const { return NetModeValueText ? NetModeValueText->GetText().ToString() : FString(); }
     FString GetSelectedActorValueText() const { return SelectedActorValueText ? SelectedActorValueText->GetText().ToString() : FString(); }
@@ -134,7 +127,6 @@ private:
 
 private:
     TWeakObjectPtr<UInspectorWorldSubsystem> Subsystem;
-    ERISettingsPresentationMode PresentationMode = ERISettingsPresentationMode::Page;
 
     FRIEditableSettings DraftSettings;
     FRISettingsDiagnostics Diagnostics;

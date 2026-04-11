@@ -4042,7 +4042,8 @@ UPanelWidget* UInspectorWorldSubsystem::FindSettingsHostPanel() const
         if (UPanelWidget* NamedHost = Cast<UPanelWidget>(Switcher->GetChildAt(ChildIndex)))
         {
             if (NamedHost->GetFName() == TEXT("Settings")
-                || NamedHost->GetFName() == TEXT("Setting"))
+                || NamedHost->GetFName() == TEXT("Setting")
+                || NamedHost->GetFName() == TEXT("RI_SettingsHost"))
             {
                 return NamedHost;
             }
@@ -4056,7 +4057,13 @@ UPanelWidget* UInspectorWorldSubsystem::FindSettingsHostPanel() const
 
     if (Switcher->GetChildrenCount() > 2)
     {
-        return Cast<UPanelWidget>(Switcher->GetChildAt(2));
+        if (UPanelWidget* FallbackHost = Cast<UPanelWidget>(Switcher->GetChildAt(2)))
+        {
+            if (FallbackHost->GetFName() != TEXT("RI_ToolsHost"))
+            {
+                return FallbackHost;
+            }
+        }
     }
 #endif
     return nullptr;
@@ -4112,6 +4119,18 @@ void UInspectorWorldSubsystem::EnsureLegacySupplementalTabsAndHosts()
         ToolsHost->SetVisibility(ESlateVisibility::Visible);
         Switcher->AddChild(ToolsHost);
         if (UWidgetSwitcherSlot* SwitcherSlot = Cast<UWidgetSwitcherSlot>(ToolsHost->Slot))
+        {
+            SwitcherSlot->SetHorizontalAlignment(HAlign_Fill);
+            SwitcherSlot->SetVerticalAlignment(VAlign_Fill);
+        }
+    }
+
+    if (!FindSettingsHostPanel())
+    {
+        UVerticalBox* SettingsHost = Panel->WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_SettingsHost"));
+        SettingsHost->SetVisibility(ESlateVisibility::Visible);
+        Switcher->AddChild(SettingsHost);
+        if (UWidgetSwitcherSlot* SwitcherSlot = Cast<UWidgetSwitcherSlot>(SettingsHost->Slot))
         {
             SwitcherSlot->SetHorizontalAlignment(HAlign_Fill);
             SwitcherSlot->SetVerticalAlignment(VAlign_Fill);
@@ -4300,6 +4319,42 @@ UInspectorWorldSubsystem::ERIVisiblePage UInspectorWorldSubsystem::GetVisiblePag
     {
         Switcher = const_cast<UInspectorWorldSubsystem*>(this)->FindContentSwitcher();
         const_cast<UInspectorWorldSubsystem*>(this)->ContentSwitcher = Switcher;
+    }
+
+    UWidget* ActiveWidget = Switcher ? Switcher->GetActiveWidget() : nullptr;
+    UPanelWidget* ActiveHost = Cast<UPanelWidget>(ActiveWidget);
+
+    UPanelWidget* ResolvedFileHost = FileHostPanel.Get();
+    if (!ResolvedFileHost)
+    {
+        ResolvedFileHost = const_cast<UInspectorWorldSubsystem*>(this)->FindFileHostPanel();
+        const_cast<UInspectorWorldSubsystem*>(this)->FileHostPanel = ResolvedFileHost;
+    }
+    if (ActiveHost && ActiveHost == ResolvedFileHost)
+    {
+        return ERIVisiblePage::Changes;
+    }
+
+    UPanelWidget* ResolvedSettingsHost = SettingsHostPanel.Get();
+    if (!ResolvedSettingsHost)
+    {
+        ResolvedSettingsHost = const_cast<UInspectorWorldSubsystem*>(this)->FindSettingsHostPanel();
+        const_cast<UInspectorWorldSubsystem*>(this)->SettingsHostPanel = ResolvedSettingsHost;
+    }
+    if (ActiveHost && ActiveHost == ResolvedSettingsHost)
+    {
+        return ERIVisiblePage::Settings;
+    }
+
+    UPanelWidget* ResolvedTestHost = TestHostPanel.Get();
+    if (!ResolvedTestHost)
+    {
+        ResolvedTestHost = const_cast<UInspectorWorldSubsystem*>(this)->FindTestHostPanel();
+        const_cast<UInspectorWorldSubsystem*>(this)->TestHostPanel = ResolvedTestHost;
+    }
+    if (ActiveHost && ActiveHost == ResolvedTestHost)
+    {
+        return ERIVisiblePage::Tools;
     }
 
     const int32 ActiveIndex = Switcher ? Switcher->GetActiveWidgetIndex() : 0;
@@ -4655,28 +4710,21 @@ void UInspectorWorldSubsystem::BindPanelTabButtons()
 void UInspectorWorldSubsystem::UpdatePanelTabButtonStyles()
 {
 #if RUNTIME_INSPECTOR_ENABLED
-    UWidgetSwitcher* Switcher = ContentSwitcher.Get();
-    if (!Switcher)
-    {
-        Switcher = FindContentSwitcher();
-        ContentSwitcher = Switcher;
-    }
-
-    const int32 ActiveIndex = Switcher ? Switcher->GetActiveWidgetIndex() : 0;
-    auto ApplyTabStyle = [ActiveIndex](UButton* Button, int32 ButtonIndex)
+    const ERIVisiblePage ActivePage = GetVisiblePage();
+    auto ApplyTabStyle = [ActivePage](UButton* Button, ERIVisiblePage ButtonPage)
     {
         if (!Button)
         {
             return;
         }
 
+        const bool bActive = ActivePage == ButtonPage;
         RICompactUI::ConfigureButton(
             Button,
-            ActiveIndex == ButtonIndex
+            bActive
                 ? RICompactUI::ERIButtonVisualStyle::TabActive
                 : RICompactUI::ERIButtonVisualStyle::TabInactive);
 
-        const bool bActive = ActiveIndex == ButtonIndex;
         Button->SetRenderOpacity(bActive ? 1.0f : 0.82f);
 
         if (UTextBlock* TextBlock = RI_FindFirstTextBlockRecursive(Button))
@@ -4688,16 +4736,23 @@ void UInspectorWorldSubsystem::UpdatePanelTabButtonStyles()
 
         if (USizeBox* SizeBox = RI_FindFirstSizeBoxRecursive(Button))
         {
-            const float MinWidth = ButtonIndex == 0 ? 78.0f : (ButtonIndex == 1 ? 92.0f : 108.0f);
-            SizeBox->SetMinDesiredWidth(MinWidth);
+            SizeBox->SetMinDesiredWidth(92.0f);
             SizeBox->SetHeightOverride(24.0f);
+        }
+
+        if (UHorizontalBoxSlot* Slot = Cast<UHorizontalBoxSlot>(Button->Slot))
+        {
+            Slot->SetPadding(FMargin(0.f));
+            Slot->SetHorizontalAlignment(HAlign_Fill);
+            Slot->SetVerticalAlignment(VAlign_Fill);
+            Slot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
         }
     };
 
-    ApplyTabStyle(ActorTabButton.Get(), 0);
-    ApplyTabStyle(FileTabButton.Get(), 1);
-    ApplyTabStyle(SettingsTabButton.Get(), SettingsPageIndex);
-    ApplyTabStyle(TestTabButton.Get(), TestPageIndex);
+    ApplyTabStyle(ActorTabButton.Get(), ERIVisiblePage::Actor);
+    ApplyTabStyle(FileTabButton.Get(), ERIVisiblePage::Changes);
+    ApplyTabStyle(SettingsTabButton.Get(), ERIVisiblePage::Settings);
+    ApplyTabStyle(TestTabButton.Get(), ERIVisiblePage::Tools);
 #endif
 }
 
@@ -11671,11 +11726,78 @@ bool UInspectorWorldSubsystem::RunFabScreenshotPageSelfTest(const FString& InPag
     const bool bThemeOk = GetThemePreset() == ERuntimeInspectorThemePreset::SoftContrast
         && static_cast<int32>(RICompactUI::GetActiveThemePreset()) == 1;
     const bool bPageOk = bSwitcherOk && ActiveIndex == ExpectedIndex;
+    const bool bVisiblePageOk = GetVisiblePage() == ExpectedPage;
     const bool bStagedClean = !HasStagedPatch();
     const bool bActorCellHiddenOk = ExpectedPage != ERIVisiblePage::Actor
         || !SharedContextActorCell.IsValid()
         || SharedContextActorCell->GetVisibility() != ESlateVisibility::Visible;
     const TCHAR* VisiblePageLabel = RI_GetVisiblePageDisplayLabel(bSwitcherOk ? GetVisiblePage() : ERIVisiblePage::Actor);
+    int32 ActiveTabCount = 0;
+    bool bTabWidthOk = true;
+    FString TabWidthSummary;
+    {
+        const TArray<UButton*> Buttons = { ActorTabButton.Get(), FileTabButton.Get(), SettingsTabButton.Get(), TestTabButton.Get() };
+        float BaselineWidth = -1.0f;
+        bool bAllFillSlots = true;
+        for (UButton* Button : Buttons)
+        {
+            if (!Button)
+            {
+                bTabWidthOk = false;
+                continue;
+            }
+
+            if (FMath::IsNearlyEqual(Button->GetRenderOpacity(), 1.0f, KINDA_SMALL_NUMBER))
+            {
+                ++ActiveTabCount;
+            }
+
+            float Width = Button->GetCachedGeometry().GetLocalSize().X;
+            if (Width <= KINDA_SMALL_NUMBER)
+            {
+                if (USizeBox* SizeBox = RI_FindFirstSizeBoxRecursive(Button))
+                {
+                    Width = SizeBox->GetMinDesiredWidth();
+                }
+            }
+
+            bool bFillSlot = false;
+            if (UHorizontalBoxSlot* Slot = Cast<UHorizontalBoxSlot>(Button->Slot))
+            {
+                bFillSlot = Slot->GetSize().SizeRule == ESlateSizeRule::Fill;
+            }
+            bAllFillSlots = bAllFillSlots && bFillSlot;
+
+            if (!TabWidthSummary.IsEmpty())
+            {
+                TabWidthSummary += TEXT(",");
+            }
+            TabWidthSummary += FString::Printf(TEXT("%.1f:%d"), Width, bFillSlot ? 1 : 0);
+
+            if (Width <= KINDA_SMALL_NUMBER)
+            {
+                continue;
+            }
+
+            if (BaselineWidth < 0.0f)
+            {
+                BaselineWidth = Width;
+            }
+            else if (!FMath::IsNearlyEqual(BaselineWidth, Width, 0.1f))
+            {
+                bTabWidthOk = false;
+            }
+        }
+
+        if (BaselineWidth < 0.0f)
+        {
+            bTabWidthOk = bAllFillSlots;
+        }
+        else
+        {
+            bTabWidthOk = bTabWidthOk && bAllFillSlots;
+        }
+    }
 
     FString GroupSwitcherActiveName = TEXT("None");
     FString CustomGroupsVisibility = TEXT("None");
@@ -11775,9 +11897,10 @@ bool UInspectorWorldSubsystem::RunFabScreenshotPageSelfTest(const FString& InPag
         }
     }
 
-    const bool bPassed = bThemeOk && bSwitcherOk && bPageOk && bStagedClean && bActorCellHiddenOk;
+    const bool bPassed = bThemeOk && bSwitcherOk && bPageOk && bVisiblePageOk && bStagedClean && bActorCellHiddenOk
+        && ActiveTabCount == 1 && bTabWidthOk;
     OutReport = FString::Printf(
-        TEXT("%s=%s | Requested=%s | Visible=%s | Switcher=%d | ActiveIndex=%d | ExpectedIndex=%d | Theme=%s | StagedClean=%d | ActorCellHidden=%d | GroupHost=%s | Sidebar=%d/%d | CustomGroups=%s/%d@%s | GroupList=%s/%d/%d@%s | TreeList=%s/%d/%d@%s | PinList=%s/%d/%d@%s | Summary=%s"),
+        TEXT("%s=%s | Requested=%s | Visible=%s | Switcher=%d | ActiveIndex=%d | ExpectedIndex=%d | Theme=%s | StagedClean=%d | ActorCellHidden=%d | ActiveTabs=%d | TabWidths=%s WidthsOk=%d | GroupHost=%s | Sidebar=%d/%d | CustomGroups=%s/%d@%s | GroupList=%s/%d/%d@%s | TreeList=%s/%d/%d@%s | PinList=%s/%d/%d@%s | Summary=%s"),
         *InTestLabel,
         bPassed ? TEXT("PASS") : TEXT("FAIL"),
         *InPageName,
@@ -11788,6 +11911,9 @@ bool UInspectorWorldSubsystem::RunFabScreenshotPageSelfTest(const FString& InPag
         bThemeOk ? TEXT("SoftContrast") : TEXT("mismatch"),
         bStagedClean ? 1 : 0,
         bActorCellHiddenOk ? 1 : 0,
+        ActiveTabCount,
+        TabWidthSummary.IsEmpty() ? TEXT("None") : *TabWidthSummary,
+        bTabWidthOk ? 1 : 0,
         *GroupSwitcherActiveName,
         SidebarGroupCount,
         SidebarPinnedCount,
@@ -13330,6 +13456,7 @@ bool UInspectorWorldSubsystem::RunFilePageInjectionSelfTest(FString& OutReport)
     const bool bActionGuideOk = Page && !Page->GetActionGuideLabel().IsEmpty() && !Page->GetActionGuideLabel().Equals(TEXT("-"), ESearchCase::CaseSensitive);
     const bool bRemoteSectionHidden = Page && !Page->HasRemoteSessionSection();
     const bool bDiagnosticsSectionHidden = Page && !Page->HasDiagnosticsSection();
+    const bool bEmbeddedSettingsHidden = Page && !Page->HasEmbeddedSettingsSection();
     const int32 ActiveIndex = Switcher ? Switcher->GetActiveWidgetIndex() : INDEX_NONE;
     const bool bFileSwitcherFillOk = RI_IsVerticalSlotRule(Switcher, ESlateSizeRule::Fill);
     const bool bDefaultActorPageOk = DefaultActiveIndex == 0;
@@ -13437,13 +13564,14 @@ bool UInspectorWorldSubsystem::RunFilePageInjectionSelfTest(FString& OutReport)
         && bNextStepOk && bActionGuideOk
         && bRemoteSectionHidden
         && bDiagnosticsSectionHidden
+        && bEmbeddedSettingsHidden
         && bFileSwitcherFillOk
         && bDefaultActorPageOk
         && bActorLayoutOk;
     const bool bFinalPassed = bPassed && bInitialStageButtonsOk && bStagedButtonsOk && bFinalSummaryOk;
 
     OutReport = FString::Printf(
-        TEXT("FilePageInjectionSelfTest=%s | ActiveIndex=%d DefaultActor=%d Host=%s HostHasPage=%d VisibleLegacy=%d ScrollRoot=%d SwitcherFill=%d Summary=%s Actor=%s Class=%s Source=%s Next=%s Guide=%s Remote=%s Diagnostics=%s ActorLayout=%d ActorHost=%d ActorOrder=%d ActorStripAuto=%d ActorSwitcherFill=%d Buttons=%d/%d StageBtn=%s PreviewBtn=%s ApplyBtn=%s ClearBtn=%s ExportBtn=%s SaveBtn=%s LatestPresetBtn=%s BaselineAuditBtn=%s AuditBtn=%s PatchVsSourceBtn=%s AppliedAuditBtn=%s RoleCompareBtn=%s RemoteSessionCompareBtn=%s Snapshots=%d Patches=%d Presets=%d Audits=%d Staged=%s Promote=%s LegacyNames=%s"),
+        TEXT("FilePageInjectionSelfTest=%s | ActiveIndex=%d DefaultActor=%d Host=%s HostHasPage=%d VisibleLegacy=%d ScrollRoot=%d SwitcherFill=%d Summary=%s Actor=%s Class=%s Source=%s Next=%s Guide=%s Remote=%s Diagnostics=%s EmbeddedSettings=%s ActorLayout=%d ActorHost=%d ActorOrder=%d ActorStripAuto=%d ActorSwitcherFill=%d Buttons=%d/%d StageBtn=%s PreviewBtn=%s ApplyBtn=%s ClearBtn=%s ExportBtn=%s SaveBtn=%s LatestPresetBtn=%s BaselineAuditBtn=%s AuditBtn=%s PatchVsSourceBtn=%s AppliedAuditBtn=%s RoleCompareBtn=%s RemoteSessionCompareBtn=%s Snapshots=%d Patches=%d Presets=%d Audits=%d Staged=%s Promote=%s LegacyNames=%s"),
         bFinalPassed ? TEXT("PASS") : TEXT("FAIL"),
         ActiveIndex,
         bDefaultActorPageOk ? 1 : 0,
@@ -13460,6 +13588,7 @@ bool UInspectorWorldSubsystem::RunFilePageInjectionSelfTest(FString& OutReport)
         bActionGuideOk ? TEXT("ok") : *(Page ? Page->GetActionGuideLabel() : FString(TEXT("None"))),
         bRemoteSectionHidden ? TEXT("hidden") : TEXT("visible"),
         bDiagnosticsSectionHidden ? TEXT("hidden") : TEXT("visible"),
+        bEmbeddedSettingsHidden ? TEXT("hidden") : TEXT("visible"),
         bActorLayoutOk ? 1 : 0,
         bActorHostOk ? 1 : 0,
         bActorOrderOk ? 1 : 0,

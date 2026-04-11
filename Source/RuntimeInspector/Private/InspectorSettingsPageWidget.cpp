@@ -76,11 +76,6 @@ void UInspectorSettingsPageWidget::SetInspectorSubsystem(UInspectorWorldSubsyste
     Subsystem = InSubsystem;
 }
 
-void UInspectorSettingsPageWidget::SetPresentationMode(ERISettingsPresentationMode InMode)
-{
-    PresentationMode = InMode;
-}
-
 TSharedRef<SWidget> UInspectorSettingsPageWidget::RebuildWidget()
 {
     if (WidgetTree && !WidgetTree->RootWidget)
@@ -198,31 +193,21 @@ void UInspectorSettingsPageWidget::BuildWidgetTree()
         return;
     }
 
-    const bool bEmbeddedSection = PresentationMode == ERISettingsPresentationMode::EmbeddedSection;
+    UBorder* RootBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("RI_SettingsRoot"));
+    RootBorder->SetPadding(RICompactUI::GetPanelPadding());
+    RootBorder->SetBrushColor(RICompactUI::GetPageBackgroundColor());
 
-    UBorder* RootBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), bEmbeddedSection ? TEXT("RI_SnapshotSectionRoot") : TEXT("RI_SettingsRoot"));
-    RootBorder->SetPadding(bEmbeddedSection ? RICompactUI::GetSurfaceCardPadding() : RICompactUI::GetPanelPadding());
-    RootBorder->SetBrushColor(bEmbeddedSection ? RI_SettingsSectionColor() : RICompactUI::GetPageBackgroundColor());
-
-    UVerticalBox* MainBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), bEmbeddedSection ? TEXT("RI_SnapshotSectionBox") : TEXT("RI_SettingsMainBox"));
+    UVerticalBox* MainBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_SettingsMainBox"));
     RootBorder->SetContent(MainBox);
 
-    UVerticalBox* ContentBox = nullptr;
-    if (bEmbeddedSection)
+    PageScrollBox = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("RI_SettingsScroll"));
+    if (UVerticalBoxSlot* ScrollSlot = MainBox->AddChildToVerticalBox(PageScrollBox))
     {
-        ContentBox = MainBox;
+        ScrollSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
     }
-    else
-    {
-        PageScrollBox = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("RI_SettingsScroll"));
-        if (UVerticalBoxSlot* ScrollSlot = MainBox->AddChildToVerticalBox(PageScrollBox))
-        {
-            ScrollSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-        }
 
-        ContentBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_SettingsContentBox"));
-        PageScrollBox->AddChild(ContentBox);
-    }
+    UVerticalBox* ContentBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_SettingsContentBox"));
+    PageScrollBox->AddChild(ContentBox);
 
     auto AddContentWidget = [ContentBox](UWidget* Child, const FMargin& SlotPadding)
     {
@@ -237,19 +222,16 @@ void UInspectorSettingsPageWidget::BuildWidgetTree()
         }
     };
 
-    if (!bEmbeddedSection)
-    {
-        AddContentWidget(CreateSectionTitle(TEXT("Settings Workspace"), true), FMargin(0.f, 0.f, 0.f, RICompactUI::GetInlineGap()));
-        AddContentWidget(
-            RICompactUI::MakeText(
-                WidgetTree,
-                TEXT("Configure runtime interaction, appearance, and safety without leaving the active workflow."),
-                RICompactUI::GetMutedFontSize(),
-                false,
-                RI_SettingsMutedTextColor(),
-                true),
-            FMargin(0.f, 0.f, 0.f, RICompactUI::GetSectionGap()));
-    }
+    AddContentWidget(CreateSectionTitle(TEXT("Settings Workspace"), true), FMargin(0.f, 0.f, 0.f, RICompactUI::GetInlineGap()));
+    AddContentWidget(
+        RICompactUI::MakeText(
+            WidgetTree,
+            TEXT("Configure runtime interaction, appearance, and safety without leaving the active workflow."),
+            RICompactUI::GetMutedFontSize(),
+            false,
+            RI_SettingsMutedTextColor(),
+            true),
+        FMargin(0.f, 0.f, 0.f, RICompactUI::GetSectionGap()));
 
     auto AddGroupCard = [this, AddContentWidget](const FString& Title, const FString& Subtitle, bool bEmphasis, const FName& Name) -> UVerticalBox*
     {
@@ -289,8 +271,8 @@ void UInspectorSettingsPageWidget::BuildWidgetTree()
     };
 
     UVerticalBox* InteractionCard = AddGroupCard(
-        bEmbeddedSection ? TEXT("Embedded Settings") : TEXT("Interaction"),
-        bEmbeddedSection ? TEXT("Quick configuration for the Changes page.") : TEXT("How the panel opens, picks targets, and responds to input."),
+        TEXT("Interaction"),
+        TEXT("How the panel opens, picks targets, and responds to input."),
         true,
         TEXT("RI_SettingsInteractionCard"));
     AddCardChild(InteractionCard, CreateKeybindRow(TEXT("Toggle Key"), ToggleKeyValueText, ToggleKeyButton));
