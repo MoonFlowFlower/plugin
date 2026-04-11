@@ -28,7 +28,7 @@ Use this checklist when preparing the UE 5.5 Fab submission package.
 - [x] Capture cover image.
 - [x] Capture 3-6 product screenshots based on `FAB_LISTING.md`.
 - [ ] Record a short demo video or GIF.
-- [ ] Confirm screenshots match the actual shipped UE 5.5 feature set.
+- [x] Confirm screenshots match the actual shipped UE 5.5 feature set.
 - [x] Media staging folder and expected filenames are prepared under `FabMedia/`.
 - [x] Automated capture path is available at `Scripts\CaptureFabMedia.cmd` and writes deterministic shots to `Saved\RuntimeInspector\FabMediaCapture\`.
 
@@ -37,6 +37,7 @@ Use this checklist when preparing the UE 5.5 Fab submission package.
 - [x] UE 5.5 `BuildPlugin` validation passes through the release script.
 - [x] Install the packaged plugin into a clean blank UE 5.5 project and confirm it loads.
   - Use `Scripts\ValidateFabBlankProject.cmd` for the automated load check.
+  - `ValidateFabBlankProject` may still perform a controlled shutdown after `QUIT`, but it no longer emits a misleading warning for that successful path.
 - [x] Use the main `PluginMaker` project, not the blank validation host, for loopback packaged-runtime self-tests and bridge-driven workflow acceptance.
   - Use `Scripts\BuildPackagedRuntimeValidation.cmd`, `Scripts\RunPackagedRuntimeValidation.cmd`, and `Scripts\StopPackagedRuntimeValidation.cmd`.
 - [ ] Re-run a minimal smoke path in the packaged install:
@@ -50,5 +51,5 @@ Use this checklist when preparing the UE 5.5 Fab submission package.
 
 ## Optional Cleanup Before Submission
 
-- [ ] Normalize source file encodings to remove `warning C4828` noise.
+- [x] Normalize source file encodings to remove `warning C4828` noise.
 - [ ] Replace any remaining temporary support/documentation URLs if needed.
