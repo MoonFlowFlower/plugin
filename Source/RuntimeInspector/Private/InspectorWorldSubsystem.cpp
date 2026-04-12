@@ -3858,6 +3858,10 @@ namespace
 
         CollapseLegacyWidgetPair(TEXT("TXT_Log"), TEXT("TXT_Log_1"));
         CollapseLegacyWidgetPair(TEXT("BTN_CopyReport"), TEXT("BTN_ExportReport"));
+        CollapseLegacyWidget(TEXT("TXT_SelectedActor"));
+        CollapseLegacyWidget(TEXT("TXT_SelectedName"));
+        CollapseLegacyWidget(TEXT("TXT_SelectCompName"));
+        CollapseLegacyWidget(TEXT("HorizontalBox_379"));
         CollapseLegacyWidget(TEXT("Logger"));
     }
 }
@@ -3894,52 +3898,22 @@ static void RI_UpdateActorPropertyHeader(UUserWidget* PanelWidget, UObject* Focu
         return Object->GetName();
     };
 
-    const FString FocusLabel = MakeObjectDisplayLabel(FocusedObject);
-    const AActor* FocusedActor = Cast<AActor>(FocusedObject);
-    const FString ActorLabel = FocusedActor ? RI_GetActorDisplayLabel(FocusedActor) : FocusLabel;
-    const bool bShowSeparateFocus = !FocusLabel.IsEmpty() && FocusLabel != ActorLabel;
-
     if (UWidget* HeaderValue = PanelWidget->WidgetTree->FindWidget(TEXT("TXT_SelectedActor")))
     {
-        HeaderValue->SetVisibility(ESlateVisibility::Visible);
+        HeaderValue->SetVisibility(ESlateVisibility::Collapsed);
     }
     if (UWidget* HeaderLabel = PanelWidget->WidgetTree->FindWidget(TEXT("TXT_SelectedName")))
     {
-        HeaderLabel->SetVisibility(ESlateVisibility::Visible);
+        HeaderLabel->SetVisibility(ESlateVisibility::Collapsed);
     }
     if (UWidget* HeaderParent = PanelWidget->WidgetTree->FindWidget(TEXT("HorizontalBox_379")))
     {
-        HeaderParent->SetVisibility(ESlateVisibility::Visible);
+        HeaderParent->SetVisibility(ESlateVisibility::Collapsed);
     }
 
-    if (UTextBlock* HeaderLabelText = Cast<UTextBlock>(PanelWidget->WidgetTree->FindWidget(TEXT("TXT_SelectedName"))))
+    if (UWidget* FocusText = PanelWidget->WidgetTree->FindWidget(TEXT("TXT_SelectCompName")))
     {
-        HeaderLabelText->SetText(FText::FromString(TEXT("Selection")));
-        FSlateFontInfo Font = HeaderLabelText->GetFont();
-        Font.Size = 7;
-        HeaderLabelText->SetFont(Font);
-    }
-
-    if (UTextBlock* HeaderValueText = Cast<UTextBlock>(PanelWidget->WidgetTree->FindWidget(TEXT("TXT_SelectedActor"))))
-    {
-        HeaderValueText->SetAutoWrapText(true);
-        HeaderValueText->SetText(FText::FromString(ActorLabel));
-        FSlateFontInfo Font = HeaderValueText->GetFont();
-        Font.Size = 8;
-        HeaderValueText->SetFont(Font);
-    }
-
-    if (UTextBlock* FocusText = Cast<UTextBlock>(PanelWidget->WidgetTree->FindWidget(TEXT("TXT_SelectCompName"))))
-    {
-        FocusText->SetAutoWrapText(true);
-        FocusText->SetText(FText::FromString(
-            bShowSeparateFocus
-                ? FString::Printf(TEXT("Focus: %s"), *FocusLabel)
-                : TEXT("")));
-        FSlateFontInfo Font = FocusText->GetFont();
-        Font.Size = 7;
-        FocusText->SetFont(Font);
-        FocusText->SetVisibility(bShowSeparateFocus ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+        FocusText->SetVisibility(ESlateVisibility::Collapsed);
     }
 
     if (UTextBlock* TitleText = Cast<UTextBlock>(PanelWidget->WidgetTree->FindWidget(TEXT("TXT_ToolName"))))
@@ -5556,7 +5530,7 @@ void UInspectorWorldSubsystem::EnsureActorWorkspaceSelectionBandInjected()
             Panel->WidgetTree,
             TEXT("RI_ActorWorkspaceSelectionBand"),
             RICompactUI::GetContextStripBackgroundColor(),
-            FMargin(10.f, 8.f));
+            FMargin(14.f, 6.f));
 
         UVerticalBox* BandRoot = Panel->WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ActorWorkspaceSelectionBandRoot"));
         SelectionBand->SetContent(BandRoot);
@@ -5564,7 +5538,7 @@ void UInspectorWorldSubsystem::EnsureActorWorkspaceSelectionBandInjected()
         if (UVerticalBoxSlot* LabelSlot = BandRoot->AddChildToVerticalBox(
             RICompactUI::MakeText(Panel->WidgetTree, TEXT("Selection"), RICompactUI::GetMutedFontSize(), true, RICompactUI::GetMutedTextColor())))
         {
-            LabelSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 2.f));
+            LabelSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 1.f));
         }
 
         UHorizontalBox* SummaryRow = Panel->WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_ActorWorkspaceSelectionSummary"));
@@ -5591,28 +5565,28 @@ void UInspectorWorldSubsystem::EnsureActorWorkspaceSelectionBandInjected()
         UTextBlock* ActorText = RICompactUI::MakeText(
             Panel->WidgetTree,
             TEXT("No selected actor"),
-            RICompactUI::GetValueFontSize() + 1,
+            RICompactUI::GetValueFontSize(),
             true,
             RICompactUI::GetStrongTextColor(),
             true);
         UTextBlock* SourceText = RICompactUI::MakeText(
             Panel->WidgetTree,
             TEXT("No source asset"),
-            RICompactUI::GetLabelFontSize(),
+            RICompactUI::GetValueFontSize(),
             false,
             RICompactUI::GetSecondaryTextColor(),
             true);
         UTextBlock* StateText = RICompactUI::MakeText(
             Panel->WidgetTree,
             TEXT("Live only"),
-            RICompactUI::GetLabelFontSize(),
+            RICompactUI::GetValueFontSize(),
             true,
             RICompactUI::GetStrongTextColor(),
             false);
 
-        AddSummaryText(ActorText, 0.96f, FMargin(0.f, 0.f, 12.f, 0.f));
-        AddSummaryText(SourceText, 1.32f, FMargin(0.f, 0.f, 12.f, 0.f));
-        AddSummaryText(StateText, 0.56f, FMargin(0.f));
+        AddSummaryText(ActorText, 0.90f, FMargin(0.f, 0.f, 14.f, 0.f));
+        AddSummaryText(SourceText, 1.40f, FMargin(0.f, 0.f, 14.f, 0.f));
+        AddSummaryText(StateText, 0.46f, FMargin(0.f));
 
         ActorWorkspaceSelectionActorTextStrong = ActorText;
         ActorWorkspaceSelectionActorText = ActorText;
@@ -5651,7 +5625,7 @@ void UInspectorWorldSubsystem::EnsureActorWorkspaceSelectionBandInjected()
         BandSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
         BandSlot->SetHorizontalAlignment(HAlign_Fill);
         BandSlot->SetVerticalAlignment(VAlign_Top);
-        BandSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 10.f));
+        BandSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 8.f));
     }
 
     UpdateActorWorkspaceSelectionBand();
@@ -5673,19 +5647,19 @@ void UInspectorWorldSubsystem::UpdateActorWorkspaceSelectionBand()
     if (UTextBlock* Text = ActorWorkspaceSelectionActorText.Get())
     {
         Text->SetText(FText::FromString(ActorLabel));
-        RICompactUI::ApplyTextStyle(Text, RICompactUI::GetValueFontSize() + 1, true, Selected ? RICompactUI::GetStrongTextColor() : RICompactUI::GetMutedTextColor());
+        RICompactUI::ApplyTextStyle(Text, RICompactUI::GetValueFontSize(), true, Selected ? RICompactUI::GetStrongTextColor() : RICompactUI::GetMutedTextColor());
     }
     if (UTextBlock* Text = ActorWorkspaceSelectionSourceText.Get())
     {
         Text->SetText(FText::FromString(SourcePath));
-        RICompactUI::ApplyTextStyle(Text, RICompactUI::GetLabelFontSize(), false, Selected ? RICompactUI::GetSecondaryTextColor() : RICompactUI::GetMutedTextColor());
+        RICompactUI::ApplyTextStyle(Text, RICompactUI::GetValueFontSize(), false, Selected ? RICompactUI::GetSecondaryTextColor() : RICompactUI::GetMutedTextColor());
     }
     if (UTextBlock* Text = ActorWorkspaceSelectionStateText.Get())
     {
         Text->SetText(FText::FromString(StagedState));
         RICompactUI::ApplyTextStyle(
             Text,
-            RICompactUI::GetLabelFontSize(),
+            RICompactUI::GetValueFontSize(),
             true,
             HasStagedPatch() ? RICompactUI::GetSuccessTextColor() : RICompactUI::GetStrongTextColor());
     }
@@ -14861,6 +14835,12 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
         && FooterWidget->GetVisibility() != ESlateVisibility::Collapsed
         && FooterWidget->GetVisibility() != ESlateVisibility::Hidden
         && RI_IsVerticalSlotRule(FooterWidget, ESlateSizeRule::Automatic);
+    const bool bLegacySelectionHeaderHidden = PanelWidget.IsValid() && PanelWidget->WidgetTree
+        ? ([](UWidget* Widget)
+        {
+            return !Widget || Widget->GetVisibility() == ESlateVisibility::Collapsed || Widget->GetVisibility() == ESlateVisibility::Hidden;
+        }(PanelWidget->WidgetTree->FindWidget(TEXT("HorizontalBox_379"))))
+        : true;
     int32 VisibleLegacySiblingCount = 0;
     if (PageStackHost)
     {
@@ -15343,6 +15323,7 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
         && bFunctionScrollOk
         && bFunctionSummaryOk
         && bFooterOk
+        && bLegacySelectionHeaderHidden
         && VisibleLegacySiblingCount == 0
         && bColumnRatioOk
         && bVerticalRatioOk
@@ -15363,7 +15344,7 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
         && bMaterialSlotSelectionOk;
 
     OutReport = FString::Printf(
-        TEXT("ActorPageStructureSelfTest=%s | Groups=%d | Sidebar=%d/%d Workspace=%d/%d Selection=%d/%d Footer=%d VisibleLegacy=%d | PropertyBox=%d Scroll=%d | FunctionBox=%d Scroll=%d Summary=%d | Columns=%d Left=%.2f Right=%.2f | Vertical=%d Property=%.2f Function=%.2f Dominant=%d | Starred=%d | FocusedComponent=%s | FocusOk=%d | ColorProperty=%s | ColorItem=%d | Swatch=%d | ValueHeights=%d Text=%s:%.1f Bool=%s:%.1f Color=%.1f MaterialScalar=%d(%s:%.1f) MaterialVector=%d(%s:%.1f) Touch=%d Favorite=%.1f/%.1f | MaterialStar=%d | MaterialTree=%d/%d/%d/%d/%d Component=%s Slot=%s Keys=%s | Summary=%s"),
+        TEXT("ActorPageStructureSelfTest=%s | Groups=%d | Sidebar=%d/%d Workspace=%d/%d Selection=%d/%d Footer=%d LegacyHeader=%d VisibleLegacy=%d | PropertyBox=%d Scroll=%d | FunctionBox=%d Scroll=%d Summary=%d | Columns=%d Left=%.2f Right=%.2f | Vertical=%d Property=%.2f Function=%.2f Dominant=%d | Starred=%d | FocusedComponent=%s | FocusOk=%d | ColorProperty=%s | ColorItem=%d | Swatch=%d | ValueHeights=%d Text=%s:%.1f Bool=%s:%.1f Color=%.1f MaterialScalar=%d(%s:%.1f) MaterialVector=%d(%s:%.1f) Touch=%d Favorite=%.1f/%.1f | MaterialStar=%d | MaterialTree=%d/%d/%d/%d/%d Component=%s Slot=%s Keys=%s | Summary=%s"),
         bPassed ? TEXT("PASS") : TEXT("FAIL"),
         GroupCount,
         bSidebarHostOk ? 1 : 0,
@@ -15373,6 +15354,7 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
         bSelectionBandOk ? 1 : 0,
         bSelectionBandOrderOk ? 1 : 0,
         bFooterOk ? 1 : 0,
+        bLegacySelectionHeaderHidden ? 1 : 0,
         VisibleLegacySiblingCount,
         bPropertyBoxVisible ? 1 : 0,
         bPropertyScrollOk ? 1 : 0,
