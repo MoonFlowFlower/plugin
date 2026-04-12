@@ -169,8 +169,8 @@ namespace RICompactUI
         {
             FRIThemePresetTokens Tokens;
             Tokens.Metrics = {
-                8, 7, 7, 6,
-                22.0f, 24.0f, 96.0f, 122.0f,
+                8, 7, 6, 5,
+                22.0f, 22.0f, 96.0f, 122.0f,
                 5.0f, 1.0f,
                 FMargin(6.f, 4.f),
                 FMargin(0.f),
@@ -297,8 +297,12 @@ namespace RICompactUI
             Tokens.SuccessText = FLinearColor(0.52f, 0.88f, 0.68f, 1.0f);
             Tokens.WarningText = FLinearColor(0.96f, 0.79f, 0.40f, 1.0f);
             Tokens.ErrorText = FLinearColor(0.95f, 0.49f, 0.49f, 1.0f);
+            Tokens.Metrics.SectionTitleFontSize = 8;
+            Tokens.Metrics.LabelFontSize = 7;
+            Tokens.Metrics.ValueFontSize = 6;
+            Tokens.Metrics.MutedFontSize = 5;
             Tokens.Metrics.ButtonHeight = 22.0f;
-            Tokens.Metrics.InputHeight = 24.0f;
+            Tokens.Metrics.InputHeight = 22.0f;
             Tokens.Metrics.CompactListHeight = 94.0f;
             Tokens.Metrics.StandardListHeight = 120.0f;
             Tokens.Metrics.SectionPadding = FMargin(6.f, 4.f);
@@ -985,6 +989,7 @@ namespace RICompactUI
         ComboBoxStyle.ComboButtonStyle.ButtonStyle.Hovered.OutlineSettings.Width = Metrics.BorderWidth;
         ComboBoxStyle.ComboButtonStyle.ButtonStyle.Pressed.OutlineSettings.Width = Metrics.BorderWidth;
         ComboBoxStyle.ComboButtonStyle.ButtonStyle.Disabled.OutlineSettings.Width = Metrics.BorderWidth;
+        ComboBoxStyle.ComboButtonStyle.DownArrowImage.TintColor = FSlateColor(TextColor);
         ComboBox->WidgetStyle = ComboBoxStyle;
         PRAGMA_ENABLE_DEPRECATION_WARNINGS
     }

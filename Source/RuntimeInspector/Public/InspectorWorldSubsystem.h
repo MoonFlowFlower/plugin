@@ -241,6 +241,24 @@ public:
     FString RunSettingsPreviewSelfTestSimple();
 
     UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Debug")
+    bool RunSettingsSavePersistenceSelfTest(FString& OutReport);
+
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Debug")
+    FString RunSettingsSavePersistenceSelfTestSimple();
+
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Debug")
+    bool RunStarLiveEditAndRunSelfTest(FString& OutReport);
+
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Debug")
+    FString RunStarLiveEditAndRunSelfTestSimple();
+
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Debug")
+    bool RunStarPreciseNavigationSelfTest(FString& OutReport);
+
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Debug")
+    FString RunStarPreciseNavigationSelfTestSimple();
+
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Debug")
     bool RunSettingsHotkeyRebindSelfTest(FString& OutReport);
 
     UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Debug")

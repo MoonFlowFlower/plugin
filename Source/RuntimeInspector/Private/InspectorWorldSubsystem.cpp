@@ -5,6 +5,7 @@
 #include "InspectorPropertyItem.h"
 #include "InspectorFunctionItem.h"
 #include "InspectorFunctionsSectionWidget.h"
+#include "InspectorFunctionRowWidget.h"
 #include "InspectorGroupsSectionWidget.h"
 #include "InspectorMaterialParamRowWidget.h"
 #include "InspectorModalBlockerWidget.h"
@@ -95,6 +96,7 @@
 #include "Misc/Paths.h"
 #include "Misc/DefaultValueHelper.h"
 #include "Misc/DateTime.h"
+#include "Misc/ConfigCacheIni.h"
 
 #include "Serialization/JsonWriter.h"
 #include "Serialization/JsonSerializer.h"
@@ -121,6 +123,9 @@ static constexpr float RI_DefaultPanelViewportSafetyMargin = 16.0f;
 static const TCHAR* RI_ConfirmDialogClassPath = TEXT("/RuntimeInspector/UI/WBP_ConfirmDialog.WBP_ConfirmDialog_C");
 static const FName RI_SelfTestId_ConfirmDialog(TEXT("confirm_dialog_color_input"));
 static const FName RI_SelfTestId_SettingsPreview(TEXT("settings_preview"));
+static const FName RI_SelfTestId_SettingsSavePersistence(TEXT("settings_save_persistence"));
+static const FName RI_SelfTestId_StarLiveEditAndRun(TEXT("star_live_edit_and_run"));
+static const FName RI_SelfTestId_StarPreciseNavigation(TEXT("star_precise_navigation"));
 static const FName RI_SelfTestId_SettingsHotkey(TEXT("settings_hotkey_rebind"));
 static const FName RI_SelfTestId_SettingsPageLayout(TEXT("settings_page_layout"));
 static const FName RI_SelfTestId_ThemePresetPreview(TEXT("theme_preset_preview"));
@@ -6048,73 +6053,59 @@ void UInspectorWorldSubsystem::RefreshActorGroupsSection()
     GetPinnedItemsForSelected(SearchText, PinnedItems);
     if (PinnedItems.Num() == 0)
     {
-        AddEmptyStateCard(PinnedEntriesBox, TEXT("No starred properties yet."));
+        AddEmptyStateCard(PinnedEntriesBox, TEXT("No starred items yet."));
     }
     else
     {
         for (UObject* ItemObject : PinnedItems)
         {
-            FString Label = TEXT("Pinned");
-            FString Value;
+            UWidget* RowWidget = nullptr;
             if (UInspectorPropertyItem* PropertyItem = Cast<UInspectorPropertyItem>(ItemObject))
             {
-                Label = PropertyItem->GetPropertyName();
-                Value = PropertyItem->GetValueText();
+                UInspectorPropertyRowWidget* PropertyRow = Panel->WidgetTree->ConstructWidget<UInspectorPropertyRowWidget>(
+                    UInspectorPropertyRowWidget::StaticClass());
+                if (PropertyRow)
+                {
+                    PropertyRow->SetInspectorSubsystem(this);
+                    PropertyRow->SetPropertyItem(PropertyItem);
+                    PropertyRow->SetAllowNavigation(true);
+                    RowWidget = PropertyRow;
+                }
             }
             else if (UInspectorMaterialParamItem* MaterialItem = Cast<UInspectorMaterialParamItem>(ItemObject))
             {
-                Label = MaterialItem->GetPropertyName();
-                Value = MaterialItem->GetValueText();
+                UInspectorMaterialParamRowWidget* MaterialRow = Panel->WidgetTree->ConstructWidget<UInspectorMaterialParamRowWidget>(
+                    UInspectorMaterialParamRowWidget::StaticClass());
+                if (MaterialRow)
+                {
+                    MaterialRow->SetInspectorSubsystem(this);
+                    MaterialRow->SetMaterialItem(MaterialItem);
+                    MaterialRow->SetAllowNavigation(true);
+                    RowWidget = MaterialRow;
+                }
             }
-            else
+            else if (UInspectorFunctionItem* FunctionItem = Cast<UInspectorFunctionItem>(ItemObject))
+            {
+                UInspectorFunctionRowWidget* FunctionRow = Panel->WidgetTree->ConstructWidget<UInspectorFunctionRowWidget>(
+                    UInspectorFunctionRowWidget::StaticClass());
+                if (FunctionRow)
+                {
+                    FunctionRow->SetInspectorSubsystem(this);
+                    FunctionRow->SetFunctionItem(FunctionItem);
+                    FunctionRow->SetAllowNavigation(true);
+                    RowWidget = FunctionRow;
+                }
+            }
+
+            if (!RowWidget)
             {
                 continue;
             }
 
-            UButton* RowButton = Panel->WidgetTree->ConstructWidget<UButton>(UButton::StaticClass());
-            UHorizontalBox* RowBox = Panel->WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
-            if (!RowButton || !RowBox)
-            {
-                continue;
-            }
-
-            RowButton->SetClickMethod(EButtonClickMethod::MouseDown);
-            RowButton->SetBackgroundColor(RICompactUI::GetRowSurfaceBackgroundColor());
-            RowButton->AddChild(RowBox);
-
-            if (UHorizontalBoxSlot* StarSlot = RowBox->AddChildToHorizontalBox(
-                RICompactUI::MakeText(Panel->WidgetTree, TEXT("*"), RICompactUI::GetLabelFontSize(), true, RICompactUI::GetWarningTextColor(), false)))
-            {
-                StarSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
-                StarSlot->SetVerticalAlignment(VAlign_Top);
-                StarSlot->SetPadding(FMargin(0.f, 1.f, 6.f, 0.f));
-            }
-
-            const FString DisplayText = Value.IsEmpty()
-                ? Label
-                : FString::Printf(TEXT("%s: %s"), *Label, *Value);
-            if (UHorizontalBoxSlot* TextSlot = RowBox->AddChildToHorizontalBox(
-                RICompactUI::MakeText(Panel->WidgetTree, DisplayText, RICompactUI::GetLabelFontSize(), true, RICompactUI::GetStrongTextColor(), true)))
-            {
-                TextSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-                TextSlot->SetVerticalAlignment(VAlign_Center);
-            }
-
-            if (UButtonSlot* ButtonSlot = Cast<UButtonSlot>(RowBox->Slot))
-            {
-                ButtonSlot->SetPadding(FMargin(8.f, 4.f, 6.f, 4.f));
-                ButtonSlot->SetHorizontalAlignment(HAlign_Fill);
-                ButtonSlot->SetVerticalAlignment(VAlign_Fill);
-            }
-
-            UInspectorPinnedItemButtonProxy* Proxy = NewObject<UInspectorPinnedItemButtonProxy>(this);
-            Proxy->Initialize(this, ItemObject);
-            RowButton->OnClicked.AddDynamic(Proxy, &UInspectorPinnedItemButtonProxy::HandleClicked);
-            ActorPinnedClickProxies.Add(Proxy);
-
-            if (UVerticalBoxSlot* EntrySlot = PinnedEntriesBox->AddChildToVerticalBox(RowButton))
+            if (UVerticalBoxSlot* EntrySlot = PinnedEntriesBox->AddChildToVerticalBox(RowWidget))
             {
                 EntrySlot->SetPadding(FMargin(0.f, 0.f, 0.f, 2.f));
+                EntrySlot->SetHorizontalAlignment(HAlign_Fill);
             }
         }
     }
@@ -7316,9 +7307,38 @@ bool UInspectorWorldSubsystem::SaveSettings(FString& OutError)
         return false;
     }
 
-    Settings->SaveConfig();
-    LastSavedSettingsSnapshot = GetEditableSettings();
-    LastSavedThemePresetSnapshot = GetThemePreset();
+    const FRIEditableSettings PendingSettings = GetEditableSettings();
+    const ERuntimeInspectorThemePreset PendingThemePreset = GetThemePreset();
+    const FString ConfigFilename = Settings->GetDefaultConfigFilename();
+
+    Settings->SaveConfig(CPF_Config, *ConfigFilename);
+    if (GConfig)
+    {
+        GConfig->Flush(false, ConfigFilename);
+    }
+
+    Settings->LoadConfig(nullptr, *ConfigFilename);
+    RebindInspectorKeys();
+    RefreshOutlineRuntimeSettings();
+
+    const FRIEditableSettings ReloadedSettings = GetEditableSettings();
+    const ERuntimeInspectorThemePreset ReloadedThemePreset = GetThemePreset();
+    const bool bSettingsMatch = RI_AreEditableSettingsEqual(ReloadedSettings, PendingSettings);
+    const bool bThemeMatches = ReloadedThemePreset == PendingThemePreset;
+    if (!bSettingsMatch || !bThemeMatches)
+    {
+        UpdateSettingsDirtyFlag();
+        OutError = FString::Printf(
+            TEXT("Settings persistence mismatch | OutlineBefore=%.3f OutlineAfter=%.3f ThemeBefore=%d ThemeAfter=%d"),
+            PendingSettings.OutlinePPWeight,
+            ReloadedSettings.OutlinePPWeight,
+            static_cast<int32>(PendingThemePreset),
+            static_cast<int32>(ReloadedThemePreset));
+        return false;
+    }
+
+    LastSavedSettingsSnapshot = ReloadedSettings;
+    LastSavedThemePresetSnapshot = ReloadedThemePreset;
     UpdateSettingsDirtyFlag();
     OutError.Reset();
     return true;
@@ -8466,6 +8486,30 @@ TArray<FRISelfTestDefinition> UInspectorWorldSubsystem::GetAvailableSelfTests() 
         true);
 
     AddDefinition(
+        RI_SelfTestId_SettingsSavePersistence,
+        TEXT("Settings Save Persistence"),
+        TEXT("Settings"),
+        TEXT("Verifies saving settings survives config reload and keeps the saved outline value."),
+        true,
+        true);
+
+    AddDefinition(
+        RI_SelfTestId_StarLiveEditAndRun,
+        TEXT("Star Live Edit And Run"),
+        TEXT("Actor"),
+        TEXT("Verifies starred property/material rows stay editable in the Star pane and starred functions can execute from the same pane."),
+        true,
+        true);
+
+    AddDefinition(
+        RI_SelfTestId_StarPreciseNavigation,
+        TEXT("Star Precise Navigation"),
+        TEXT("Actor"),
+        TEXT("Verifies starred property, material, and function rows navigate back to the exact target context."),
+        true,
+        true);
+
+    AddDefinition(
         RI_SelfTestId_SettingsHotkey,
         TEXT("Settings Hotkey Rebind"),
         TEXT("Settings"),
@@ -8832,6 +8876,24 @@ bool UInspectorWorldSubsystem::ExecuteSelfTestByIdInternal(FName TestId, FString
     if (TestId == RI_SelfTestId_SettingsPreview)
     {
         bOutPassed = RunSettingsPreviewSelfTest(OutReport);
+        return true;
+    }
+
+    if (TestId == RI_SelfTestId_SettingsSavePersistence)
+    {
+        bOutPassed = RunSettingsSavePersistenceSelfTest(OutReport);
+        return true;
+    }
+
+    if (TestId == RI_SelfTestId_StarLiveEditAndRun)
+    {
+        bOutPassed = RunStarLiveEditAndRunSelfTest(OutReport);
+        return true;
+    }
+
+    if (TestId == RI_SelfTestId_StarPreciseNavigation)
+    {
+        bOutPassed = RunStarPreciseNavigationSelfTest(OutReport);
         return true;
     }
 
@@ -10778,6 +10840,681 @@ FString UInspectorWorldSubsystem::RunSettingsPreviewSelfTestSimple()
 #else
     FString Report;
     RunSettingsPreviewSelfTest(Report);
+    return Report;
+#endif
+}
+
+bool UInspectorWorldSubsystem::RunSettingsSavePersistenceSelfTest(FString& OutReport)
+{
+#if !RUNTIME_INSPECTOR_ENABLED
+    OutReport = TEXT("RuntimeInspector disabled");
+    return false;
+#else
+    const FRIEditableSettings OriginalSettings = GetEditableSettings();
+    FRIEditableSettings CandidateSettings = OriginalSettings;
+    CandidateSettings.OutlinePPWeight = FMath::Clamp(OriginalSettings.OutlinePPWeight + 0.25f, 0.05f, 5.0f);
+    if (FMath::IsNearlyEqual(CandidateSettings.OutlinePPWeight, OriginalSettings.OutlinePPWeight, KINDA_SMALL_NUMBER))
+    {
+        CandidateSettings.OutlinePPWeight = FMath::Clamp(OriginalSettings.OutlinePPWeight + 0.5f, 0.05f, 5.0f);
+    }
+
+    FString Error;
+    if (!PreviewApplySettings(CandidateSettings, Error))
+    {
+        OutReport = FString::Printf(TEXT("SettingsSavePersistenceSelfTest=FAIL | PreviewError=%s"), *Error);
+        return false;
+    }
+
+    const FRIEditableSettings AfterPreview = GetEditableSettings();
+    const bool bPreviewApplied = FMath::IsNearlyEqual(AfterPreview.OutlinePPWeight, CandidateSettings.OutlinePPWeight, 0.001f);
+    if (!bPreviewApplied)
+    {
+        ReloadSettingsFromConfig();
+        OutReport = FString::Printf(TEXT("SettingsSavePersistenceSelfTest=FAIL | PreviewDidNotApply Before=%.3f Preview=%.3f Current=%.3f"),
+            OriginalSettings.OutlinePPWeight,
+            CandidateSettings.OutlinePPWeight,
+            AfterPreview.OutlinePPWeight);
+        return false;
+    }
+
+    if (!SaveSettings(Error))
+    {
+        ReloadSettingsFromConfig();
+        OutReport = FString::Printf(TEXT("SettingsSavePersistenceSelfTest=FAIL | SaveError=%s"), *Error);
+        return false;
+    }
+
+    const FRIEditableSettings AfterSaveReload = GetEditableSettings();
+    const bool bPersisted = FMath::IsNearlyEqual(AfterSaveReload.OutlinePPWeight, CandidateSettings.OutlinePPWeight, 0.001f);
+
+    FRIEditableSettings RestoreSettings = OriginalSettings;
+    PreviewApplySettings(RestoreSettings, Error);
+    SaveSettings(Error);
+    ReloadSettingsFromConfig();
+
+    OutReport = FString::Printf(
+        TEXT("SettingsSavePersistenceSelfTest=%s | Before=%.3f Saved=%.3f Reloaded=%.3f"),
+        bPersisted ? TEXT("PASS") : TEXT("FAIL"),
+        OriginalSettings.OutlinePPWeight,
+        CandidateSettings.OutlinePPWeight,
+        AfterSaveReload.OutlinePPWeight);
+    return bPersisted;
+#endif
+}
+
+FString UInspectorWorldSubsystem::RunSettingsSavePersistenceSelfTestSimple()
+{
+#if !RUNTIME_INSPECTOR_ENABLED
+    return TEXT("RuntimeInspector disabled");
+#else
+    FString Report;
+    RunSettingsSavePersistenceSelfTest(Report);
+    return Report;
+#endif
+}
+
+bool UInspectorWorldSubsystem::RunStarLiveEditAndRunSelfTest(FString& OutReport)
+{
+#if !RUNTIME_INSPECTOR_ENABLED
+    OutReport = TEXT("RuntimeInspector disabled");
+    return false;
+#else
+    FString FoundationSummary;
+    FString Error;
+    if (!ApplyFabScreenshotFoundationState(FoundationSummary, Error))
+    {
+        OutReport = FString::Printf(TEXT("StarLiveEditAndRunSelfTest=FAIL | FoundationError=%s"), *Error);
+        return false;
+    }
+
+    if (!SetVisiblePageByName(TEXT("Actor"), Error))
+    {
+        OutReport = FString::Printf(TEXT("StarLiveEditAndRunSelfTest=FAIL | ShowActorError=%s"), *Error);
+        return false;
+    }
+
+    AActor* PreferredActor = ResolvePreferredFabScreenshotActor();
+    if (!PreferredActor)
+    {
+        OutReport = TEXT("StarLiveEditAndRunSelfTest=FAIL | Preferred actor unavailable");
+        return false;
+    }
+
+    SetSelectedActor(PreferredActor);
+    PropertyViewMode = ERIPropertyViewMode::Full;
+    RefreshActorPropertiesSection();
+    RefreshActorFunctionsSection();
+    RefreshActorGroupsSection();
+
+    UInspectorPropertyItem* TestPropertyItem = nullptr;
+    UObject* TestPropertyTargetObject = nullptr;
+    FString PropertyOriginalText;
+    FString PropertyPatchedText;
+    FString PropertyKind;
+    {
+        auto TrySelectVisibleComponentProperty = [&]() -> bool
+        {
+            TArray<UActorComponent*> Components;
+            PreferredActor->GetComponents(Components);
+            for (UActorComponent* Component : Components)
+            {
+                if (!Component)
+                {
+                    continue;
+                }
+
+                FString FocusError;
+                if (!FocusSelectedActorComponentByName(Component->GetName(), FocusError))
+                {
+                    continue;
+                }
+
+                TArray<UObject*> ComponentItems;
+                GetPropertyItemsForSelectedEx(TEXT(""), false, ComponentItems);
+                for (UObject* ItemObject : ComponentItems)
+                {
+                    UInspectorPropertyItem* PropertyItem = Cast<UInspectorPropertyItem>(ItemObject);
+                    if (!PropertyItem || !PropertyItem->IsEditable())
+                    {
+                        continue;
+                    }
+
+                    const EInspectorValueType ValueType = PropertyItem->GetValueType();
+                    const bool bIsFloat = ValueType == EInspectorValueType::Float || ValueType == EInspectorValueType::Double;
+                    const bool bIsInt = ValueType == EInspectorValueType::Int;
+                    if (!bIsFloat && !bIsInt)
+                    {
+                        continue;
+                    }
+
+                    FString CurrentText = PropertyItem->GetValueText();
+                    FString PatchedText;
+                    FString Kind;
+                    if (bIsFloat)
+                    {
+                        const double CurrentValue = FCString::Atod(*CurrentText);
+                        const double CandidateValue = FMath::IsNearlyEqual(CurrentValue, 1.15, 0.001) ? 0.95 : (CurrentValue + 0.15);
+                        PatchedText = FString::SanitizeFloat(CandidateValue);
+                        Kind = TEXT("float");
+                    }
+                    else
+                    {
+                        const int32 CurrentValue = FCString::Atoi(*CurrentText);
+                        PatchedText = FString::FromInt((CurrentValue == 0) ? 1 : 0);
+                        Kind = TEXT("int");
+                    }
+
+                    if (CurrentText == PatchedText)
+                    {
+                        continue;
+                    }
+
+                    TestPropertyItem = PropertyItem;
+                    TestPropertyTargetObject = PropertyItem->GetTargetObject();
+                    PropertyOriginalText = CurrentText;
+                    PropertyPatchedText = PatchedText;
+                    PropertyKind = Kind;
+                    return true;
+                }
+            }
+
+            return false;
+        };
+
+        if (!TrySelectVisibleComponentProperty())
+        {
+            OutReport = TEXT("StarLiveEditAndRunSelfTest=FAIL | No writable visible component property found");
+            return false;
+        }
+    }
+
+    if (!TestPropertyItem)
+    {
+        OutReport = TEXT("StarLiveEditAndRunSelfTest=FAIL | Failed to resolve starred property item");
+        return false;
+    }
+
+    UStaticMeshComponent* TestMeshComponent = nullptr;
+    UInspectorMaterialParamItem* TestMaterialScalarItem = nullptr;
+    float OriginalScalarValue = 0.0f;
+    FString OriginalScalarError;
+    for (UActorComponent* Component : PreferredActor->GetComponents())
+    {
+        UStaticMeshComponent* MeshComponent = Cast<UStaticMeshComponent>(Component);
+        if (!MeshComponent || MeshComponent->GetNumMaterials() <= 0)
+        {
+            continue;
+        }
+
+        SetPropertyView_MaterialOnly(MeshComponent, 0);
+        RefreshActorPropertiesSection();
+
+        TArray<UObject*> MaterialItems;
+        GetPropertyItemsForSelectedEx(TEXT(""), false, MaterialItems);
+        for (UObject* ItemObject : MaterialItems)
+        {
+            if (UInspectorMaterialParamItem* MaterialItem = Cast<UInspectorMaterialParamItem>(ItemObject))
+            {
+                if (MaterialItem->GetParamType() == EInspectorMatParamType::Scalar)
+                {
+                    TestMeshComponent = MeshComponent;
+                    TestMaterialScalarItem = MaterialItem;
+                    break;
+                }
+            }
+        }
+
+        if (TestMaterialScalarItem)
+        {
+            TestMaterialScalarItem->GetScalar(OriginalScalarValue, OriginalScalarError);
+            break;
+        }
+    }
+
+    if (!TestMaterialScalarItem)
+    {
+        PropertyViewMode = ERIPropertyViewMode::Full;
+        RefreshActorPropertiesSection();
+        OutReport = TEXT("StarLiveEditAndRunSelfTest=FAIL | No starred scalar material parameter available");
+        return false;
+    }
+
+    PropertyViewMode = ERIPropertyViewMode::Full;
+    RefreshActorPropertiesSection();
+    RefreshActorFunctionsSection();
+
+    UInspectorFunctionItem* TestFunctionItem = nullptr;
+    {
+        TArray<UInspectorFunctionItem*> FunctionItems;
+        GetFunctionItemsForSelected(TEXT(""), FunctionItems);
+        for (UInspectorFunctionItem* FunctionItem : FunctionItems)
+        {
+            if (FunctionItem && FunctionItem->IsValidItem() && FunctionItem->GetParameterCount() == 0)
+            {
+                TestFunctionItem = FunctionItem;
+                break;
+            }
+        }
+
+        if (!TestFunctionItem)
+        {
+            for (UInspectorFunctionItem* FunctionItem : FunctionItems)
+            {
+                if (FunctionItem && FunctionItem->IsValidItem())
+                {
+                    TestFunctionItem = FunctionItem;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (!TestFunctionItem)
+    {
+        OutReport = TEXT("StarLiveEditAndRunSelfTest=FAIL | No callable function item available");
+        return false;
+    }
+
+    const bool bPropertyWasFavorite = IsFavoriteForAnyItem(TestPropertyItem);
+    const bool bMaterialWasFavorite = IsFavoriteForAnyItem(TestMaterialScalarItem);
+    const bool bFunctionWasFavorite = IsFavoriteForAnyItem(TestFunctionItem);
+
+    auto RestoreFavorites = [&]()
+    {
+        if (TestPropertyItem && IsFavoriteForAnyItem(TestPropertyItem) != bPropertyWasFavorite)
+        {
+            ToggleFavoriteForAnyItem(TestPropertyItem);
+        }
+        if (TestMaterialScalarItem && IsFavoriteForAnyItem(TestMaterialScalarItem) != bMaterialWasFavorite)
+        {
+            ToggleFavoriteForAnyItem(TestMaterialScalarItem);
+        }
+        if (TestFunctionItem && IsFavoriteForAnyItem(TestFunctionItem) != bFunctionWasFavorite)
+        {
+            ToggleFavoriteForAnyItem(TestFunctionItem);
+        }
+    };
+
+    if (!bPropertyWasFavorite)
+    {
+        ToggleFavoriteForAnyItem(TestPropertyItem);
+    }
+    if (!bMaterialWasFavorite)
+    {
+        ToggleFavoriteForAnyItem(TestMaterialScalarItem);
+    }
+    if (!bFunctionWasFavorite)
+    {
+        ToggleFavoriteForAnyItem(TestFunctionItem);
+    }
+
+    RefreshActorGroupsSection();
+
+    UInspectorPropertyRowWidget* PinnedPropertyRow = nullptr;
+    UInspectorMaterialParamRowWidget* PinnedMaterialRow = nullptr;
+    UInspectorFunctionRowWidget* PinnedFunctionRow = nullptr;
+    if (ActorPinnedEntriesBoxStrong)
+    {
+        for (int32 ChildIndex = 0; ChildIndex < ActorPinnedEntriesBoxStrong->GetChildrenCount(); ++ChildIndex)
+        {
+            UWidget* Child = ActorPinnedEntriesBoxStrong->GetChildAt(ChildIndex);
+            if (!PinnedPropertyRow)
+            {
+                if (UInspectorPropertyRowWidget* Row = Cast<UInspectorPropertyRowWidget>(Child))
+                {
+                    if (Row->IsDisplayingItem(TestPropertyItem))
+                    {
+                        PinnedPropertyRow = Row;
+                        continue;
+                    }
+                }
+            }
+
+            if (!PinnedMaterialRow)
+            {
+                if (UInspectorMaterialParamRowWidget* Row = Cast<UInspectorMaterialParamRowWidget>(Child))
+                {
+                    if (Row->IsDisplayingItem(TestMaterialScalarItem))
+                    {
+                        PinnedMaterialRow = Row;
+                        continue;
+                    }
+                }
+            }
+
+            if (!PinnedFunctionRow)
+            {
+                if (UInspectorFunctionRowWidget* Row = Cast<UInspectorFunctionRowWidget>(Child))
+                {
+                    if (Row->IsDisplayingItem(TestFunctionItem))
+                    {
+                        PinnedFunctionRow = Row;
+                        continue;
+                    }
+                }
+            }
+        }
+    }
+
+    bool bPropertyEdited = false;
+    FString PropertyAfterText;
+    FString PropertyEditError;
+    if (PinnedPropertyRow)
+    {
+        bPropertyEdited = PinnedPropertyRow->CommitTextValueForAutomation(PropertyPatchedText, PropertyEditError)
+            && TestPropertyTargetObject
+            && InspectorPropertyUtils::GetValueAsText(TestPropertyTargetObject, TestPropertyItem->GetPropertyFName(), PropertyAfterText)
+            && RI_AreSelfTestPrimitiveValuesEquivalent(PropertyAfterText, PropertyPatchedText, PropertyKind);
+    }
+
+    const float TargetScalarValue = FMath::IsNearlyEqual(OriginalScalarValue, 0.35f, 0.001f) ? 0.65f : 0.35f;
+    const FString TargetScalarText = FString::SanitizeFloat(TargetScalarValue);
+    bool bMaterialEdited = false;
+    FString MaterialEditError;
+    float MaterialAfterValue = OriginalScalarValue;
+    if (PinnedMaterialRow)
+    {
+        bMaterialEdited = PinnedMaterialRow->CommitScalarValueForAutomation(TargetScalarText, MaterialEditError)
+            && TestMaterialScalarItem->GetScalar(MaterialAfterValue, MaterialEditError)
+            && FMath::IsNearlyEqual(MaterialAfterValue, TargetScalarValue, 0.001f);
+    }
+
+    bool bFunctionRan = false;
+    FString FunctionRunError;
+    if (PinnedFunctionRow)
+    {
+        bFunctionRan = PinnedFunctionRow->InvokeForAutomation(FunctionRunError);
+    }
+
+    FString RestoreError;
+    if (TestPropertyTargetObject)
+    {
+        ApplyPropertyTextNow(TestPropertyTargetObject, TestPropertyItem->GetPropertyFName(), PropertyOriginalText, RestoreError);
+    }
+    if (TestMaterialScalarItem)
+    {
+        TestMaterialScalarItem->SetScalar(OriginalScalarValue, RestoreError);
+    }
+    RestoreFavorites();
+    PropertyViewMode = ERIPropertyViewMode::Full;
+    RefreshActorPropertiesSection();
+    RefreshActorFunctionsSection();
+    RefreshActorGroupsSection();
+
+    const bool bPassed = PinnedPropertyRow && PinnedMaterialRow && PinnedFunctionRow && bPropertyEdited && bMaterialEdited && bFunctionRan;
+    OutReport = FString::Printf(
+        TEXT("StarLiveEditAndRunSelfTest=%s | PropertyRow=%d PropertyEdit=%d MaterialRow=%d MaterialEdit=%d FunctionRow=%d FunctionRun=%d PropertyAfter=%s ScalarAfter=%.3f Function=%s Errors=%s|%s|%s"),
+        bPassed ? TEXT("PASS") : TEXT("FAIL"),
+        PinnedPropertyRow ? 1 : 0,
+        bPropertyEdited ? 1 : 0,
+        PinnedMaterialRow ? 1 : 0,
+        bMaterialEdited ? 1 : 0,
+        PinnedFunctionRow ? 1 : 0,
+        bFunctionRan ? 1 : 0,
+        *PropertyAfterText,
+        MaterialAfterValue,
+        TestFunctionItem ? *TestFunctionItem->GetFunctionName() : TEXT("None"),
+        *PropertyEditError,
+        *MaterialEditError,
+        *FunctionRunError);
+    return bPassed;
+#endif
+}
+
+FString UInspectorWorldSubsystem::RunStarLiveEditAndRunSelfTestSimple()
+{
+#if !RUNTIME_INSPECTOR_ENABLED
+    return TEXT("RuntimeInspector disabled");
+#else
+    FString Report;
+    RunStarLiveEditAndRunSelfTest(Report);
+    return Report;
+#endif
+}
+
+bool UInspectorWorldSubsystem::RunStarPreciseNavigationSelfTest(FString& OutReport)
+{
+#if !RUNTIME_INSPECTOR_ENABLED
+    OutReport = TEXT("RuntimeInspector disabled");
+    return false;
+#else
+    FString FoundationSummary;
+    FString Error;
+    if (!ApplyFabScreenshotFoundationState(FoundationSummary, Error))
+    {
+        OutReport = FString::Printf(TEXT("StarPreciseNavigationSelfTest=FAIL | FoundationError=%s"), *Error);
+        return false;
+    }
+
+    if (!SetVisiblePageByName(TEXT("Actor"), Error))
+    {
+        OutReport = FString::Printf(TEXT("StarPreciseNavigationSelfTest=FAIL | ShowActorError=%s"), *Error);
+        return false;
+    }
+
+    AActor* PreferredActor = ResolvePreferredFabScreenshotActor();
+    if (!PreferredActor)
+    {
+        OutReport = TEXT("StarPreciseNavigationSelfTest=FAIL | Preferred actor unavailable");
+        return false;
+    }
+
+    SetSelectedActor(PreferredActor);
+    PropertyViewMode = ERIPropertyViewMode::Full;
+    RefreshActorPropertiesSection();
+    RefreshActorFunctionsSection();
+    RefreshActorGroupsSection();
+
+    UInspectorPropertyItem* TestPropertyItem = nullptr;
+    {
+        FName TestPropertyName = NAME_None;
+        FString OriginalText;
+        FString PatchedText;
+        FString PropertyKind;
+        double NumericOriginalValue = 0.0;
+        double NumericTargetValue = 0.0;
+        if (RI_SelectWritablePrimitivePropertyForSelfTest(
+                PreferredActor,
+                TestPropertyName,
+                OriginalText,
+                PatchedText,
+                PropertyKind,
+                NumericOriginalValue,
+                NumericTargetValue))
+        {
+            TestPropertyItem = GetOrCreatePropertyItem(PreferredActor, TestPropertyName);
+        }
+    }
+
+    UStaticMeshComponent* TestMeshComponent = nullptr;
+    UInspectorMaterialParamItem* TestMaterialItem = nullptr;
+    for (UActorComponent* Component : PreferredActor->GetComponents())
+    {
+        UStaticMeshComponent* MeshComponent = Cast<UStaticMeshComponent>(Component);
+        if (!MeshComponent || MeshComponent->GetNumMaterials() <= 0)
+        {
+            continue;
+        }
+
+        SetPropertyView_MaterialOnly(MeshComponent, 0);
+        RefreshActorPropertiesSection();
+
+        TArray<UObject*> MaterialItems;
+        GetPropertyItemsForSelectedEx(TEXT(""), false, MaterialItems);
+        for (UObject* ItemObject : MaterialItems)
+        {
+            if (UInspectorMaterialParamItem* MaterialItem = Cast<UInspectorMaterialParamItem>(ItemObject))
+            {
+                TestMeshComponent = MeshComponent;
+                TestMaterialItem = MaterialItem;
+                break;
+            }
+        }
+
+        if (TestMaterialItem)
+        {
+            break;
+        }
+    }
+
+    PropertyViewMode = ERIPropertyViewMode::Full;
+    RefreshActorPropertiesSection();
+    RefreshActorFunctionsSection();
+
+    UInspectorFunctionItem* TestFunctionItem = nullptr;
+    {
+        TArray<UInspectorFunctionItem*> FunctionItems;
+        GetFunctionItemsForSelected(TEXT(""), FunctionItems);
+        for (UInspectorFunctionItem* FunctionItem : FunctionItems)
+        {
+            if (FunctionItem && FunctionItem->IsValidItem())
+            {
+                TestFunctionItem = FunctionItem;
+                break;
+            }
+        }
+    }
+
+    if (!TestPropertyItem || !TestMaterialItem || !TestFunctionItem)
+    {
+        OutReport = TEXT("StarPreciseNavigationSelfTest=FAIL | Missing property/material/function candidate");
+        return false;
+    }
+
+    const bool bPropertyWasFavorite = IsFavoriteForAnyItem(TestPropertyItem);
+    const bool bMaterialWasFavorite = IsFavoriteForAnyItem(TestMaterialItem);
+    const bool bFunctionWasFavorite = IsFavoriteForAnyItem(TestFunctionItem);
+
+    auto RestoreFavorites = [&]()
+    {
+        if (IsFavoriteForAnyItem(TestPropertyItem) != bPropertyWasFavorite)
+        {
+            ToggleFavoriteForAnyItem(TestPropertyItem);
+        }
+        if (IsFavoriteForAnyItem(TestMaterialItem) != bMaterialWasFavorite)
+        {
+            ToggleFavoriteForAnyItem(TestMaterialItem);
+        }
+        if (IsFavoriteForAnyItem(TestFunctionItem) != bFunctionWasFavorite)
+        {
+            ToggleFavoriteForAnyItem(TestFunctionItem);
+        }
+    };
+
+    if (!bPropertyWasFavorite)
+    {
+        ToggleFavoriteForAnyItem(TestPropertyItem);
+    }
+    if (!bMaterialWasFavorite)
+    {
+        ToggleFavoriteForAnyItem(TestMaterialItem);
+    }
+    if (!bFunctionWasFavorite)
+    {
+        ToggleFavoriteForAnyItem(TestFunctionItem);
+    }
+
+    RefreshActorGroupsSection();
+
+    UInspectorPropertyRowWidget* PinnedPropertyRow = nullptr;
+    UInspectorMaterialParamRowWidget* PinnedMaterialRow = nullptr;
+    UInspectorFunctionRowWidget* PinnedFunctionRow = nullptr;
+    if (ActorPinnedEntriesBoxStrong)
+    {
+        for (int32 ChildIndex = 0; ChildIndex < ActorPinnedEntriesBoxStrong->GetChildrenCount(); ++ChildIndex)
+        {
+            UWidget* Child = ActorPinnedEntriesBoxStrong->GetChildAt(ChildIndex);
+            if (!PinnedPropertyRow)
+            {
+                if (UInspectorPropertyRowWidget* Row = Cast<UInspectorPropertyRowWidget>(Child))
+                {
+                    if (Row->IsDisplayingItem(TestPropertyItem))
+                    {
+                        PinnedPropertyRow = Row;
+                    }
+                }
+            }
+            if (!PinnedMaterialRow)
+            {
+                if (UInspectorMaterialParamRowWidget* Row = Cast<UInspectorMaterialParamRowWidget>(Child))
+                {
+                    if (Row->IsDisplayingItem(TestMaterialItem))
+                    {
+                        PinnedMaterialRow = Row;
+                    }
+                }
+            }
+            if (!PinnedFunctionRow)
+            {
+                if (UInspectorFunctionRowWidget* Row = Cast<UInspectorFunctionRowWidget>(Child))
+                {
+                    if (Row->IsDisplayingItem(TestFunctionItem))
+                    {
+                        PinnedFunctionRow = Row;
+                    }
+                }
+            }
+        }
+    }
+
+    bool bPropertyNavigateOk = false;
+    bool bMaterialNavigateOk = false;
+    bool bFunctionNavigateOk = false;
+    FString PropertyNavigateError;
+    FString MaterialNavigateError;
+    FString FunctionNavigateError;
+
+    if (PinnedPropertyRow)
+    {
+        bPropertyNavigateOk = PinnedPropertyRow->NavigateForAutomation(PropertyNavigateError)
+            && ActorPropertiesSectionWidget.IsValid()
+            && ActorPropertiesSectionWidget->FindPropertyRowForAutomation(TestPropertyItem) != nullptr;
+    }
+
+    if (PinnedMaterialRow)
+    {
+        bMaterialNavigateOk = PinnedMaterialRow->NavigateForAutomation(MaterialNavigateError)
+            && TestMeshComponent
+            && PropertyViewMode == ERIPropertyViewMode::MaterialOnly
+            && GetFocusedInspectObject() == TestMeshComponent
+            && ActorPropertiesSectionWidget.IsValid()
+            && ActorPropertiesSectionWidget->FindMaterialRowForAutomation(TestMaterialItem) != nullptr;
+    }
+
+    if (PinnedFunctionRow)
+    {
+        bFunctionNavigateOk = PinnedFunctionRow->NavigateForAutomation(FunctionNavigateError)
+            && ActorFunctionsSectionWidget.IsValid()
+            && ActorFunctionsSectionWidget->FindFunctionRowForAutomation(TestFunctionItem) != nullptr;
+    }
+
+    RestoreFavorites();
+    PropertyViewMode = ERIPropertyViewMode::Full;
+    RefreshActorPropertiesSection();
+    RefreshActorFunctionsSection();
+    RefreshActorGroupsSection();
+
+    const bool bPassed = bPropertyNavigateOk && bMaterialNavigateOk && bFunctionNavigateOk;
+    OutReport = FString::Printf(
+        TEXT("StarPreciseNavigationSelfTest=%s | Property=%d Material=%d Function=%d Errors=%s|%s|%s"),
+        bPassed ? TEXT("PASS") : TEXT("FAIL"),
+        bPropertyNavigateOk ? 1 : 0,
+        bMaterialNavigateOk ? 1 : 0,
+        bFunctionNavigateOk ? 1 : 0,
+        *PropertyNavigateError,
+        *MaterialNavigateError,
+        *FunctionNavigateError);
+    return bPassed;
+#endif
+}
+
+FString UInspectorWorldSubsystem::RunStarPreciseNavigationSelfTestSimple()
+{
+#if !RUNTIME_INSPECTOR_ENABLED
+    return TEXT("RuntimeInspector disabled");
+#else
+    FString Report;
+    RunStarPreciseNavigationSelfTest(Report);
     return Report;
 #endif
 }
@@ -17886,9 +18623,6 @@ void UInspectorWorldSubsystem::GetPinnedItemsForSelected(const FString& SearchTe
     AActor* ActorPtr = SelectedActor.Get();
     if (!ActorPtr) return;
 
-    // ✅ 先确认调用
-    UE_CLOG(RI_IsDebugLogEnabled(), LogRuntimeInspector, Warning, TEXT("[RI] GetPinnedItemsForSelected CALLED. Keys=%d"), FavoriteKeys.Num());
-
     // 预取组件
     TArray<UActorComponent*> Components;
     ActorPtr->GetComponents(Components);
@@ -17896,12 +18630,6 @@ void UInspectorWorldSubsystem::GetPinnedItemsForSelected(const FString& SearchTe
     // 稳定顺序（避免 UI 抖动）
     TArray<FString> Keys = FavoriteKeys.Array();
     Keys.Sort();
-
-    if (Keys.Num() > 0)
-    {
-        UE_CLOG(RI_IsDebugLogEnabled(), LogRuntimeInspector, Warning, TEXT("[RI] PinnedKey0=%s"), *Keys[0]);
-        UE_CLOG(RI_IsDebugLogEnabled(), LogRuntimeInspector, Warning, TEXT("[RI] SelectedActorPath=%s"), *ActorPtr->GetPathName());
-    }
 
     const bool bSearchMode = !SearchText.IsEmpty();
 
@@ -17998,8 +18726,83 @@ void UInspectorWorldSubsystem::GetPinnedItemsForSelected(const FString& SearchTe
 
                 MatItem->Init(SMC, Slot, ParamName, (EInspectorMatParamType)TypeInt);
                 OutPinnedItems.Add(MatItem);
+                continue;
+            }
 
-                UE_CLOG(RI_IsDebugLogEnabled(), LogRuntimeInspector, Warning, TEXT("[RI] M pinned OK: %s"), *GetNameSafe(MatItem));
+            if (Parts.Num() > 0 && Parts[0] == TEXT("F"))
+            {
+                if (Parts.Num() < 4)
+                {
+                    continue;
+                }
+
+                const FString& ActorPath = Parts[1];
+                const FString& TargetPath = Parts[2];
+                const FName FunctionName(*Parts[3]);
+                if (FunctionName.IsNone() || ActorPtr->GetPathName() != ActorPath)
+                {
+                    continue;
+                }
+
+                UObject* TargetObject = nullptr;
+                if (ActorPtr->GetPathName() == TargetPath)
+                {
+                    TargetObject = ActorPtr;
+                }
+                else
+                {
+                    FString TargetObjectName = TargetPath;
+                    int32 DotPos = INDEX_NONE;
+                    if (TargetObjectName.FindLastChar(TEXT('.'), DotPos))
+                    {
+                        TargetObjectName = TargetObjectName.Mid(DotPos + 1);
+                    }
+
+                    for (UActorComponent* Component : Components)
+                    {
+                        if (!Component)
+                        {
+                            continue;
+                        }
+
+                        if (Component->GetPathName() == TargetPath || Component->GetName() == TargetObjectName)
+                        {
+                            TargetObject = Component;
+                            break;
+                        }
+                    }
+                }
+
+                if (!TargetObject)
+                {
+                    continue;
+                }
+
+                if (UInspectorFunctionItem* FunctionItem = GetOrCreateFunctionItem(TargetObject, FunctionName))
+                {
+                    UFunction* Function = TargetObject->FindFunction(FunctionName);
+                    if (!Function)
+                    {
+                        continue;
+                    }
+
+                    TArray<FRIInspectorFunctionParameterDefinition> ParameterDefinitions;
+                    if (!RI_BuildFunctionParameterDefinitions(Function, ParameterDefinitions))
+                    {
+                        continue;
+                    }
+
+                    const FString OwnerLabel = TargetObject == ActorPtr
+                        ? TEXT("Actor")
+                        : TargetObject->GetName();
+                    FunctionItem->SetDisplayMetadata(
+                        RI_GetFunctionDisplayNameRuntimeSafe(Function),
+                        OwnerLabel,
+                        RI_BuildFunctionSignature(Function, ParameterDefinitions),
+                        RI_GetFunctionTooltipRuntimeSafe(Function));
+                    FunctionItem->SetParameterDefinitions(ParameterDefinitions);
+                    OutPinnedItems.Add(FunctionItem);
+                }
                 continue;
             }
 
@@ -18063,7 +18866,6 @@ void UInspectorWorldSubsystem::GetPinnedItemsForSelected(const FString& SearchTe
         }
     }
 
-    UE_CLOG(RI_IsDebugLogEnabled(), LogRuntimeInspector, Warning, TEXT("[RI] PinnedItems Out=%d"), OutPinnedItems.Num());
 #endif
 }
 
@@ -19139,6 +19941,34 @@ static FString MakeMaterialFavoriteKey(UInspectorMaterialParamItem* M)
         *ParamName.ToString());
 }
 
+static FString MakeFunctionFavoriteKey(UInspectorFunctionItem* FunctionItem)
+{
+    if (!FunctionItem)
+    {
+        return FString();
+    }
+
+    UObject* TargetObject = FunctionItem->GetTargetObject();
+    if (!TargetObject)
+    {
+        return FString();
+    }
+
+    AActor* OwnerActor = Cast<AActor>(TargetObject);
+    UActorComponent* Component = Cast<UActorComponent>(TargetObject);
+    if (!OwnerActor && Component)
+    {
+        OwnerActor = Component->GetOwner();
+    }
+
+    const FString ActorPath = OwnerActor ? OwnerActor->GetPathName() : TEXT("None");
+    const FString TargetPath = TargetObject->GetPathName();
+    return FString::Printf(TEXT("F|%s|%s|%s"),
+        *ActorPath,
+        *TargetPath,
+        *FunctionItem->GetFunctionFName().ToString());
+}
+
 bool UInspectorWorldSubsystem::IsFavoriteForAnyItem(UObject* Item) const
 {
 #if RUNTIME_INSPECTOR_ENABLED
@@ -19155,6 +19985,12 @@ bool UInspectorWorldSubsystem::IsFavoriteForAnyItem(UObject* Item) const
     if (UInspectorMaterialParamItem* MaterialItem = Cast<UInspectorMaterialParamItem>(Item))
     {
         const FString Key = MakeMaterialFavoriteKey(MaterialItem);
+        return !Key.IsEmpty() && FavoriteKeys.Contains(Key);
+    }
+
+    if (UInspectorFunctionItem* FunctionItem = Cast<UInspectorFunctionItem>(Item))
+    {
+        const FString Key = MakeFunctionFavoriteKey(FunctionItem);
         return !Key.IsEmpty() && FavoriteKeys.Contains(Key);
     }
 #else
@@ -19202,8 +20038,30 @@ void UInspectorWorldSubsystem::ToggleFavoriteForAnyItem(UObject* Item)
         UE_CLOG(RI_IsDebugLogEnabled(), LogRuntimeInspector, Warning, TEXT("[RI] ToggleFavoriteForAnyItem(Material): %s  Before=%d After=%d"),
             *Key, Before, FavoriteKeys.Num());
 
-        // 触发你现有的刷新（按你项目里已经用的那套）
-        RefreshPanel(EInspectorRefreshReason::StructureChanged); // <- 如果你叫 OnInspectorRefreshEx/RefreshPanel/RequestRefresh，改成你实际函数名
+        SaveFavorites();
+        RefreshPanel(EInspectorRefreshReason::StructureChanged);
+        return;
+    }
+
+    if (UInspectorFunctionItem* FunctionItem = Cast<UInspectorFunctionItem>(Item))
+    {
+        const FString Key = MakeFunctionFavoriteKey(FunctionItem);
+        if (Key.IsEmpty())
+        {
+            return;
+        }
+
+        if (FavoriteKeys.Contains(Key))
+        {
+            FavoriteKeys.Remove(Key);
+        }
+        else
+        {
+            FavoriteKeys.Add(Key);
+        }
+
+        SaveFavorites();
+        RefreshPanel(EInspectorRefreshReason::StructureChanged);
         return;
     }
 
@@ -23674,6 +24532,22 @@ bool UInspectorWorldSubsystem::NavigateToPinnedItem(UObject* ItemObject, FString
         return nullptr;
     };
 
+    auto FindResolvedFunctionItem = [this](UObject* TargetObject, FName FunctionName) -> UInspectorFunctionItem*
+    {
+        TArray<UInspectorFunctionItem*> Items;
+        GetFunctionItemsForSelected(TEXT(""), Items);
+        for (UInspectorFunctionItem* Candidate : Items)
+        {
+            if (Candidate
+                && Candidate->GetTargetObject() == TargetObject
+                && Candidate->GetFunctionFName() == FunctionName)
+            {
+                return Candidate;
+            }
+        }
+        return nullptr;
+    };
+
     if (UInspectorPropertyItem* PropertyItem = Cast<UInspectorPropertyItem>(ItemObject))
     {
         UObject* TargetObject = PropertyItem->GetTargetObject();
@@ -23821,6 +24695,55 @@ bool UInspectorWorldSubsystem::NavigateToPinnedItem(UObject* ItemObject, FString
         }
 
         OutError = FString::Printf(TEXT("Material parameter row not found: %s"), *MaterialItem->GetPropertyName());
+        return false;
+    }
+
+    if (UInspectorFunctionItem* FunctionItem = Cast<UInspectorFunctionItem>(ItemObject))
+    {
+        UObject* TargetObject = FunctionItem->GetTargetObject();
+        AActor* TargetActor = ResolveActorFromTarget(TargetObject);
+        if (!TargetObject || !TargetActor)
+        {
+            OutError = TEXT("Pinned function target is unavailable");
+            return false;
+        }
+
+        if (SelectedActor.Get() != TargetActor)
+        {
+            SetSelectedActor(TargetActor);
+        }
+
+        if (UActorComponent* Component = Cast<UActorComponent>(TargetObject))
+        {
+            if (!FocusSelectedActorComponentByName(Component->GetName(), OutError))
+            {
+                return false;
+            }
+        }
+        else
+        {
+            SelectedInspectObject = TargetActor;
+            SelectedGroupKey = TEXT("ROOT_ACTOR");
+            SelectedMaterialSlotIndex = INDEX_NONE;
+            PropertyViewMode = ERIPropertyViewMode::Full;
+            ViewMeshComp = nullptr;
+            ViewMaterialSlot = INDEX_NONE;
+            RefreshPanel(EInspectorRefreshReason::StructureChanged);
+        }
+
+        if (UInspectorFunctionsSectionWidget* SectionWidget = ActorFunctionsSectionWidget.Get())
+        {
+            SectionWidget->RefreshFromSubsystem();
+            if (UInspectorFunctionItem* ResolvedFunctionItem = FindResolvedFunctionItem(TargetObject, FunctionItem->GetFunctionFName()))
+            {
+                if (SectionWidget->ScrollToItemForAutomation(ResolvedFunctionItem))
+                {
+                    return true;
+                }
+            }
+        }
+
+        OutError = FString::Printf(TEXT("Function row not found: %s"), *FunctionItem->GetDisplayName());
         return false;
     }
 

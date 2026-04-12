@@ -16,6 +16,7 @@ class UHorizontalBox;
 class USizeBox;
 class UTextBlock;
 class UVerticalBox;
+class UWidget;
 
 UCLASS()
 class RUNTIMEINSPECTOR_API UInspectorFunctionRowWidget : public UUserWidget
@@ -27,8 +28,11 @@ public:
 
     void SetInspectorSubsystem(UInspectorWorldSubsystem* InSubsystem);
     void SetFunctionItem(UInspectorFunctionItem* InItem);
+    void SetAllowNavigation(bool bInAllowNavigation);
 
     bool HasFunctionItem() const { return FunctionItem.IsValid(); }
+    bool IsDisplayingItem(const UInspectorFunctionItem* InItem) const;
+    void RefreshDisplay();
 
     UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Function")
     bool InvokeForAutomation(FString& OutError);
@@ -36,9 +40,14 @@ public:
     UFUNCTION(BlueprintPure, Category = "RuntimeInspector|Function")
     FString GetFunctionTitleForAutomation() const;
 
+    float GetFavoriteButtonHeightForAutomation() const;
+    float GetParameterInputHeightForAutomation() const;
+    bool NavigateForAutomation(FString& OutError);
+
 protected:
     virtual TSharedRef<SWidget> RebuildWidget() override;
     virtual void NativeConstruct() override;
+    virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 
 private:
     void BuildWidgetTree();
@@ -46,12 +55,19 @@ private:
     void ClearParameterWidgets();
     TArray<FString> CollectArgumentTexts() const;
     UWidget* CreateParameterComboItemWidget(const FString& InItemText) const;
+    void UpdateCachedDisplayState(bool bFavorited);
 
     UFUNCTION()
     void HandleInvokeClicked();
 
     UFUNCTION()
     UWidget* HandleGenerateParameterComboItem(FString InItemText);
+
+    UFUNCTION()
+    void HandleFavoriteClicked();
+
+    UFUNCTION()
+    void HandleTitleClicked();
 
 private:
     TWeakObjectPtr<UInspectorWorldSubsystem> Subsystem;
@@ -67,6 +83,18 @@ private:
     UTextBlock* TitleText = nullptr;
 
     UPROPERTY(Transient)
+    UButton* TitleButton = nullptr;
+
+    UPROPERTY(Transient)
+    UButton* FavoriteButton = nullptr;
+
+    UPROPERTY(Transient)
+    UTextBlock* FavoriteText = nullptr;
+
+    UPROPERTY(Transient)
+    USizeBox* FavoriteSizeBox = nullptr;
+
+    UPROPERTY(Transient)
     UTextBlock* OwnerText = nullptr;
 
     UPROPERTY(Transient)
@@ -77,4 +105,8 @@ private:
 
     UPROPERTY(Transient)
     TArray<TObjectPtr<UWidget>> ParameterWidgets;
+
+    TWeakObjectPtr<USizeBox> PrimaryParameterSizeBox;
+    bool bCachedFavorited = false;
+    bool bAllowNavigation = true;
 };

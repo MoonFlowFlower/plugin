@@ -12,6 +12,7 @@ class UInspectorMaterialParamItem;
 class UInspectorWorldSubsystem;
 class USizeBox;
 class UTextBlock;
+class UWidget;
 
 UCLASS()
 class RUNTIMEINSPECTOR_API UInspectorMaterialParamRowWidget : public UUserWidget
@@ -25,6 +26,7 @@ public:
     void SetMaterialItem(UInspectorMaterialParamItem* InItem);
     bool IsDisplayingItem(const UInspectorMaterialParamItem* InItem) const;
     void RefreshDisplay();
+    void SetAllowNavigation(bool bInAllowNavigation);
 
     bool IsColorSwatchVisibleForAutomation() const;
     bool IsScalarValueVisibleForAutomation() const;
@@ -34,6 +36,8 @@ public:
     float GetValueControlHeightForAutomation() const;
     float GetFavoriteButtonHeightForAutomation() const;
     float GetColorButtonHeightForAutomation() const;
+    bool CommitScalarValueForAutomation(const FString& InValue, FString& OutError);
+    bool NavigateForAutomation(FString& OutError);
 
 protected:
     virtual TSharedRef<SWidget> RebuildWidget() override;
@@ -43,6 +47,7 @@ protected:
 private:
     void BuildWidgetTree();
     void RefreshRow();
+    void UpdateCachedScalarDisplay();
 
     bool ApplyScalarValue(const FString& InValue);
 
@@ -54,6 +59,9 @@ private:
 
     UFUNCTION()
     void HandleScalarCommitted(const FText& InText, ETextCommit::Type CommitMethod);
+
+    UFUNCTION()
+    void HandleNameClicked();
 
 private:
     UPROPERTY(Transient)
@@ -73,6 +81,9 @@ private:
 
     UPROPERTY(Transient)
     TObjectPtr<UTextBlock> NameText = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UButton> NameButton = nullptr;
 
     UPROPERTY(Transient)
     TObjectPtr<UTextBlock> ReadOnlyValueText = nullptr;
@@ -100,4 +111,6 @@ private:
     bool bHasCachedDisplayColor = false;
     FLinearColor CachedDisplayColor = FLinearColor::Transparent;
     bool bCachedFavorited = false;
+    FString CachedScalarValue;
+    bool bAllowNavigation = true;
 };

@@ -14,6 +14,7 @@ class UInspectorWorldSubsystem;
 class USizeBox;
 class UTextBlock;
 class UButton;
+class UWidget;
 
 UCLASS()
 class RUNTIMEINSPECTOR_API UInspectorPropertyRowWidget : public UUserWidget
@@ -27,6 +28,7 @@ public:
     void SetPropertyItem(UInspectorPropertyItem* InItem);
     bool IsDisplayingItem(const UInspectorPropertyItem* InItem) const;
     void RefreshDisplay();
+    void SetAllowNavigation(bool bInAllowNavigation);
     bool IsColorSwatchVisibleForAutomation() const;
     bool IsReadOnlyValueVisibleForAutomation() const;
     bool IsValueTextBoxVisibleForAutomation() const;
@@ -34,16 +36,20 @@ public:
     float GetValueControlHeightForAutomation() const;
     float GetFavoriteButtonHeightForAutomation() const;
     float GetColorButtonHeightForAutomation() const;
+    bool CommitTextValueForAutomation(const FString& InValue, FString& OutError);
+    bool NavigateForAutomation(FString& OutError);
 
 protected:
     virtual TSharedRef<SWidget> RebuildWidget() override;
     virtual void NativeConstruct() override;
+    virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 
 private:
     void BuildWidgetTree();
     void RefreshRow();
     bool ApplyTextValue(const FString& InValue);
     UWidget* CreateEnumOptionWidget(const FString& InItemText) const;
+    void UpdateCachedDisplayState(const FString& InCurrentValue, bool bFavorited);
 
     UFUNCTION()
     void HandleValueCommitted(const FText& InText, ETextCommit::Type CommitMethod);
@@ -63,6 +69,9 @@ private:
     UFUNCTION()
     void HandleColorClicked();
 
+    UFUNCTION()
+    void HandleNameClicked();
+
 private:
     UPROPERTY(Transient)
     TObjectPtr<UBorder> RootBorder = nullptr;
@@ -72,6 +81,9 @@ private:
 
     UPROPERTY(Transient)
     TObjectPtr<UTextBlock> NameText = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UButton> NameButton = nullptr;
 
     UPROPERTY(Transient)
     TObjectPtr<UTextBlock> ReadOnlyValueText = nullptr;
@@ -117,4 +129,7 @@ private:
 
     TWeakObjectPtr<UInspectorWorldSubsystem> Subsystem;
     TWeakObjectPtr<UInspectorPropertyItem> PropertyItem;
+    FString CachedDisplayValue;
+    bool bCachedFavorited = false;
+    bool bAllowNavigation = true;
 };

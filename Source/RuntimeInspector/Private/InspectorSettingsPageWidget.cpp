@@ -1066,6 +1066,11 @@ void UInspectorSettingsPageWidget::HandleSaveClicked()
         return;
     }
 
+    if (!ApplyPreviewSettings(DraftSettings, false))
+    {
+        return;
+    }
+
     FString Error;
     if (!InspectorSubsystem->SaveSettings(Error))
     {

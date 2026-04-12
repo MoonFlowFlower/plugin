@@ -74,6 +74,15 @@ void UInspectorPropertyRowWidget::RefreshDisplay()
     RefreshRow();
 }
 
+void UInspectorPropertyRowWidget::SetAllowNavigation(bool bInAllowNavigation)
+{
+    bAllowNavigation = bInAllowNavigation;
+    if (NameButton)
+    {
+        NameButton->SetIsEnabled(bAllowNavigation);
+    }
+}
+
 float UInspectorPropertyRowWidget::GetValueControlHeightForAutomation() const
 {
     if (ValueTextBoxSizeBox && ValueTextBox && ValueTextBox->GetVisibility() == ESlateVisibility::Visible)
@@ -110,6 +119,49 @@ float UInspectorPropertyRowWidget::GetColorButtonHeightForAutomation() const
     return (ColorSizeBox && ColorButton && ColorButton->GetVisibility() == ESlateVisibility::Visible)
         ? ColorSizeBox->GetHeightOverride()
         : 0.f;
+}
+
+bool UInspectorPropertyRowWidget::CommitTextValueForAutomation(const FString& InValue, FString& OutError)
+{
+    if (!PropertyItem.IsValid())
+    {
+        OutError = TEXT("Property item is invalid");
+        return false;
+    }
+
+    if (!ValueTextBox || ValueTextBox->GetVisibility() != ESlateVisibility::Visible)
+    {
+        OutError = TEXT("Property row is not exposing an editable text box");
+        return false;
+    }
+
+    if (!ApplyTextValue(InValue))
+    {
+        OutError = FString::Printf(TEXT("Failed to apply property value '%s'"), *InValue);
+        return false;
+    }
+
+    RefreshRow();
+    OutError.Reset();
+    return true;
+}
+
+bool UInspectorPropertyRowWidget::NavigateForAutomation(FString& OutError)
+{
+    if (!PropertyItem.IsValid())
+    {
+        OutError = TEXT("Property item is invalid");
+        return false;
+    }
+
+    UInspectorWorldSubsystem* InspectorSubsystem = Subsystem.Get();
+    if (!InspectorSubsystem)
+    {
+        OutError = TEXT("Inspector subsystem is unavailable");
+        return false;
+    }
+
+    return InspectorSubsystem->NavigateToPinnedItem(PropertyItem.Get(), OutError);
 }
 
 bool UInspectorPropertyRowWidget::IsColorSwatchVisibleForAutomation() const
@@ -155,6 +207,24 @@ void UInspectorPropertyRowWidget::NativeConstruct()
     RefreshRow();
 }
 
+void UInspectorPropertyRowWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
+{
+    Super::NativeTick(MyGeometry, InDeltaTime);
+
+    UInspectorPropertyItem* Item = PropertyItem.Get();
+    if (!Item || !Item->IsValidItem())
+    {
+        return;
+    }
+
+    const FString CurrentValue = Item->GetValueText();
+    const bool bFavorited = Subsystem.IsValid() && Subsystem->IsFavoriteForAnyItem(Item);
+    if (CurrentValue != CachedDisplayValue || bFavorited != bCachedFavorited)
+    {
+        RefreshRow();
+    }
+}
+
 void UInspectorPropertyRowWidget::BuildWidgetTree()
 {
     if (!WidgetTree)
@@ -185,8 +255,12 @@ void UInspectorPropertyRowWidget::BuildWidgetTree()
         FavoriteSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
     }
 
+    NameButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("RI_PropertyRowNameButton"));
+    RICompactUI::ConfigureButton(NameButton, RICompactUI::ERIButtonVisualStyle::Subtle, false);
+    NameButton->OnClicked.AddDynamic(this, &UInspectorPropertyRowWidget::HandleNameClicked);
     NameText = RICompactUI::MakeText(WidgetTree, TEXT("Property"), RICompactUI::GetLabelFontSize(), true, RI_PropertyTextColor(), true);
-    if (UHorizontalBoxSlot* NameSlot = RootBox->AddChildToHorizontalBox(NameText))
+    NameButton->AddChild(NameText);
+    if (UHorizontalBoxSlot* NameSlot = RootBox->AddChildToHorizontalBox(NameButton))
     {
         FSlateChildSize SizeRule(ESlateSizeRule::Fill);
         SizeRule.Value = 0.90f;
@@ -289,8 +363,16 @@ void UInspectorPropertyRowWidget::RefreshRow()
     {
         NameText->SetText(FText::FromString(Item->GetPropertyName()));
     }
+    if (NameButton)
+    {
+        NameButton->SetIsEnabled(bAllowNavigation);
+        NameButton->SetToolTipText(bAllowNavigation
+            ? FText::FromString(TEXT("Navigate to this property."))
+            : FText::GetEmpty());
+    }
 
     const FString CurrentValue = Item->GetValueText();
+    CachedDisplayValue = CurrentValue;
     const bool bEditable = Item->IsEditable();
     const EInspectorValueType ValueType = Item->GetValueType();
     const bool bIsColorType = ValueType == EInspectorValueType::LinearColor || ValueType == EInspectorValueType::Color;
@@ -302,6 +384,7 @@ void UInspectorPropertyRowWidget::RefreshRow()
     if (FavoriteText)
     {
         const bool bFavorited = Subsystem.IsValid() && Subsystem->IsFavoriteForAnyItem(Item);
+        bCachedFavorited = bFavorited;
         FavoriteText->SetText(FText::FromString(bFavorited ? TEXT("★") : TEXT("☆")));
         FavoriteText->SetColorAndOpacity(bFavorited ? RI_PropertyFavoriteActiveColor() : RI_PropertyMutedColor());
     }
@@ -387,8 +470,12 @@ bool UInspectorPropertyRowWidget::ApplyTextValue(const FString& InValue)
         return false;
     }
 
+    UInspectorWorldSubsystem* InspectorSubsystem = Subsystem.Get();
+    UObject* TargetObject = Item->GetTargetObject();
     FString Error;
-    const bool bApplied = Item->ApplyFromText(InValue, Error);
+    const bool bApplied = (InspectorSubsystem && TargetObject)
+        ? InspectorSubsystem->ApplyPropertyTextImmediate(TargetObject, Item->GetPropertyFName(), InValue, Error)
+        : Item->ApplyFromText(InValue, Error);
     if (bApplied)
     {
         RefreshRow();
@@ -459,4 +546,28 @@ void UInspectorPropertyRowWidget::HandleColorClicked()
     }
 
     InspectorSubsystem->OpenColorEditorForAnyItem(Item);
+}
+
+void UInspectorPropertyRowWidget::UpdateCachedDisplayState(const FString& InCurrentValue, bool bFavorited)
+{
+    CachedDisplayValue = InCurrentValue;
+    bCachedFavorited = bFavorited;
+}
+
+void UInspectorPropertyRowWidget::HandleNameClicked()
+{
+    if (!bAllowNavigation)
+    {
+        return;
+    }
+
+    UInspectorWorldSubsystem* InspectorSubsystem = Subsystem.Get();
+    UInspectorPropertyItem* Item = PropertyItem.Get();
+    if (!InspectorSubsystem || !Item)
+    {
+        return;
+    }
+
+    FString Error;
+    InspectorSubsystem->NavigateToPinnedItem(Item, Error);
 }

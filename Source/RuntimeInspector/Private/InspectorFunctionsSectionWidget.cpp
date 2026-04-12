@@ -48,6 +48,43 @@ int32 UInspectorFunctionsSectionWidget::GetEntryWidgetCountForAutomation() const
     return FunctionsEntriesBox ? FunctionsEntriesBox->GetChildrenCount() : INDEX_NONE;
 }
 
+UInspectorFunctionRowWidget* UInspectorFunctionsSectionWidget::FindFunctionRowForAutomation(const UInspectorFunctionItem* Item) const
+{
+    if (!FunctionsEntriesBox || !Item)
+    {
+        return nullptr;
+    }
+
+    for (int32 ChildIndex = 0; ChildIndex < FunctionsEntriesBox->GetChildrenCount(); ++ChildIndex)
+    {
+        if (UInspectorFunctionRowWidget* Row = Cast<UInspectorFunctionRowWidget>(FunctionsEntriesBox->GetChildAt(ChildIndex)))
+        {
+            if (Row->IsDisplayingItem(Item))
+            {
+                return Row;
+            }
+        }
+    }
+
+    return nullptr;
+}
+
+bool UInspectorFunctionsSectionWidget::ScrollToItemForAutomation(UInspectorFunctionItem* Item)
+{
+    if (!FunctionsScrollBox || !FunctionsEntriesBox || !Item)
+    {
+        return false;
+    }
+
+    if (UInspectorFunctionRowWidget* Row = FindFunctionRowForAutomation(Item))
+    {
+        FunctionsScrollBox->ScrollWidgetIntoView(Row, true, EDescendantScrollDestination::Center, 0.0f);
+        return true;
+    }
+
+    return false;
+}
+
 TSharedRef<SWidget> UInspectorFunctionsSectionWidget::RebuildWidget()
 {
     if (WidgetTree && !WidgetTree->RootWidget)

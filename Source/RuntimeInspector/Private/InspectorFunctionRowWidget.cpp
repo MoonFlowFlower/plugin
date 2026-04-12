@@ -33,6 +33,11 @@ namespace
     {
         return RICompactUI::GetMutedTextColor();
     }
+
+    static FLinearColor RI_FunctionFavoriteActiveColor()
+    {
+        return RICompactUI::GetWarningTextColor();
+    }
 }
 
 UInspectorFunctionRowWidget::UInspectorFunctionRowWidget(const FObjectInitializer& ObjectInitializer)
@@ -52,6 +57,63 @@ void UInspectorFunctionRowWidget::SetFunctionItem(UInspectorFunctionItem* InItem
     RefreshRow();
 }
 
+void UInspectorFunctionRowWidget::SetAllowNavigation(bool bInAllowNavigation)
+{
+    bAllowNavigation = bInAllowNavigation;
+    if (TitleButton)
+    {
+        TitleButton->SetIsEnabled(bAllowNavigation);
+    }
+}
+
+bool UInspectorFunctionRowWidget::IsDisplayingItem(const UInspectorFunctionItem* InItem) const
+{
+    const UInspectorFunctionItem* CurrentItem = FunctionItem.Get();
+    if (!CurrentItem || !InItem)
+    {
+        return false;
+    }
+
+    return CurrentItem == InItem
+        || (CurrentItem->GetTargetObject() == InItem->GetTargetObject()
+            && CurrentItem->GetFunctionFName() == InItem->GetFunctionFName());
+}
+
+void UInspectorFunctionRowWidget::RefreshDisplay()
+{
+    RefreshRow();
+}
+
+float UInspectorFunctionRowWidget::GetFavoriteButtonHeightForAutomation() const
+{
+    return FavoriteSizeBox ? FavoriteSizeBox->GetHeightOverride() : 0.f;
+}
+
+float UInspectorFunctionRowWidget::GetParameterInputHeightForAutomation() const
+{
+    const USizeBox* SizeBox = PrimaryParameterSizeBox.Get();
+    return SizeBox ? SizeBox->GetHeightOverride() : 0.f;
+}
+
+bool UInspectorFunctionRowWidget::NavigateForAutomation(FString& OutError)
+{
+    UInspectorFunctionItem* Item = FunctionItem.Get();
+    if (!Item || !Item->IsValidItem())
+    {
+        OutError = TEXT("Function item is invalid");
+        return false;
+    }
+
+    UInspectorWorldSubsystem* InspectorSubsystem = Subsystem.Get();
+    if (!InspectorSubsystem)
+    {
+        OutError = TEXT("Inspector subsystem is unavailable");
+        return false;
+    }
+
+    return InspectorSubsystem->NavigateToPinnedItem(Item, OutError);
+}
+
 TSharedRef<SWidget> UInspectorFunctionRowWidget::RebuildWidget()
 {
     if (WidgetTree && !WidgetTree->RootWidget)
@@ -66,6 +128,23 @@ void UInspectorFunctionRowWidget::NativeConstruct()
 {
     Super::NativeConstruct();
     RefreshRow();
+}
+
+void UInspectorFunctionRowWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
+{
+    Super::NativeTick(MyGeometry, InDeltaTime);
+
+    UInspectorFunctionItem* Item = FunctionItem.Get();
+    if (!Item || !Item->IsValidItem())
+    {
+        return;
+    }
+
+    const bool bFavorited = Subsystem.IsValid() && Subsystem->IsFavoriteForAnyItem(Item);
+    if (bFavorited != bCachedFavorited)
+    {
+        RefreshRow();
+    }
 }
 
 void UInspectorFunctionRowWidget::BuildWidgetTree()
@@ -88,8 +167,28 @@ void UInspectorFunctionRowWidget::BuildWidgetTree()
         HeaderSlot->SetPadding(FMargin(0.f, 0.f, 0.f, RICompactUI::GetInlineGap()));
     }
 
+    FavoriteButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("RI_FunctionRowFavoriteButton"));
+    RICompactUI::ConfigureButton(FavoriteButton, RICompactUI::ERIButtonVisualStyle::Secondary, false);
+    FavoriteButton->OnClicked.AddDynamic(this, &UInspectorFunctionRowWidget::HandleFavoriteClicked);
+    FavoriteSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_FunctionRowFavoriteSize"));
+    FavoriteSizeBox->SetWidthOverride(24.f);
+    FavoriteSizeBox->SetHeightOverride(RICompactUI::GetInputHeight());
+    FavoriteText = RICompactUI::MakeText(WidgetTree, TEXT("☆"), RICompactUI::GetValueFontSize(), true, RI_FunctionRowMutedColor(), false);
+    FavoriteText->SetJustification(ETextJustify::Center);
+    FavoriteSizeBox->SetContent(FavoriteText);
+    FavoriteButton->AddChild(FavoriteSizeBox);
+    if (UHorizontalBoxSlot* FavoriteSlot = HeaderRow->AddChildToHorizontalBox(FavoriteButton))
+    {
+        FavoriteSlot->SetVerticalAlignment(VAlign_Center);
+        FavoriteSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
+    }
+
+    TitleButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("RI_FunctionRowTitleButton"));
+    RICompactUI::ConfigureButton(TitleButton, RICompactUI::ERIButtonVisualStyle::Subtle, false);
+    TitleButton->OnClicked.AddDynamic(this, &UInspectorFunctionRowWidget::HandleTitleClicked);
     TitleText = RICompactUI::MakeText(WidgetTree, TEXT("Function"), RICompactUI::GetLabelFontSize(), true, RI_FunctionRowTextColor(), true);
-    if (UHorizontalBoxSlot* TitleSlot = HeaderRow->AddChildToHorizontalBox(TitleText))
+    TitleButton->AddChild(TitleText);
+    if (UHorizontalBoxSlot* TitleSlot = HeaderRow->AddChildToHorizontalBox(TitleButton))
     {
         TitleSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
         TitleSlot->SetVerticalAlignment(VAlign_Center);
@@ -103,7 +202,14 @@ void UInspectorFunctionRowWidget::BuildWidgetTree()
         OwnerSlot->SetVerticalAlignment(VAlign_Center);
     }
 
-    InvokeButton = RICompactUI::MakeLabeledButton(WidgetTree, TEXT("BTN_InvokeFunction"), TEXT("Run"), RICompactUI::ERIButtonVisualStyle::Primary, 40.f);
+    InvokeButton = RICompactUI::MakeLabeledButton(
+        WidgetTree,
+        TEXT("BTN_InvokeFunction"),
+        TEXT("Run"),
+        RICompactUI::ERIButtonVisualStyle::Primary,
+        48.f,
+        RICompactUI::GetInputHeight(),
+        RICompactUI::GetValueFontSize());
     InvokeButton->OnClicked.AddDynamic(this, &UInspectorFunctionRowWidget::HandleInvokeClicked);
     if (UHorizontalBoxSlot* ButtonSlot = HeaderRow->AddChildToHorizontalBox(InvokeButton))
     {
@@ -119,6 +225,7 @@ void UInspectorFunctionRowWidget::BuildWidgetTree()
 void UInspectorFunctionRowWidget::ClearParameterWidgets()
 {
     ParameterWidgets.Reset();
+    PrimaryParameterSizeBox.Reset();
     if (ParametersBox)
     {
         ParametersBox->ClearChildren();
@@ -149,12 +256,28 @@ void UInspectorFunctionRowWidget::RefreshRow()
         {
             InvokeButton->SetIsEnabled(false);
         }
+        if (FavoriteButton)
+        {
+            FavoriteButton->SetVisibility(ESlateVisibility::Collapsed);
+        }
         return;
+    }
+
+    if (FavoriteButton)
+    {
+        FavoriteButton->SetVisibility(ESlateVisibility::Visible);
     }
 
     if (TitleText)
     {
         TitleText->SetText(FText::FromString(Item->GetDisplayName()));
+    }
+    if (TitleButton)
+    {
+        TitleButton->SetIsEnabled(bAllowNavigation);
+        TitleButton->SetToolTipText(bAllowNavigation
+            ? FText::FromString(TEXT("Navigate to this function."))
+            : FText::GetEmpty());
     }
 
     if (OwnerText)
@@ -168,6 +291,9 @@ void UInspectorFunctionRowWidget::RefreshRow()
         InvokeButton->SetIsEnabled(true);
     }
 
+    const bool bFavorited = Subsystem.IsValid() && Subsystem->IsFavoriteForAnyItem(Item);
+    UpdateCachedDisplayState(bFavorited);
+
     const TArray<FRIFunctionParameterSpec>& Params = Item->GetParameterSpecs();
     for (const FRIFunctionParameterSpec& Param : Params)
     {
@@ -179,7 +305,7 @@ void UInspectorFunctionRowWidget::RefreshRow()
         ParamBorder->SetContent(ParamRow);
 
         const FString LabelText = FString::Printf(TEXT("%s (%s)"), *Param.DisplayName, *Param.TypeLabel);
-        UTextBlock* Label = RICompactUI::MakeText(WidgetTree, LabelText, RICompactUI::GetValueFontSize(), true, RI_FunctionRowMutedColor(), true);
+        UTextBlock* Label = RICompactUI::MakeText(WidgetTree, LabelText, RICompactUI::GetMutedFontSize(), true, RI_FunctionRowMutedColor(), true);
         if (UHorizontalBoxSlot* LabelSlot = ParamRow->AddChildToHorizontalBox(Label))
         {
             LabelSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
@@ -206,7 +332,7 @@ void UInspectorFunctionRowWidget::RefreshRow()
                 Combo->SetSelectedOption(Param.EnumOptions[0]);
             }
             Control = Combo;
-            WrappedControl = RICompactUI::WrapValueControl(WidgetTree, Combo, 112.f);
+            WrappedControl = RICompactUI::WrapValueControl(WidgetTree, Combo, 96.f);
         }
         else if (Param.TypeLabel.Equals(TEXT("bool"), ESearchCase::IgnoreCase))
         {
@@ -222,11 +348,16 @@ void UInspectorFunctionRowWidget::RefreshRow()
             RICompactUI::ConfigureEditableTextBox(TextBox, RI_FunctionRowTextColor(), RICompactUI::GetValueFontSize(), RICompactUI::ERIInputVisualStyle::Strong);
             TextBox->SetText(FText::FromString(Param.DefaultText));
             Control = TextBox;
-            WrappedControl = RICompactUI::WrapValueControl(WidgetTree, TextBox, 112.f);
+            WrappedControl = RICompactUI::WrapValueControl(WidgetTree, TextBox, 96.f);
         }
 
         if (Control)
         {
+            if (!PrimaryParameterSizeBox.IsValid())
+            {
+                PrimaryParameterSizeBox = Cast<USizeBox>(WrappedControl);
+            }
+
             if (UHorizontalBoxSlot* ControlSlot = ParamRow->AddChildToHorizontalBox(WrappedControl ? WrappedControl : Control))
             {
                 ControlSlot->SetPadding(FMargin(8.f, 0.f, 0.f, 0.f));
@@ -341,6 +472,47 @@ FString UInspectorFunctionRowWidget::GetFunctionTitleForAutomation() const
 UWidget* UInspectorFunctionRowWidget::HandleGenerateParameterComboItem(FString InItemText)
 {
     return CreateParameterComboItemWidget(InItemText);
+}
+
+void UInspectorFunctionRowWidget::UpdateCachedDisplayState(bool bFavorited)
+{
+    bCachedFavorited = bFavorited;
+    if (FavoriteText)
+    {
+        FavoriteText->SetText(FText::FromString(bFavorited ? TEXT("★") : TEXT("☆")));
+        FavoriteText->SetColorAndOpacity(bFavorited ? RI_FunctionFavoriteActiveColor() : RI_FunctionRowMutedColor());
+    }
+}
+
+void UInspectorFunctionRowWidget::HandleFavoriteClicked()
+{
+    UInspectorWorldSubsystem* InspectorSubsystem = Subsystem.Get();
+    UInspectorFunctionItem* Item = FunctionItem.Get();
+    if (!InspectorSubsystem || !Item)
+    {
+        return;
+    }
+
+    InspectorSubsystem->ToggleFavoriteForAnyItem(Item);
+    RefreshRow();
+}
+
+void UInspectorFunctionRowWidget::HandleTitleClicked()
+{
+    if (!bAllowNavigation)
+    {
+        return;
+    }
+
+    UInspectorWorldSubsystem* InspectorSubsystem = Subsystem.Get();
+    UInspectorFunctionItem* Item = FunctionItem.Get();
+    if (!InspectorSubsystem || !Item)
+    {
+        return;
+    }
+
+    FString Error;
+    InspectorSubsystem->NavigateToPinnedItem(Item, Error);
 }
 
 void UInspectorFunctionRowWidget::HandleInvokeClicked()

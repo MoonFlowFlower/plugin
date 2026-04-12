@@ -639,7 +639,7 @@ void UInspectorFilePageWidget::BuildWidgetTree()
 
     if (UVerticalBoxSlot* VBoxSlot = MainBox->AddChildToVerticalBox(RI_MakeText(
         WidgetTree,
-        TEXT("See runtime edits, review the diff, then apply or export only when the result is clear."),
+        TEXT("See runtime edits, compare the result, then apply or export when it is ready."),
         RICompactUI::GetMutedFontSize(),
         false,
         RI_FileMutedColor(),
@@ -859,7 +859,7 @@ UWidget* UInspectorFilePageWidget::CreateMainActionsSection()
     IntroBorder->SetBrushColor(RI_FileRowColor());
     IntroBorder->SetContent(RI_MakeText(
         WidgetTree,
-        TEXT("Stage the runtime edit, review the diff, then apply or export."),
+        TEXT("1) Stage runtime edits  2) review the compare result  3) apply or export."),
         RICompactUI::GetMutedFontSize(),
         false,
         RI_FileMutedColor(),
@@ -1098,7 +1098,7 @@ UWidget* UInspectorFilePageWidget::CreateStatusSection()
 UWidget* UInspectorFilePageWidget::CreateAuditsSection()
 {
     UVerticalBox* Outer = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
-    UWidget* Header = CreateCollapsibleSectionHeader(TEXT("Review Details"), AuditsSectionToggleText, TEXT("BTN_FileToggleAudits"));
+    UWidget* Header = CreateCollapsibleSectionHeader(TEXT("Compare & Audit"), AuditsSectionToggleText, TEXT("BTN_FileToggleAudits"));
     if (UButton* HeaderButton = Cast<UButton>(Header))
     {
         HeaderButton->OnClicked.AddDynamic(this, &UInspectorFilePageWidget::HandleToggleAuditsSectionClicked);
@@ -1238,7 +1238,7 @@ UWidget* UInspectorFilePageWidget::CreateAuditsSection()
 UWidget* UInspectorFilePageWidget::CreatePresetsSection()
 {
     UVerticalBox* Outer = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
-    UWidget* Header = CreateCollapsibleSectionHeader(TEXT("Advanced"), PresetsSectionToggleText, TEXT("BTN_FileTogglePresets"));
+    UWidget* Header = CreateCollapsibleSectionHeader(TEXT("Advanced & Remote"), PresetsSectionToggleText, TEXT("BTN_FileTogglePresets"));
     if (UButton* HeaderButton = Cast<UButton>(Header))
     {
         HeaderButton->OnClicked.AddDynamic(this, &UInspectorFilePageWidget::HandleTogglePresetsSectionClicked);

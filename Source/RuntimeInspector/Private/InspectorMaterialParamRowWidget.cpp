@@ -73,6 +73,15 @@ void UInspectorMaterialParamRowWidget::RefreshDisplay()
     RefreshRow();
 }
 
+void UInspectorMaterialParamRowWidget::SetAllowNavigation(bool bInAllowNavigation)
+{
+    bAllowNavigation = bInAllowNavigation;
+    if (NameButton)
+    {
+        NameButton->SetIsEnabled(bAllowNavigation);
+    }
+}
+
 float UInspectorMaterialParamRowWidget::GetValueControlHeightForAutomation() const
 {
     if (ColorSizeBox && ColorButton && ColorButton->GetVisibility() == ESlateVisibility::Visible)
@@ -101,6 +110,49 @@ float UInspectorMaterialParamRowWidget::GetColorButtonHeightForAutomation() cons
     return (ColorSizeBox && ColorButton && ColorButton->GetVisibility() == ESlateVisibility::Visible)
         ? ColorSizeBox->GetHeightOverride()
         : 0.f;
+}
+
+bool UInspectorMaterialParamRowWidget::CommitScalarValueForAutomation(const FString& InValue, FString& OutError)
+{
+    if (!MaterialItem.IsValid())
+    {
+        OutError = TEXT("Material item is invalid");
+        return false;
+    }
+
+    if (!ScalarValueTextBox || ScalarValueTextBox->GetVisibility() != ESlateVisibility::Visible)
+    {
+        OutError = TEXT("Material row is not exposing an editable scalar text box");
+        return false;
+    }
+
+    if (!ApplyScalarValue(InValue))
+    {
+        OutError = FString::Printf(TEXT("Failed to apply scalar value '%s'"), *InValue);
+        return false;
+    }
+
+    RefreshRow();
+    OutError.Reset();
+    return true;
+}
+
+bool UInspectorMaterialParamRowWidget::NavigateForAutomation(FString& OutError)
+{
+    if (!MaterialItem.IsValid())
+    {
+        OutError = TEXT("Material item is invalid");
+        return false;
+    }
+
+    UInspectorWorldSubsystem* InspectorSubsystem = Subsystem.Get();
+    if (!InspectorSubsystem)
+    {
+        OutError = TEXT("Inspector subsystem is unavailable");
+        return false;
+    }
+
+    return InspectorSubsystem->NavigateToPinnedItem(MaterialItem.Get(), OutError);
 }
 
 bool UInspectorMaterialParamRowWidget::IsColorSwatchVisibleForAutomation() const
@@ -181,6 +233,14 @@ void UInspectorMaterialParamRowWidget::NativeTick(const FGeometry& MyGeometry, f
             }
         }
     }
+    else
+    {
+        const FString CurrentValue = Item->GetValueText();
+        if (CurrentValue != CachedScalarValue)
+        {
+            RefreshRow();
+        }
+    }
 }
 
 void UInspectorMaterialParamRowWidget::BuildWidgetTree()
@@ -213,8 +273,12 @@ void UInspectorMaterialParamRowWidget::BuildWidgetTree()
         FavoriteSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
     }
 
+    NameButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("RI_MaterialParamNameButton"));
+    RICompactUI::ConfigureButton(NameButton, RICompactUI::ERIButtonVisualStyle::Subtle, false);
+    NameButton->OnClicked.AddDynamic(this, &UInspectorMaterialParamRowWidget::HandleNameClicked);
     NameText = RICompactUI::MakeText(WidgetTree, TEXT("Material Parameter"), RICompactUI::GetLabelFontSize(), true, RI_MaterialTextColor(), true);
-    if (UHorizontalBoxSlot* NameSlot = RootBox->AddChildToHorizontalBox(NameText))
+    NameButton->AddChild(NameText);
+    if (UHorizontalBoxSlot* NameSlot = RootBox->AddChildToHorizontalBox(NameButton))
     {
         FSlateChildSize SizeRule(ESlateSizeRule::Fill);
         SizeRule.Value = 0.90f;
@@ -314,6 +378,13 @@ void UInspectorMaterialParamRowWidget::RefreshRow()
     {
         NameText->SetText(FText::FromString(Item->GetPropertyName()));
     }
+    if (NameButton)
+    {
+        NameButton->SetIsEnabled(bAllowNavigation);
+        NameButton->SetToolTipText(bAllowNavigation
+            ? FText::FromString(TEXT("Navigate to this material parameter."))
+            : FText::GetEmpty());
+    }
 
     if (ReadOnlyValueText)
     {
@@ -335,6 +406,7 @@ void UInspectorMaterialParamRowWidget::RefreshRow()
         const bool bHasValue = Item->GetVector(VectorValue, Error);
         bHasCachedDisplayColor = bHasValue;
         CachedDisplayColor = bHasValue ? VectorValue : FLinearColor::Black;
+        CachedScalarValue.Reset();
         ColorSwatch->SetBrushColor(bHasValue ? VectorValue : FLinearColor::Black);
         ColorButton->SetVisibility(ESlateVisibility::Visible);
         ColorButton->SetIsEnabled(bHasValue);
@@ -349,6 +421,7 @@ void UInspectorMaterialParamRowWidget::RefreshRow()
         float ScalarValue = 0.f;
         const bool bHasScalar = Item->GetScalar(ScalarValue, Error);
         const FString DisplayValue = bHasScalar ? FString::SanitizeFloat(ScalarValue) : Item->GetValueText();
+        CachedScalarValue = DisplayValue;
         if (ScalarValueTextBox)
         {
             ScalarValueTextBox->SetVisibility(ESlateVisibility::Visible);
@@ -412,4 +485,22 @@ void UInspectorMaterialParamRowWidget::HandleScalarCommitted(const FText& InText
     }
 
     ApplyScalarValue(InText.ToString());
+}
+
+void UInspectorMaterialParamRowWidget::HandleNameClicked()
+{
+    if (!bAllowNavigation)
+    {
+        return;
+    }
+
+    UInspectorWorldSubsystem* InspectorSubsystem = Subsystem.Get();
+    UInspectorMaterialParamItem* Item = MaterialItem.Get();
+    if (!InspectorSubsystem || !Item)
+    {
+        return;
+    }
+
+    FString Error;
+    InspectorSubsystem->NavigateToPinnedItem(Item, Error);
 }

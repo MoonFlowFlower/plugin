@@ -24,6 +24,8 @@ public:
     void SetInspectorSubsystem(UInspectorWorldSubsystem* InSubsystem);
     void RefreshFromSubsystem();
     int32 GetEntryWidgetCountForAutomation() const;
+    UInspectorFunctionRowWidget* FindFunctionRowForAutomation(const UInspectorFunctionItem* Item) const;
+    bool ScrollToItemForAutomation(UInspectorFunctionItem* Item);
 
     bool HasFunctionsSection() const { return FunctionsSectionBorder != nullptr; }
     bool HasFunctionScrollRoot() const { return FunctionsScrollBox != nullptr; }
