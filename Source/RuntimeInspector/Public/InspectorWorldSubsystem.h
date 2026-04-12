@@ -975,6 +975,9 @@ public:
     UFUNCTION(BlueprintCallable, Category = "RuntimeInspector")
     bool InvokeFunctionItem(UInspectorFunctionItem* Item, const TArray<FString>& InArgTexts, FString& OutError);
 
+    UFUNCTION()
+    void HandleActorSearchTextChanged(const FText& InText);
+
 
 private:
     APlayerController* GetLocalPC() const;
@@ -1020,6 +1023,7 @@ private:
     void EnsureActorFunctionsSectionInjected();
     void RefreshActorFunctionsSection();
     void CacheActorPageSearchTextFromPanel();
+    void BindActorSearchBox();
     void UpdatePanelTabButtonStyles();
     UButton* FindPanelTabButtonByText(const FString& DesiredText) const;
     UButton* FindPanelTabButtonByTexts(std::initializer_list<const TCHAR*> DesiredTexts) const;

@@ -170,11 +170,11 @@ namespace RICompactUI
             FRIThemePresetTokens Tokens;
             Tokens.Metrics = {
                 8, 7, 6, 5,
-                22.0f, 22.0f, 96.0f, 122.0f,
+                20.0f, 20.0f, 96.0f, 122.0f,
                 5.0f, 1.0f,
                 FMargin(6.f, 4.f),
                 FMargin(0.f),
-                FMargin(7.f, 4.f)
+                FMargin(6.f, 2.f)
             };
             Tokens.PageBackground = FLinearColor(0.02f, 0.02f, 0.03f, 0.90f);
             Tokens.FooterBackground = FLinearColor(0.05f, 0.05f, 0.07f, 0.95f);

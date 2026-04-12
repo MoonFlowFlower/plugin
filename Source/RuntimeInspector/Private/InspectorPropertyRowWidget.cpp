@@ -233,7 +233,7 @@ void UInspectorPropertyRowWidget::BuildWidgetTree()
     }
 
     RootBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("RI_PropertyRowBorder"));
-    RootBorder->SetPadding(FMargin(6.f, 4.f));
+    RootBorder->SetPadding(FMargin(4.f, 2.f));
     RootBorder->SetBrushColor(RI_PropertyRowColor());
 
     RootBox = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_PropertyRowBox"));
@@ -242,8 +242,9 @@ void UInspectorPropertyRowWidget::BuildWidgetTree()
     FavoriteButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("RI_PropertyRowFavoriteButton"));
     RICompactUI::ConfigureButton(FavoriteButton, RICompactUI::ERIButtonVisualStyle::Secondary, false);
     FavoriteSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_PropertyRowFavoriteSize"));
-    FavoriteSizeBox->SetWidthOverride(24.f);
-    FavoriteSizeBox->SetHeightOverride(RICompactUI::GetInputHeight());
+    const float FavoriteButtonSize = FMath::Max(18.f, RICompactUI::GetInputHeight() - 4.f);
+    FavoriteSizeBox->SetWidthOverride(FavoriteButtonSize);
+    FavoriteSizeBox->SetHeightOverride(FavoriteButtonSize);
     FavoriteText = RICompactUI::MakeText(WidgetTree, TEXT("☆"), RICompactUI::GetValueFontSize(), true, RI_PropertyMutedColor(), false);
     FavoriteText->SetJustification(ETextJustify::Center);
     FavoriteSizeBox->SetContent(FavoriteText);
@@ -258,7 +259,7 @@ void UInspectorPropertyRowWidget::BuildWidgetTree()
     NameButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("RI_PropertyRowNameButton"));
     RICompactUI::ConfigureButton(NameButton, RICompactUI::ERIButtonVisualStyle::Subtle, false);
     NameButton->OnClicked.AddDynamic(this, &UInspectorPropertyRowWidget::HandleNameClicked);
-    NameText = RICompactUI::MakeText(WidgetTree, TEXT("Property"), RICompactUI::GetLabelFontSize(), true, RI_PropertyTextColor(), true);
+    NameText = RICompactUI::MakeText(WidgetTree, TEXT("Property"), RICompactUI::GetLabelFontSize(), true, RI_PropertyTextColor(), false);
     NameButton->AddChild(NameText);
     if (UHorizontalBoxSlot* NameSlot = RootBox->AddChildToHorizontalBox(NameButton))
     {
@@ -266,7 +267,7 @@ void UInspectorPropertyRowWidget::BuildWidgetTree()
         SizeRule.Value = 0.90f;
         NameSlot->SetSize(SizeRule);
         NameSlot->SetVerticalAlignment(VAlign_Center);
-        NameSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
+        NameSlot->SetPadding(FMargin(0.f, 0.f, 6.f, 0.f));
     }
 
     ReadOnlyValueText = RICompactUI::MakeText(WidgetTree, TEXT(""), RICompactUI::GetValueFontSize(), false, RI_PropertyMutedColor(), true);
@@ -316,10 +317,10 @@ void UInspectorPropertyRowWidget::BuildWidgetTree()
     RICompactUI::ConfigureButton(ColorButton, RICompactUI::ERIButtonVisualStyle::Subtle, false);
     ColorButton->OnClicked.AddDynamic(this, &UInspectorPropertyRowWidget::HandleColorClicked);
     ColorSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_PropertyRowColorSize"));
-    ColorSizeBox->SetWidthOverride(34.f);
+    ColorSizeBox->SetWidthOverride(30.f);
     ColorSizeBox->SetHeightOverride(RICompactUI::GetInputHeight());
     ColorSwatch = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("RI_PropertyRowColorSwatch"));
-    ColorSwatch->SetPadding(FMargin(0.f, 3.f));
+    ColorSwatch->SetPadding(FMargin(0.f, 2.f));
     ColorSwatch->SetBrushColor(FLinearColor::Black);
     ColorSizeBox->SetContent(ColorSwatch);
     ColorButton->AddChild(ColorSizeBox);

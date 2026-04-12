@@ -35,6 +35,7 @@
 #include "Components/CheckBox.h"
 #include "Components/ComboBoxString.h"
 #include "Components/ContentWidget.h"
+#include "Components/EditableText.h"
 #include "Components/EditableTextBox.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
@@ -118,6 +119,72 @@ static constexpr float RI_DefaultPanelViewportHeightFraction = 0.96f;
 static constexpr float RI_DefaultPanelWidthMax = 920.0f;
 static constexpr float RI_DefaultPanelHeightMin = 680.0f;
 static constexpr float RI_DefaultPanelViewportInsetX = 8.0f;
+
+static bool RI_TryGetEditableSearchText(UWidget* Widget, FString& OutText)
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    OutText.Reset();
+    if (UEditableTextBox* SearchBox = Cast<UEditableTextBox>(Widget))
+    {
+        OutText = SearchBox->GetText().ToString();
+        return true;
+    }
+    if (UEditableText* SearchText = Cast<UEditableText>(Widget))
+    {
+        OutText = SearchText->GetText().ToString();
+        return true;
+    }
+#else
+    (void)Widget;
+#endif
+    return false;
+}
+
+static bool RI_TrySetEditableSearchText(UWidget* Widget, const FText& InText)
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    if (UEditableTextBox* SearchBox = Cast<UEditableTextBox>(Widget))
+    {
+        SearchBox->SetText(InText);
+        return true;
+    }
+    if (UEditableText* SearchText = Cast<UEditableText>(Widget))
+    {
+        SearchText->SetText(InText);
+        return true;
+    }
+#else
+    (void)Widget;
+    (void)InText;
+#endif
+    return false;
+}
+
+static void RI_BindEditableSearchTextChanged(UWidget* Widget, UInspectorWorldSubsystem* Owner)
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    if (!Widget || !Owner)
+    {
+        return;
+    }
+
+    if (UEditableTextBox* SearchBox = Cast<UEditableTextBox>(Widget))
+    {
+        SearchBox->OnTextChanged.RemoveAll(Owner);
+        SearchBox->OnTextChanged.AddDynamic(Owner, &UInspectorWorldSubsystem::HandleActorSearchTextChanged);
+        return;
+    }
+
+    if (UEditableText* SearchText = Cast<UEditableText>(Widget))
+    {
+        SearchText->OnTextChanged.RemoveAll(Owner);
+        SearchText->OnTextChanged.AddDynamic(Owner, &UInspectorWorldSubsystem::HandleActorSearchTextChanged);
+    }
+#else
+    (void)Widget;
+    (void)Owner;
+#endif
+}
 static constexpr float RI_DefaultPanelViewportInsetY = 8.0f;
 static constexpr float RI_DefaultPanelViewportSafetyMargin = 16.0f;
 static const TCHAR* RI_ConfirmDialogClassPath = TEXT("/RuntimeInspector/UI/WBP_ConfirmDialog.WBP_ConfirmDialog_C");
@@ -4680,6 +4747,7 @@ void UInspectorWorldSubsystem::BindPanelTabButtons()
         Button->OnClicked.AddDynamic(this, &UInspectorWorldSubsystem::HandleTestTabClicked);
     }
 
+    BindActorSearchBox();
     UpdatePanelTabButtonStyles();
     EnsureSharedContextStripInjected();
     UpdateSharedContextStrip();
@@ -5405,11 +5473,35 @@ void UInspectorWorldSubsystem::CacheActorPageSearchTextFromPanel()
 
     if (UWidget* SearchWidget = Panel->WidgetTree->FindWidget(TEXT("ETB_Search")))
     {
-        if (UEditableTextBox* SearchBox = Cast<UEditableTextBox>(SearchWidget))
+        FString SearchText;
+        if (RI_TryGetEditableSearchText(SearchWidget, SearchText))
         {
-            CurrentActorSearchText = SearchBox->GetText().ToString();
+            CurrentActorSearchText = SearchText;
         }
     }
+#endif
+}
+
+void UInspectorWorldSubsystem::BindActorSearchBox()
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    UUserWidget* Panel = PanelWidget.Get();
+    if (!Panel || !Panel->WidgetTree)
+    {
+        return;
+    }
+
+    RI_BindEditableSearchTextChanged(Panel->WidgetTree->FindWidget(TEXT("ETB_Search")), this);
+#endif
+}
+
+void UInspectorWorldSubsystem::HandleActorSearchTextChanged(const FText& InText)
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    CurrentActorSearchText = InText.ToString();
+    RefreshPanel(EInspectorRefreshReason::StructureChanged);
+#else
+    (void)InText;
 #endif
 }
 
@@ -14827,7 +14919,7 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
         && ActorFunctionsSectionWidget->GetVisibility() == ESlateVisibility::Visible;
     const bool bPropertyScrollOk = ActorPropertiesSectionWidget.IsValid() && ActorPropertiesSectionWidget->HasPropertyScrollRoot();
     const bool bFunctionScrollOk = ActorFunctionsSectionWidget.IsValid() && ActorFunctionsSectionWidget->HasFunctionScrollRoot();
-    const bool bFunctionSummaryOk = ActorFunctionsSectionWidget.IsValid() && ActorFunctionsSectionWidget->HasFocusSummary();
+    const bool bFunctionSummaryOk = ActorFunctionsSectionWidget.IsValid() && !ActorFunctionsSectionWidget->HasFocusSummary();
     UWidget* FooterWidget = PanelWidget.IsValid() && PanelWidget->WidgetTree
         ? PanelWidget->WidgetTree->FindWidget(TEXT("Modified"))
         : nullptr;
@@ -14952,9 +15044,14 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
     float MaterialVectorHeight = 0.f;
     float MaterialFavoriteHeight = 0.f;
     const float ExpectedValueControlHeight = RICompactUI::GetInputHeight();
+    const float ExpectedFavoriteControlHeight = FMath::Max(18.f, ExpectedValueControlHeight - 4.f);
     const float HeightTolerance = 0.25f;
     bool bValueHeightContractOk = false;
     bool bTouchHeightContractOk = false;
+    bool bSearchBindingOk = false;
+    bool bSearchFilterOk = false;
+    int32 UnfilteredSearchEntryCount = 0;
+    int32 FilteredSearchEntryCount = 0;
 
     if (ActorPtr)
     {
@@ -15288,6 +15385,37 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
     ViewMaterialSlot = INDEX_NONE;
     RefreshPanel(EInspectorRefreshReason::StructureChanged);
 
+    UnfilteredSearchEntryCount = ActorGroupsEntriesBoxStrong
+        ? ActorGroupsEntriesBoxStrong->GetChildrenCount()
+        : 0;
+
+    FString SearchPageError;
+    const bool bSearchPageReady = SetVisiblePageByName(TEXT("Actor"), SearchPageError);
+    if (bSearchPageReady && PanelWidget.IsValid() && PanelWidget->WidgetTree)
+    {
+        if (UWidget* SearchWidget = PanelWidget->WidgetTree->FindWidget(TEXT("ETB_Search")))
+        {
+            RI_TrySetEditableSearchText(SearchWidget, FText::FromString(TEXT("Arrow")));
+            CacheActorPageSearchTextFromPanel();
+            RefreshActorGroupsSection();
+            RefreshActorPropertiesSection();
+            RefreshActorFunctionsSection();
+            bSearchBindingOk = CurrentActorSearchText.Equals(TEXT("Arrow"), ESearchCase::IgnoreCase);
+            FilteredSearchEntryCount = ActorGroupsEntriesBoxStrong
+                ? ActorGroupsEntriesBoxStrong->GetChildrenCount()
+                : 0;
+            bSearchFilterOk = bSearchBindingOk
+                && FilteredSearchEntryCount > 0
+                && FilteredSearchEntryCount < UnfilteredSearchEntryCount;
+
+            RI_TrySetEditableSearchText(SearchWidget, FText::GetEmpty());
+            CacheActorPageSearchTextFromPanel();
+            RefreshActorGroupsSection();
+            RefreshActorPropertiesSection();
+            RefreshActorFunctionsSection();
+        }
+    }
+
     bValueHeightContractOk =
         bTextInputItemFound
         && bBoolItemFound
@@ -15305,8 +15433,8 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
         && MaterialFavoriteHeight > 0.f
         && PropertyColorHeight > 0.f
         && MaterialVectorHeight > 0.f
-        && FMath::Abs(PropertyFavoriteHeight - ExpectedValueControlHeight) <= HeightTolerance
-        && FMath::Abs(MaterialFavoriteHeight - ExpectedValueControlHeight) <= HeightTolerance
+        && FMath::Abs(PropertyFavoriteHeight - ExpectedFavoriteControlHeight) <= HeightTolerance
+        && FMath::Abs(MaterialFavoriteHeight - ExpectedFavoriteControlHeight) <= HeightTolerance
         && FMath::Abs(PropertyColorHeight - ExpectedValueControlHeight) <= HeightTolerance
         && FMath::Abs(MaterialVectorHeight - ExpectedValueControlHeight) <= HeightTolerance;
 
@@ -15337,6 +15465,8 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
         && bSwatchVisible
         && bValueHeightContractOk
         && bTouchHeightContractOk
+        && bSearchBindingOk
+        && bSearchFilterOk
         && bMaterialSingleClickExpandOk
         && bMaterialTreeFound
         && bMaterialTreeExpandedOk
@@ -15344,7 +15474,7 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
         && bMaterialSlotSelectionOk;
 
     OutReport = FString::Printf(
-        TEXT("ActorPageStructureSelfTest=%s | Groups=%d | Sidebar=%d/%d Workspace=%d/%d Selection=%d/%d Footer=%d LegacyHeader=%d VisibleLegacy=%d | PropertyBox=%d Scroll=%d | FunctionBox=%d Scroll=%d Summary=%d | Columns=%d Left=%.2f Right=%.2f | Vertical=%d Property=%.2f Function=%.2f Dominant=%d | Starred=%d | FocusedComponent=%s | FocusOk=%d | ColorProperty=%s | ColorItem=%d | Swatch=%d | ValueHeights=%d Text=%s:%.1f Bool=%s:%.1f Color=%.1f MaterialScalar=%d(%s:%.1f) MaterialVector=%d(%s:%.1f) Touch=%d Favorite=%.1f/%.1f | MaterialStar=%d | MaterialTree=%d/%d/%d/%d/%d Component=%s Slot=%s Keys=%s | Summary=%s"),
+        TEXT("ActorPageStructureSelfTest=%s | Groups=%d | Sidebar=%d/%d Workspace=%d/%d Selection=%d/%d Footer=%d LegacyHeader=%d VisibleLegacy=%d | PropertyBox=%d Scroll=%d | FunctionBox=%d Scroll=%d SummaryHidden=%d | Columns=%d Left=%.2f Right=%.2f | Vertical=%d Property=%.2f Function=%.2f Dominant=%d | Starred=%d | FocusedComponent=%s | FocusOk=%d | ColorProperty=%s | ColorItem=%d | Swatch=%d | ValueHeights=%d Text=%s:%.1f Bool=%s:%.1f Color=%.1f MaterialScalar=%d(%s:%.1f) MaterialVector=%d(%s:%.1f) Touch=%d Favorite=%.1f/%.1f | Search=%d/%d Entries=%d->%d | MaterialStar=%d | MaterialTree=%d/%d/%d/%d/%d Component=%s Slot=%s Keys=%s | Summary=%s"),
         bPassed ? TEXT("PASS") : TEXT("FAIL"),
         GroupCount,
         bSidebarHostOk ? 1 : 0,
@@ -15389,6 +15519,10 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
         bTouchHeightContractOk ? 1 : 0,
         PropertyFavoriteHeight,
         MaterialFavoriteHeight,
+        bSearchBindingOk ? 1 : 0,
+        bSearchFilterOk ? 1 : 0,
+        UnfilteredSearchEntryCount,
+        FilteredSearchEntryCount,
         bMaterialFavoriteVisible ? 1 : 0,
         bMaterialSingleClickExpandOk ? 1 : 0,
         bMaterialTreeFound ? 1 : 0,
@@ -18054,6 +18188,7 @@ void UInspectorWorldSubsystem::RequestActorPageRefresh()
 void UInspectorWorldSubsystem::RefreshPanel(EInspectorRefreshReason Reason)
 {
 #if RUNTIME_INSPECTOR_ENABLED
+    BindActorSearchBox();
     CacheActorPageSearchTextFromPanel();
     UpdateSharedContextStrip();
     if (UUserWidget* W = PanelWidget.Get())
@@ -18168,6 +18303,155 @@ static bool RI_IsPinnedRootKey(const FString& StableKey)
         || StableKey == TEXT("ROOT_STAR");
 }
 
+static bool RI_IsInspectableVisibleProperty(const FProperty* Prop)
+{
+    if (!Prop || !InspectorPropertyUtils::IsDisplayableProperty(Prop))
+    {
+        return false;
+    }
+
+    return Prop->HasAnyPropertyFlags(CPF_Edit) || Prop->HasAnyPropertyFlags(CPF_BlueprintVisible);
+}
+
+static bool RI_ObjectMatchesAttributeSearch(UObject* TargetObject, const FString& SearchText)
+{
+    if (!TargetObject || SearchText.IsEmpty())
+    {
+        return !SearchText.IsEmpty() ? false : true;
+    }
+
+    if (RI_Match(TargetObject->GetName(), SearchText)
+        || RI_Match(TargetObject->GetClass()->GetName(), SearchText))
+    {
+        return true;
+    }
+
+    UClass* Class = TargetObject->GetClass();
+    if (!Class)
+    {
+        return false;
+    }
+
+    for (TFieldIterator<FProperty> It(Class, EFieldIteratorFlags::IncludeSuper); It; ++It)
+    {
+        const FProperty* Prop = *It;
+        if (!RI_IsInspectableVisibleProperty(Prop))
+        {
+            continue;
+        }
+
+        const FString RawName = Prop->GetName();
+        const FString DisplayName = RI_GetPropertyDisplayNameRuntimeSafe(Prop);
+        if (RI_Match(RawName, SearchText) || RI_Match(DisplayName, SearchText))
+        {
+            return true;
+        }
+    }
+
+    for (TFieldIterator<UFunction> It(Class, EFieldIteratorFlags::IncludeSuper); It; ++It)
+    {
+        UFunction* Function = *It;
+        if (!Function)
+        {
+            continue;
+        }
+
+        if (!Function->HasAnyFunctionFlags(FUNC_BlueprintCallable)
+            || Function->HasAnyFunctionFlags(FUNC_Static | FUNC_Delegate | FUNC_MulticastDelegate | FUNC_BlueprintPure))
+        {
+            continue;
+        }
+
+        const UClass* OwnerClass = Function->GetOwnerClass();
+        if (!RI_IsUserAuthoredFunctionOwnerClass(Class, OwnerClass))
+        {
+            continue;
+        }
+
+        const FString DisplayName = RI_GetFunctionDisplayNameRuntimeSafe(Function);
+        const FString RawName = Function->GetName();
+        if (RI_Match(DisplayName, SearchText) || RI_Match(RawName, SearchText))
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static bool RI_MaterialSlotMatchesAttributeSearch(UStaticMeshComponent* MeshComponent, int32 SlotIndex, const FString& SearchText)
+{
+    if (!MeshComponent || SearchText.IsEmpty() || SlotIndex < 0)
+    {
+        return !SearchText.IsEmpty() ? false : true;
+    }
+
+    UMaterialInterface* Material = MeshComponent->GetMaterial(SlotIndex);
+    const FString SlotLabel = FString::Printf(TEXT("Element %d: %s"), SlotIndex, *GetNameSafe(Material));
+    if (RI_Match(SlotLabel, SearchText))
+    {
+        return true;
+    }
+
+    if (!Material)
+    {
+        return false;
+    }
+
+    TArray<FMaterialParameterInfo> ParameterInfos;
+    TArray<FGuid> ParameterIds;
+    Material->GetAllScalarParameterInfo(ParameterInfos, ParameterIds);
+    for (const FMaterialParameterInfo& Info : ParameterInfos)
+    {
+        if (RI_Match(Info.Name.ToString(), SearchText))
+        {
+            return true;
+        }
+    }
+
+    ParameterInfos.Reset();
+    ParameterIds.Reset();
+    Material->GetAllVectorParameterInfo(ParameterInfos, ParameterIds);
+    for (const FMaterialParameterInfo& Info : ParameterInfos)
+    {
+        if (RI_Match(Info.Name.ToString(), SearchText))
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static bool RI_ComponentMatchesAttributeSearch(UActorComponent* Component, const FString& SearchText)
+{
+    if (!Component || SearchText.IsEmpty())
+    {
+        return !SearchText.IsEmpty() ? false : true;
+    }
+
+    if (RI_Match(Component->GetName(), SearchText)
+        || RI_Match(Component->GetClass()->GetName(), SearchText)
+        || RI_ObjectMatchesAttributeSearch(Component, SearchText))
+    {
+        return true;
+    }
+
+    if (UStaticMeshComponent* MeshComponent = Cast<UStaticMeshComponent>(Component))
+    {
+        const int32 MaterialCount = MeshComponent->GetNumMaterials();
+        for (int32 SlotIndex = 0; SlotIndex < MaterialCount; ++SlotIndex)
+        {
+            if (RI_MaterialSlotMatchesAttributeSearch(MeshComponent, SlotIndex, SearchText))
+            {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
 
 void UInspectorWorldSubsystem::GetGroupTreeChildrenForItem(
     UInspectorGroupItem* Parent,
@@ -18205,6 +18489,11 @@ void UInspectorWorldSubsystem::GetGroupTreeChildrenForItem(
             UMaterialInterface* Mat = SMC->GetMaterial(Slot);
             if (!Mat) continue;
 
+            if (bSearchMode && !RI_MaterialSlotMatchesAttributeSearch(SMC, Slot, SearchText))
+            {
+                continue;
+            }
+
             const FString SlotKey = Parent->StableKey + FString::Printf(TEXT(":MAT:%d"), Slot);
 
             UInspectorGroupItem* SlotGroup = GetOrCreateGroupItem(SlotKey);
@@ -18225,6 +18514,25 @@ void UInspectorWorldSubsystem::GetGroupTreeChildrenForItem(
     // ✅ 普通组件节点：如果 TargetObject 是 StaticMeshComponent，则挂一个 MaterialsRoot
     if (UStaticMeshComponent* SMC = Cast<UStaticMeshComponent>(Parent->TargetObject))
     {
+        bool bShowMaterials = !bSearchMode || RI_Match(TEXT("Materials"), SearchText);
+        if (!bShowMaterials)
+        {
+            const int32 NumMats = SMC->GetNumMaterials();
+            for (int32 Slot = 0; Slot < NumMats; ++Slot)
+            {
+                if (RI_MaterialSlotMatchesAttributeSearch(SMC, Slot, SearchText))
+                {
+                    bShowMaterials = true;
+                    break;
+                }
+            }
+        }
+
+        if (!bShowMaterials)
+        {
+            return;
+        }
+
         const FString MatRootKey = Parent->StableKey + TEXT(":MATERIALS");
 
         UInspectorGroupItem* MatRoot = GetOrCreateGroupItem(MatRootKey);
@@ -18248,6 +18556,10 @@ void UInspectorWorldSubsystem::GetGroupTreeChildrenForItem(
 
         for (UActorComponent* Comp : Components)
         {
+            if (!Comp || (bSearchMode && !RI_ComponentMatchesAttributeSearch(Comp, SearchText)))
+            {
+                continue;
+            }
 
             const FString CompKey = MakeComponentKey(ActorPtr, Comp);
 
@@ -18448,6 +18760,10 @@ void UInspectorWorldSubsystem::GetGroupItemsForSelected(const FString& SearchTex
 
     for (UActorComponent* Comp : Components)
     {
+        if (!Comp || (bSearchMode && !RI_ComponentMatchesAttributeSearch(Comp, SearchText)))
+        {
+            continue;
+        }
 
         const FString CompKey = MakeComponentKey(ActorPtr, Comp);
 
@@ -18481,6 +18797,10 @@ void UInspectorWorldSubsystem::GetGroupItemsForSelected(const FString& SearchTex
                 {
                     UMaterialInterface* Mat = SMC->GetMaterial(Slot);
                     if (!Mat) continue;
+                    if (bSearchMode && !RI_MaterialSlotMatchesAttributeSearch(SMC, Slot, SearchText))
+                    {
+                        continue;
+                    }
 
                     const FString SlotKey = MatRootKey + FString::Printf(TEXT(":MAT:%d"), Slot);
 
@@ -19316,7 +19636,13 @@ void UInspectorWorldSubsystem::AppendPropertiesForObject(
         if (!bVisible) continue;
 
         const FString PropNameStr = Prop->GetName();
-        if (!NameMatchesSearch(PropNameStr, SearchText)) continue;
+        const FString PropDisplayName = RI_GetPropertyDisplayNameRuntimeSafe(Prop);
+        if (!SearchText.IsEmpty()
+            && !NameMatchesSearch(PropNameStr, SearchText)
+            && !NameMatchesSearch(PropDisplayName, SearchText))
+        {
+            continue;
+        }
 
         UInspectorPropertyItem* Item = GetOrCreatePropertyItem(TargetObject, Prop->GetFName());
         if (!Item)
@@ -24437,10 +24763,7 @@ bool UInspectorWorldSubsystem::NavigateToPinnedItem(UObject* ItemObject, FString
 
     if (PanelWidget.IsValid() && PanelWidget->WidgetTree)
     {
-        if (UEditableTextBox* SearchBox = Cast<UEditableTextBox>(PanelWidget->WidgetTree->FindWidget(TEXT("ETB_Search"))))
-        {
-            SearchBox->SetText(FText::GetEmpty());
-        }
+        RI_TrySetEditableSearchText(PanelWidget->WidgetTree->FindWidget(TEXT("ETB_Search")), FText::GetEmpty());
         if (UCheckBox* OnlyModifyToggle = Cast<UCheckBox>(PanelWidget->WidgetTree->FindWidget(TEXT("Toggle_OnModify"))))
         {
             OnlyModifyToggle->SetIsChecked(false);

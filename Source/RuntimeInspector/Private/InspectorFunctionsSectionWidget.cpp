@@ -121,18 +121,6 @@ void UInspectorFunctionsSectionWidget::BuildWidgetTree()
         HeaderSlot->SetPadding(FMargin(0.f, 0.f, 0.f, RICompactUI::GetInlineGap()));
     }
 
-    FocusSummaryText = RICompactUI::MakeText(
-        WidgetTree,
-        TEXT("Focused target: Actor root"),
-        RICompactUI::GetMutedFontSize(),
-        false,
-        RI_FunctionMutedColor(),
-        true);
-    if (UVerticalBoxSlot* SummarySlot = RootBox->AddChildToVerticalBox(FocusSummaryText))
-    {
-        SummarySlot->SetPadding(FMargin(0.f, 0.f, 0.f, RICompactUI::GetInlineGap()));
-    }
-
     UScrollBox* ScrollBox = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("RI_ActorFunctionsScroll"));
 
     FunctionsEntriesBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ActorFunctionsEntriesBox"));
@@ -207,15 +195,6 @@ void UInspectorFunctionsSectionWidget::RefreshFromSubsystem()
 
     TArray<UInspectorFunctionItem*> Items;
     InspectorSubsystem->GetFunctionItemsForSelected(InspectorSubsystem->GetCurrentActorSearchText(), Items);
-
-    const UObject* FocusedObject = InspectorSubsystem->GetFocusedInspectObject();
-    if (FocusSummaryText)
-    {
-        const FString FocusSummary = FocusedObject
-            ? FString::Printf(TEXT("Focused target: %s"), *FocusedObject->GetName())
-            : TEXT("Focused target: Actor root");
-        FocusSummaryText->SetText(FText::FromString(FocusSummary));
-    }
 
     if (Items.Num() == 0)
     {

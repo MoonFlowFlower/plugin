@@ -171,8 +171,9 @@ void UInspectorFunctionRowWidget::BuildWidgetTree()
     RICompactUI::ConfigureButton(FavoriteButton, RICompactUI::ERIButtonVisualStyle::Secondary, false);
     FavoriteButton->OnClicked.AddDynamic(this, &UInspectorFunctionRowWidget::HandleFavoriteClicked);
     FavoriteSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_FunctionRowFavoriteSize"));
-    FavoriteSizeBox->SetWidthOverride(24.f);
-    FavoriteSizeBox->SetHeightOverride(RICompactUI::GetInputHeight());
+    const float FavoriteButtonSize = FMath::Max(18.f, RICompactUI::GetInputHeight() - 4.f);
+    FavoriteSizeBox->SetWidthOverride(FavoriteButtonSize);
+    FavoriteSizeBox->SetHeightOverride(FavoriteButtonSize);
     FavoriteText = RICompactUI::MakeText(WidgetTree, TEXT("☆"), RICompactUI::GetValueFontSize(), true, RI_FunctionRowMutedColor(), false);
     FavoriteText->SetJustification(ETextJustify::Center);
     FavoriteSizeBox->SetContent(FavoriteText);
@@ -186,7 +187,7 @@ void UInspectorFunctionRowWidget::BuildWidgetTree()
     TitleButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("RI_FunctionRowTitleButton"));
     RICompactUI::ConfigureButton(TitleButton, RICompactUI::ERIButtonVisualStyle::Subtle, false);
     TitleButton->OnClicked.AddDynamic(this, &UInspectorFunctionRowWidget::HandleTitleClicked);
-    TitleText = RICompactUI::MakeText(WidgetTree, TEXT("Function"), RICompactUI::GetLabelFontSize(), true, RI_FunctionRowTextColor(), true);
+    TitleText = RICompactUI::MakeText(WidgetTree, TEXT("Function"), RICompactUI::GetLabelFontSize(), true, RI_FunctionRowTextColor(), false);
     TitleButton->AddChild(TitleText);
     if (UHorizontalBoxSlot* TitleSlot = HeaderRow->AddChildToHorizontalBox(TitleButton))
     {
