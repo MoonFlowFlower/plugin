@@ -7,6 +7,7 @@
 class UScrollBox;
 class UButton;
 class UInspectorGroupItem;
+class UInspectorFunctionItem;
 class UInspectorMaterialParamItem;
 class UInspectorPropertyItem;
 class UInspectorWorldSubsystem;
@@ -65,6 +66,7 @@ public:
     int32 GetPinnedEntryWidgetCountForDebug() const;
     bool InvokeGroupItemClickForAutomation(const FString& StableKey);
     void GetVisibleGroupStableKeysForAutomation(TArray<FString>& OutKeys) const;
+    bool HasTouchScrollSupportForAutomation() const;
 
 protected:
     virtual TSharedRef<SWidget> RebuildWidget() override;

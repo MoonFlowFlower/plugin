@@ -1,0 +1,487 @@
+[
+  {
+    "Id": "confirm_dialog_color_input",
+    "DisplayName": "Confirm Dialog Color Input",
+    "Category": "UI",
+    "Description": "Validates confirm-dialog color input parsing and preview behavior.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": true,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "confirm_dialog_color_input"
+  },
+  {
+    "Id": "settings_preview",
+    "DisplayName": "Settings Preview",
+    "Category": "Settings",
+    "Description": "Validates settings preview apply behavior.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": true,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "settings_preview"
+  },
+  {
+    "Id": "settings_save_persistence",
+    "DisplayName": "Settings Save Persistence",
+    "Category": "Settings",
+    "Description": "Validates saved settings persist across reload.",
+    "bRequiresPIE": false,
+    "bMutatesRuntime": false,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "settings_save_persistence"
+  },
+  {
+    "Id": "star_live_edit_and_run",
+    "DisplayName": "Star Live Edit And Run",
+    "Category": "Settings",
+    "Description": "Validates star toggle live-edit behavior.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": true,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "star_live_edit_and_run"
+  },
+  {
+    "Id": "star_precise_navigation",
+    "DisplayName": "Star Precise Navigation",
+    "Category": "Settings",
+    "Description": "Validates focused star navigation paths.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": false,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "star_precise_navigation"
+  },
+  {
+    "Id": "settings_hotkey_rebind",
+    "DisplayName": "Settings Hotkey Rebind",
+    "Category": "Settings",
+    "Description": "Validates hotkey rebind workflow.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": true,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "settings_hotkey_rebind"
+  },
+  {
+    "Id": "settings_page_layout",
+    "DisplayName": "Settings Page Layout",
+    "Category": "Settings",
+    "Description": "Validates Settings page layout.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": false,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "settings_page_layout"
+  },
+  {
+    "Id": "theme_preset_preview",
+    "DisplayName": "Theme Preset Preview",
+    "Category": "Settings",
+    "Description": "Validates theme preset preview behavior.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": true,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "theme_preset_preview"
+  },
+  {
+    "Id": "patch_preset_roundtrip",
+    "DisplayName": "Patch Preset Roundtrip",
+    "Category": "Actor",
+    "Description": "Validates patch preset export and restore roundtrip.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": true,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "patch_preset_roundtrip"
+  },
+  {
+    "Id": "promote_preview",
+    "DisplayName": "Promote Preview",
+    "Category": "Promote",
+    "Description": "Validates promote preview generation.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": true,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "promote_preview"
+  },
+  {
+    "Id": "promote_config",
+    "DisplayName": "Promote Config",
+    "Category": "Promote",
+    "Description": "Validates config source promote workflow.",
+    "bRequiresPIE": false,
+    "bMutatesRuntime": true,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "promote_config"
+  },
+  {
+    "Id": "promote_blueprint_apply",
+    "DisplayName": "Promote Blueprint Apply",
+    "Category": "Promote",
+    "Description": "Validates Blueprint apply-to-source workflow.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": true,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "promote_blueprint_apply"
+  },
+  {
+    "Id": "promote_material_apply",
+    "DisplayName": "Promote Material Apply",
+    "Category": "Promote",
+    "Description": "Validates material apply-to-source workflow.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": true,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "promote_material_apply"
+  },
+  {
+    "Id": "audit_report",
+    "DisplayName": "Audit Report",
+    "Category": "Audit",
+    "Description": "Validates audit report generation.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": true,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "audit_report"
+  },
+  {
+    "Id": "file_page_injection",
+    "DisplayName": "File Page Injection",
+    "Category": "File",
+    "Description": "Validates Changes page injection and mounting.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": false,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "file_page_injection"
+  },
+  {
+    "Id": "context_strip",
+    "DisplayName": "Context Strip",
+    "Category": "UI",
+    "Description": "Validates shared context strip behavior.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": false,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "context_strip"
+  },
+  {
+    "Id": "capture_changes_first_open_perf",
+    "DisplayName": "Capture Changes First Open Perf",
+    "Category": "Validation",
+    "Description": "Runs the Changes first-open validation capture and exports a structured artifact.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": false,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "capture_changes_first_open_perf"
+  },
+  {
+    "Id": "transform_source_persistence_prepare",
+    "DisplayName": "Transform Source Persistence Prepare",
+    "Category": "Validation",
+    "Description": "Stages and promotes SceneComponent transform values, then writes a pending checkpoint for post-PIE persistence verification.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": true,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "transform_source_persistence_prepare"
+  },
+  {
+    "Id": "transform_source_persistence_verify_restore",
+    "DisplayName": "Transform Source Persistence Verify Restore",
+    "Category": "Validation",
+    "Description": "After a fresh PIE start, verifies promoted SceneComponent transform values persisted and restores source/runtime baselines.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": true,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "transform_source_persistence_verify_restore"
+  },
+  {
+    "Id": "workflow_page_view",
+    "DisplayName": "Workflow Page View",
+    "Category": "Workflow",
+    "Description": "Validates workflow page rendering.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": false,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "workflow_page_view"
+  },
+  {
+    "Id": "test_page_layout",
+    "DisplayName": "Tools Page Layout",
+    "Category": "Workflow",
+    "Description": "Validates Tools page layout.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": false,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "test_page_layout"
+  },
+  {
+    "Id": "panel_interaction",
+    "DisplayName": "Panel Interaction",
+    "Category": "UI",
+    "Description": "Validates panel interaction paths.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": false,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "panel_interaction"
+  },
+  {
+    "Id": "actor_page_structure",
+    "DisplayName": "Actor Page Structure",
+    "Category": "Actor",
+    "Description": "Validates Actor page structure.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": false,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "actor_page_structure"
+  },
+  {
+    "Id": "file_workflow",
+    "DisplayName": "File Workflow",
+    "Category": "File",
+    "Description": "Validates the end-to-end Changes workflow.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": true,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "file_workflow"
+  },
+  {
+    "Id": "file_promote_workflow",
+    "DisplayName": "File Promote Workflow",
+    "Category": "File",
+    "Description": "Validates the Changes promote workflow.",
+    "bRequiresPIE": false,
+    "bMutatesRuntime": true,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "file_promote_workflow"
+  },
+  {
+    "Id": "file_compare_view",
+    "DisplayName": "File Compare View",
+    "Category": "File",
+    "Description": "Validates file compare rendering.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": false,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "file_compare_view"
+  },
+  {
+    "Id": "file_role_compare_view",
+    "DisplayName": "File Role Compare View",
+    "Category": "File",
+    "Description": "Validates role compare rendering on Changes.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": false,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "file_role_compare_view"
+  },
+  {
+    "Id": "file_remote_session_compare_view",
+    "DisplayName": "File Remote Session Compare View",
+    "Category": "File",
+    "Description": "Validates remote session compare rendering on Changes.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": false,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "file_remote_session_compare_view"
+  },
+  {
+    "Id": "actor_promote_file_workflow",
+    "DisplayName": "Actor Promote File Workflow",
+    "Category": "Actor",
+    "Description": "Validates actor-aware promote workflow on Changes.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": true,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "actor_promote_file_workflow"
+  },
+  {
+    "Id": "actor_apply_file_workflow",
+    "DisplayName": "Actor Apply File Workflow",
+    "Category": "Actor",
+    "Description": "Validates actor-aware apply workflow on Changes.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": true,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "actor_apply_file_workflow"
+  },
+  {
+    "Id": "runtime_session_role",
+    "DisplayName": "Runtime Session Role",
+    "Category": "Remote",
+    "Description": "Validates runtime session role reporting.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": true,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "runtime_session_role"
+  },
+  {
+    "Id": "runtime_role_compare",
+    "DisplayName": "Runtime Role Compare",
+    "Category": "Remote",
+    "Description": "Validates runtime role compare reporting.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": true,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "runtime_role_compare"
+  },
+  {
+    "Id": "remote_runtime_foundation",
+    "DisplayName": "Remote Runtime Foundation",
+    "Category": "Remote",
+    "Description": "Validates remote runtime discovery and connection.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": false,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "remote_runtime_foundation"
+  },
+  {
+    "Id": "remote_session_compare",
+    "DisplayName": "Remote Session Compare",
+    "Category": "Remote",
+    "Description": "Validates remote session compare output.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": false,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "remote_session_compare"
+  },
+  {
+    "Id": "remote_session_target_set_compare",
+    "DisplayName": "Remote Session Target Set Compare",
+    "Category": "Remote",
+    "Description": "Validates remote target-set compare output.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": false,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "remote_session_target_set_compare"
+  },
+  {
+    "Id": "remote_session_target_set_compare_matrix",
+    "DisplayName": "Remote Session Target Set Compare Matrix",
+    "Category": "Remote",
+    "Description": "Validates white-listed remote target-set compare matrix.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": false,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "remote_session_target_set_compare_matrix"
+  },
+  {
+    "Id": "remote_session_context_ui",
+    "DisplayName": "Remote Session Context UI",
+    "Category": "Remote",
+    "Description": "Validates shared remote session UI context.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": false,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "remote_session_context_ui"
+  },
+  {
+    "Id": "remote_packaged_foundation",
+    "DisplayName": "Remote Packaged Foundation",
+    "Category": "Remote",
+    "Description": "Validates packaged runtime discovery and connection.",
+    "bRequiresPIE": false,
+    "bMutatesRuntime": false,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "remote_packaged_foundation"
+  },
+  {
+    "Id": "remote_packaged_patch_pull",
+    "DisplayName": "Remote Packaged Patch Pull",
+    "Category": "Remote",
+    "Description": "Validates packaged runtime patch pull workflow.",
+    "bRequiresPIE": false,
+    "bMutatesRuntime": true,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "remote_packaged_patch_pull"
+  },
+  {
+    "Id": "remote_packaged_to_source_closure",
+    "DisplayName": "Remote Packaged To Source Closure",
+    "Category": "Remote",
+    "Description": "Validates packaged runtime to source closure.",
+    "bRequiresPIE": false,
+    "bMutatesRuntime": true,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "remote_packaged_to_source_closure"
+  },
+  {
+    "Id": "fab_screenshot_foundation",
+    "DisplayName": "Fab Screenshot Foundation",
+    "Category": "Presentation",
+    "Description": "Applies the baseline RuntimeInspector screenshot state.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": false,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "fab_screenshot_foundation"
+  },
+  {
+    "Id": "fab_screenshot_actor_page",
+    "DisplayName": "Fab Screenshot Actor Page",
+    "Category": "Presentation",
+    "Description": "Routes the panel to Actor for screenshot capture.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": false,
+    "bEnabled": true,
+    "ActionSequence": [
+      { "ActionType": "OpenPanel" },
+      { "ActionType": "ShowPage", "PageTarget": "Actor" },
+      { "ActionType": "RefreshPanel", "RefreshReason": 3 },
+      { "ActionType": "AppendReportMessage", "StringValue": "Actor page routed for screenshot capture." }
+    ]
+  },
+  {
+    "Id": "fab_screenshot_settings_page",
+    "DisplayName": "Fab Screenshot Settings Page",
+    "Category": "Presentation",
+    "Description": "Routes the panel to Settings for screenshot capture.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": false,
+    "bEnabled": true,
+    "ActionSequence": [
+      { "ActionType": "OpenPanel" },
+      { "ActionType": "ShowPage", "PageTarget": "Settings" },
+      { "ActionType": "RefreshPanel", "RefreshReason": 3 },
+      { "ActionType": "AppendReportMessage", "StringValue": "Settings page routed for screenshot capture." }
+    ]
+  },
+  {
+    "Id": "fab_screenshot_tools_page",
+    "DisplayName": "Fab Screenshot Tools Page",
+    "Category": "Presentation",
+    "Description": "Routes the panel to Tools for screenshot capture.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": false,
+    "bEnabled": true,
+    "ActionSequence": [
+      { "ActionType": "OpenPanel" },
+      { "ActionType": "ShowPage", "PageTarget": "Tools" },
+      { "ActionType": "RefreshPanel", "RefreshReason": 3 },
+      { "ActionType": "AppendReportMessage", "StringValue": "Tools page routed for screenshot capture." }
+    ]
+  },
+  {
+    "Id": "fab_screenshot_remote_session",
+    "DisplayName": "Fab Screenshot Remote Session",
+    "Category": "Presentation",
+    "Description": "Validates remote session screenshot state.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": false,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "fab_screenshot_remote_session"
+  },
+  {
+    "Id": "fab_screenshot_promote_or_audit",
+    "DisplayName": "Fab Screenshot Promote Or Audit",
+    "Category": "Presentation",
+    "Description": "Validates promote-or-audit screenshot state.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": false,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "fab_screenshot_promote_or_audit"
+  },
+  {
+    "Id": "workflow_matrix",
+    "DisplayName": "Workflow Matrix",
+    "Category": "Workflow",
+    "Description": "Validates white-listed workflow matrix execution.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": true,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "workflow_matrix"
+  }
+]

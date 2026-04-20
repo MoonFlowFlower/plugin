@@ -8,6 +8,7 @@ class UBorder;
 class UButton;
 class UEditableTextBox;
 class UHorizontalBox;
+class UImage;
 class UInspectorMaterialParamItem;
 class UInspectorWorldSubsystem;
 class USizeBox;
@@ -43,6 +44,7 @@ protected:
     virtual TSharedRef<SWidget> RebuildWidget() override;
     virtual void NativeConstruct() override;
     virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
+    virtual FReply NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
 
 private:
     void BuildWidgetTree();
@@ -74,16 +76,13 @@ private:
     TObjectPtr<UButton> FavoriteButton = nullptr;
 
     UPROPERTY(Transient)
-    TObjectPtr<UTextBlock> FavoriteText = nullptr;
+    TObjectPtr<UImage> FavoriteIcon = nullptr;
 
     UPROPERTY(Transient)
     TObjectPtr<USizeBox> FavoriteSizeBox = nullptr;
 
     UPROPERTY(Transient)
     TObjectPtr<UTextBlock> NameText = nullptr;
-
-    UPROPERTY(Transient)
-    TObjectPtr<UButton> NameButton = nullptr;
 
     UPROPERTY(Transient)
     TObjectPtr<UTextBlock> ReadOnlyValueText = nullptr;

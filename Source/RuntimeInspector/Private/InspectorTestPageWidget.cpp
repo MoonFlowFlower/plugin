@@ -1,6 +1,7 @@
 #include "InspectorTestPageWidget.h"
 
 #include "InspectorCompactWidgetUtils.h"
+#include "InspectorTouchScrollBox.h"
 #include "InspectorWorldSubsystem.h"
 
 #include "Blueprint/WidgetTree.h"
@@ -99,12 +100,49 @@ namespace
             return SessionInfo.SessionId == SessionId;
         });
     }
+
+    static void RI_ConfigureNamedScrollBoxTouchSupport(UWidgetTree* WidgetTree, const FName& ScrollBoxName)
+    {
+        if (!WidgetTree)
+        {
+            return;
+        }
+
+        RIInspectorTouchScroll::Configure(Cast<UScrollBox>(WidgetTree->FindWidget(ScrollBoxName)));
+    }
 }
 
 UInspectorTestPageWidget::UInspectorTestPageWidget(const FObjectInitializer& ObjectInitializer)
     : Super(ObjectInitializer)
 {
     SetIsFocusable(false);
+}
+
+bool UInspectorTestPageWidget::HasTouchScrollSupportForAutomation() const
+{
+    if (!WidgetTree)
+    {
+        return false;
+    }
+
+    const TArray<FName> ScrollNames = {
+        TEXT("RI_TestPageScroll"),
+        TEXT("RI_WorkflowDefinitionsScroll"),
+        TEXT("RI_TestDefinitionsScroll"),
+        TEXT("RI_TestResultsScroll"),
+        TEXT("RI_TestReportScroll"),
+        TEXT("RI_ToolsActivityLogScroll")
+    };
+
+    for (const FName& ScrollName : ScrollNames)
+    {
+        if (!RIInspectorTouchScroll::HasTouchSupport(Cast<UScrollBox>(WidgetTree->FindWidget(ScrollName))))
+        {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 void UInspectorTestPageWidget::SetInspectorSubsystem(UInspectorWorldSubsystem* InSubsystem)
@@ -115,7 +153,10 @@ void UInspectorTestPageWidget::SetInspectorSubsystem(UInspectorWorldSubsystem* I
 
 TSharedRef<SWidget> UInspectorTestPageWidget::RebuildWidget()
 {
-    if (WidgetTree && !WidgetTree->RootWidget)
+    const bool bHasUsableBlueprintLayout = AvailableWorkflowsScroll
+        || (WidgetTree && WidgetTree->FindWidget(TEXT("RI_TestPageScroll")) != nullptr);
+
+    if (WidgetTree && (!WidgetTree->RootWidget || !bHasUsableBlueprintLayout))
     {
         BuildWidgetTree();
     }
@@ -126,6 +167,15 @@ TSharedRef<SWidget> UInspectorTestPageWidget::RebuildWidget()
 void UInspectorTestPageWidget::NativeConstruct()
 {
     Super::NativeConstruct();
+    if (WidgetTree)
+    {
+        RI_ConfigureNamedScrollBoxTouchSupport(WidgetTree, TEXT("RI_TestPageScroll"));
+        RI_ConfigureNamedScrollBoxTouchSupport(WidgetTree, TEXT("RI_WorkflowDefinitionsScroll"));
+        RI_ConfigureNamedScrollBoxTouchSupport(WidgetTree, TEXT("RI_TestDefinitionsScroll"));
+        RI_ConfigureNamedScrollBoxTouchSupport(WidgetTree, TEXT("RI_TestResultsScroll"));
+        RI_ConfigureNamedScrollBoxTouchSupport(WidgetTree, TEXT("RI_TestReportScroll"));
+        RI_ConfigureNamedScrollBoxTouchSupport(WidgetTree, TEXT("RI_ToolsActivityLogScroll"));
+    }
     RefreshFromSubsystem();
 }
 
@@ -143,7 +193,8 @@ void UInspectorTestPageWidget::BuildWidgetTree()
     UVerticalBox* RootBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_TestRootBox"));
     RootBorder->SetContent(RootBox);
 
-    UScrollBox* PageScroll = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("RI_TestPageScroll"));
+    UInspectorTouchScrollBox* PageScroll = WidgetTree->ConstructWidget<UInspectorTouchScrollBox>(UInspectorTouchScrollBox::StaticClass(), TEXT("RI_TestPageScroll"));
+    RIInspectorTouchScroll::Configure(PageScroll);
     if (UVerticalBoxSlot* VBoxSlot = RootBox->AddChildToVerticalBox(PageScroll))
     {
         VBoxSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
@@ -184,47 +235,17 @@ void UInspectorTestPageWidget::BuildWidgetTree()
     UVerticalBox* ControlsBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_TestControlsBox"));
     ControlsBorder->SetContent(ControlsBox);
 
-    UHorizontalBox* WorkflowSelectionRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_WorkflowSelectionRow"));
-    ControlsBox->AddChildToVerticalBox(WorkflowSelectionRow);
-
-    UTextBlock* SelectedWorkflowLabel = RI_MakeText(WidgetTree, TEXT("Selected Workflow"), 7, true, RI_TestMutedTextColor());
-    if (UHorizontalBoxSlot* HBoxSlot = WorkflowSelectionRow->AddChildToHorizontalBox(SelectedWorkflowLabel))
-    {
-        HBoxSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
-        HBoxSlot->SetVerticalAlignment(VAlign_Center);
-    }
-
-    SelectedWorkflowValueText = RI_MakeText(WidgetTree, TEXT("None"), 7, true, RI_TestTextColor(), true);
-    SelectedWorkflowValueText->SetClipping(EWidgetClipping::ClipToBounds);
-    if (UHorizontalBoxSlot* HBoxSlot = WorkflowSelectionRow->AddChildToHorizontalBox(SelectedWorkflowValueText))
-    {
-        HBoxSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-        HBoxSlot->SetVerticalAlignment(VAlign_Center);
-    }
-
-    UHorizontalBox* SelectionRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_TestSelectionRow"));
-    if (UVerticalBoxSlot* VBoxSlot = ControlsBox->AddChildToVerticalBox(SelectionRow))
+    if (UVerticalBoxSlot* VBoxSlot = ControlsBox->AddChildToVerticalBox(CreateInfoRow(TEXT("Selected Workflow"), SelectedWorkflowValueText, true, TEXT("RI_WorkflowSelectionRow"))))
     {
         VBoxSlot->SetPadding(FMargin(0.f, 4.f, 0.f, 0.f));
     }
 
-    UTextBlock* SelectedLabel = RI_MakeText(WidgetTree, TEXT("Selected Test"), 7, true, RI_TestMutedTextColor());
-    if (UHorizontalBoxSlot* HBoxSlot = SelectionRow->AddChildToHorizontalBox(SelectedLabel))
+    if (UVerticalBoxSlot* VBoxSlot = ControlsBox->AddChildToVerticalBox(CreateInfoRow(TEXT("Selected Test"), SelectedTestValueText, true, TEXT("RI_TestSelectionRow"))))
     {
-        HBoxSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
-        HBoxSlot->SetVerticalAlignment(VAlign_Center);
+        VBoxSlot->SetPadding(FMargin(0.f, 4.f, 0.f, 0.f));
     }
 
-    SelectedTestValueText = RI_MakeText(WidgetTree, TEXT("None"), 7, true, RI_TestTextColor(), true);
-    SelectedTestValueText->SetClipping(EWidgetClipping::ClipToBounds);
-    if (UHorizontalBoxSlot* HBoxSlot = SelectionRow->AddChildToHorizontalBox(SelectedTestValueText))
-    {
-        HBoxSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-        HBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 0.f));
-        HBoxSlot->SetVerticalAlignment(VAlign_Center);
-    }
-
-    UHorizontalBox* ActionRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_TestActionRow"));
+    UVerticalBox* ActionRow = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_TestActionRow"));
     if (UVerticalBoxSlot* VBoxSlot = ControlsBox->AddChildToVerticalBox(ActionRow))
     {
         VBoxSlot->SetPadding(FMargin(0.f, 5.f, 0.f, 0.f));
@@ -242,25 +263,31 @@ void UInspectorTestPageWidget::BuildWidgetTree()
     };
 
     MakeButton(TEXT("BTN_RunSelectedWorkflow"), TEXT("Run Workflow"), RunSelectedWorkflowButton)->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleRunSelectedWorkflowClicked);
-    if (UHorizontalBoxSlot* HBoxSlot = ActionRow->AddChildToHorizontalBox(RunSelectedWorkflowButton))
+    if (UVerticalBoxSlot* VBoxSlot = ActionRow->AddChildToVerticalBox(RunSelectedWorkflowButton))
     {
-        HBoxSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
+        VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+        VBoxSlot->SetHorizontalAlignment(HAlign_Fill);
     }
 
     MakeButton(TEXT("BTN_RunSelected"), TEXT("Run Test"), RunSelectedButton)->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleRunSelectedClicked);
-    if (UHorizontalBoxSlot* HBoxSlot = ActionRow->AddChildToHorizontalBox(RunSelectedButton))
+    if (UVerticalBoxSlot* VBoxSlot = ActionRow->AddChildToVerticalBox(RunSelectedButton))
     {
-        HBoxSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
+        VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+        VBoxSlot->SetHorizontalAlignment(HAlign_Fill);
     }
 
     MakeButton(TEXT("BTN_RunAll"), TEXT("Run All"), RunAllButton)->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleRunAllClicked);
-    if (UHorizontalBoxSlot* HBoxSlot = ActionRow->AddChildToHorizontalBox(RunAllButton))
+    if (UVerticalBoxSlot* VBoxSlot = ActionRow->AddChildToVerticalBox(RunAllButton))
     {
-        HBoxSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
+        VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+        VBoxSlot->SetHorizontalAlignment(HAlign_Fill);
     }
 
     MakeButton(TEXT("BTN_RefreshTests"), TEXT("Refresh"), RefreshButton)->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleRefreshClicked);
-    ActionRow->AddChildToHorizontalBox(RefreshButton);
+    if (UVerticalBoxSlot* VBoxSlot = ActionRow->AddChildToVerticalBox(RefreshButton))
+    {
+        VBoxSlot->SetHorizontalAlignment(HAlign_Fill);
+    }
 
     StatusMessageText = RI_MakeText(WidgetTree, TEXT(""), 7, false, RI_TestMutedTextColor(), true);
     if (UVerticalBoxSlot* VBoxSlot = ControlsBox->AddChildToVerticalBox(StatusMessageText))
@@ -273,7 +300,8 @@ void UInspectorTestPageWidget::BuildWidgetTree()
         VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, RICompactUI::GetInlineGap()));
     }
 
-    AvailableWorkflowsScroll = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("RI_WorkflowDefinitionsScroll"));
+    AvailableWorkflowsScroll = WidgetTree->ConstructWidget<UInspectorTouchScrollBox>(UInspectorTouchScrollBox::StaticClass(), TEXT("RI_WorkflowDefinitionsScroll"));
+    RIInspectorTouchScroll::Configure(AvailableWorkflowsScroll);
     USizeBox* WorkflowSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_WorkflowDefinitionsSize"));
     WorkflowSize->SetMaxDesiredHeight(RICompactUI::GetCompactListHeight());
     AvailableWorkflowsBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_WorkflowDefinitionsBox"));
@@ -294,7 +322,8 @@ void UInspectorTestPageWidget::BuildWidgetTree()
         VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
     }
 
-    AvailableTestsScroll = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("RI_TestDefinitionsScroll"));
+    AvailableTestsScroll = WidgetTree->ConstructWidget<UInspectorTouchScrollBox>(UInspectorTouchScrollBox::StaticClass(), TEXT("RI_TestDefinitionsScroll"));
+    RIInspectorTouchScroll::Configure(AvailableTestsScroll);
     USizeBox* TestsSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_TestDefinitionsSize"));
     TestsSize->SetMaxDesiredHeight(RICompactUI::GetCompactListHeight());
     AvailableTestsBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_TestDefinitionsBox"));
@@ -359,7 +388,8 @@ void UInspectorTestPageWidget::BuildWidgetTree()
         VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, RICompactUI::GetInlineGap()));
     }
 
-    ResultsScroll = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("RI_TestResultsScroll"));
+    ResultsScroll = WidgetTree->ConstructWidget<UInspectorTouchScrollBox>(UInspectorTouchScrollBox::StaticClass(), TEXT("RI_TestResultsScroll"));
+    RIInspectorTouchScroll::Configure(ResultsScroll);
     USizeBox* ResultsSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_TestResultsSize"));
     ResultsSize->SetMaxDesiredHeight(RICompactUI::GetCompactListHeight());
     AvailableTestsBox->SetVisibility(ESlateVisibility::Visible);
@@ -397,7 +427,8 @@ void UInspectorTestPageWidget::BuildWidgetTree()
         VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
     }
 
-    UScrollBox* ReportScroll = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("RI_TestReportScroll"));
+    UInspectorTouchScrollBox* ReportScroll = WidgetTree->ConstructWidget<UInspectorTouchScrollBox>(UInspectorTouchScrollBox::StaticClass(), TEXT("RI_TestReportScroll"));
+    RIInspectorTouchScroll::Configure(ReportScroll);
     SelectedResultReportText = RI_MakeText(WidgetTree, TEXT("Run a test to see the detailed report."), 7, false, RI_TestMutedTextColor(), true);
     ReportScroll->AddChild(SelectedResultReportText);
     ReportBox->AddChildToVerticalBox(ReportScroll);
@@ -485,28 +516,16 @@ UWidget* UInspectorTestPageWidget::CreateCollapsibleSectionHeader(const FString&
 
 UWidget* UInspectorTestPageWidget::CreateInfoRow(const FString& Label, UTextBlock*& OutValueText, bool bWrapValue, const FName& WidgetName)
 {
-    UBorder* Border = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), WidgetName);
-    Border->SetPadding(FMargin(5.f, 2.f));
-    Border->SetBrushColor(RI_TestRowColor());
-
-    UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
-    Border->SetContent(Row);
-
-    UTextBlock* LabelText = RI_MakeText(WidgetTree, Label, RICompactUI::GetLabelFontSize(), true, RI_TestMutedTextColor());
-    if (UHorizontalBoxSlot* HBoxSlot = Row->AddChildToHorizontalBox(LabelText))
-    {
-        HBoxSlot->SetPadding(FMargin(0.f, 0.f, 6.f, 0.f));
-        HBoxSlot->SetVerticalAlignment(VAlign_Center);
-    }
-
-    OutValueText = RI_MakeText(WidgetTree, TEXT("-"), RICompactUI::GetValueFontSize(), false, RI_TestTextColor(), bWrapValue);
-    if (UHorizontalBoxSlot* HBoxSlot = Row->AddChildToHorizontalBox(OutValueText))
-    {
-        HBoxSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-        HBoxSlot->SetVerticalAlignment(VAlign_Center);
-    }
-
-    return Border;
+    return RICompactUI::MakeStackedValueRow(
+        WidgetTree,
+        Label,
+        OutValueText,
+        RI_TestRowColor(),
+        RI_TestMutedTextColor(),
+        RI_TestTextColor(),
+        bWrapValue,
+        NAME_None,
+        WidgetName);
 }
 
 void UInspectorTestPageWidget::SetSectionExpanded(UWidget* ContentWidget, UTextBlock* ToggleText, bool bExpanded, const FString& ExpandedLabel, const FString& CollapsedLabel)
@@ -536,44 +555,23 @@ UWidget* UInspectorTestPageWidget::CreateRemoteSessionSection()
     UVerticalBox* PanelBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
     PanelBorder->SetContent(PanelBox);
 
-    UHorizontalBox* SessionRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_RemoteSessionSelectionRow"));
-    PanelBox->AddChildToVerticalBox(SessionRow);
-
-    UTextBlock* SessionLabel = RI_MakeText(WidgetTree, TEXT("Selected Session"), 7, true, RI_TestMutedTextColor());
-    if (UHorizontalBoxSlot* HBoxSlot = SessionRow->AddChildToHorizontalBox(SessionLabel))
+    if (UVerticalBoxSlot* VBoxSlot = PanelBox->AddChildToVerticalBox(CreateInfoRow(TEXT("Selected Session"), SelectedRemoteSessionValueText, true, TEXT("RI_RemoteSessionSelectionRow"))))
     {
-        HBoxSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
-        HBoxSlot->SetVerticalAlignment(VAlign_Center);
-    }
-
-    SelectedRemoteSessionValueText = RI_MakeText(WidgetTree, TEXT("None"), 7, true, RI_TestTextColor(), true);
-    SelectedRemoteSessionValueText->SetClipping(EWidgetClipping::ClipToBounds);
-    if (UHorizontalBoxSlot* HBoxSlot = SessionRow->AddChildToHorizontalBox(SelectedRemoteSessionValueText))
-    {
-        HBoxSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-        HBoxSlot->SetVerticalAlignment(VAlign_Center);
-    }
-
-    UHorizontalBox* PickerRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_RemoteSessionPickerRow"));
-    if (UVerticalBoxSlot* VBoxSlot = PanelBox->AddChildToVerticalBox(PickerRow))
-    {
-        VBoxSlot->SetPadding(FMargin(0.f, 4.f, 0.f, 0.f));
-    }
-
-    UTextBlock* PickerLabel = RI_MakeText(WidgetTree, TEXT("Session Picker"), RICompactUI::GetLabelFontSize(), true, RI_TestMutedTextColor());
-    if (UHorizontalBoxSlot* HBoxSlot = PickerRow->AddChildToHorizontalBox(PickerLabel))
-    {
-        HBoxSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
-        HBoxSlot->SetVerticalAlignment(VAlign_Center);
+        VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
     }
 
     RemoteSessionComboBox = WidgetTree->ConstructWidget<UComboBoxString>(UComboBoxString::StaticClass(), TEXT("RI_RemoteSessionCombo"));
     RICompactUI::ConfigureComboBoxString(RemoteSessionComboBox, RI_TestTextColor(), 220.0f, RICompactUI::ERIInputVisualStyle::Strong);
     RemoteSessionComboBox->OnGenerateWidgetEvent.BindDynamic(this, &UInspectorTestPageWidget::HandleGenerateRemoteSessionOptionWidget);
-    if (UHorizontalBoxSlot* HBoxSlot = PickerRow->AddChildToHorizontalBox(RICompactUI::WrapFixedHeight(WidgetTree, RemoteSessionComboBox, RICompactUI::GetInputHeight())))
+    if (UVerticalBoxSlot* VBoxSlot = PanelBox->AddChildToVerticalBox(RICompactUI::MakeStackedContentRow(
+        WidgetTree,
+        TEXT("Session Picker"),
+        RICompactUI::WrapFixedHeight(WidgetTree, RemoteSessionComboBox, RICompactUI::GetInputHeight()),
+        RI_TestRowColor(),
+        RI_TestMutedTextColor(),
+        TEXT("RI_RemoteSessionPickerRow"))))
     {
-        HBoxSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-        HBoxSlot->SetVerticalAlignment(VAlign_Center);
+        VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
     }
     RemoteSessionComboBox->OnSelectionChanged.AddDynamic(this, &UInspectorTestPageWidget::HandleRemoteSessionSelectionChanged);
 
@@ -591,53 +589,37 @@ UWidget* UInspectorTestPageWidget::CreateRemoteSessionSection()
     RemoteOverrideSectionWidget = OverrideBox;
     PanelBox->AddChildToVerticalBox(OverrideBox);
 
-    UHorizontalBox* WorkflowRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_RemoteSessionWorkflowRow"));
-    if (UVerticalBoxSlot* VBoxSlot = OverrideBox->AddChildToVerticalBox(WorkflowRow))
-    {
-        VBoxSlot->SetPadding(FMargin(0.f, 4.f, 0.f, 0.f));
-    }
-
-    UTextBlock* WorkflowLabel = RI_MakeText(WidgetTree, TEXT("Workflow Id"), RICompactUI::GetLabelFontSize(), true, RI_TestMutedTextColor());
-    if (UHorizontalBoxSlot* HBoxSlot = WorkflowRow->AddChildToHorizontalBox(WorkflowLabel))
-    {
-        HBoxSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
-        HBoxSlot->SetVerticalAlignment(VAlign_Center);
-    }
-
     RemoteSessionWorkflowBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("RI_RemoteSessionWorkflowBox"));
     RemoteSessionWorkflowBox->SetText(FText::FromString(SelectedWorkflowId != NAME_None ? SelectedWorkflowId.ToString() : TEXT("")));
     RemoteSessionWorkflowBox->OnTextCommitted.AddDynamic(this, &UInspectorTestPageWidget::HandleRemoteSessionWorkflowCommitted);
     RICompactUI::ConfigureEditableTextBox(RemoteSessionWorkflowBox, RI_TestTextColor(), RICompactUI::GetValueFontSize(), RICompactUI::ERIInputVisualStyle::Strong);
-    if (UHorizontalBoxSlot* HBoxSlot = WorkflowRow->AddChildToHorizontalBox(RICompactUI::WrapFixedHeight(WidgetTree, RemoteSessionWorkflowBox, RICompactUI::GetInputHeight())))
-    {
-        HBoxSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-        HBoxSlot->SetVerticalAlignment(VAlign_Center);
-    }
-
-    UHorizontalBox* TargetRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_RemoteSessionTargetRow"));
-    if (UVerticalBoxSlot* VBoxSlot = OverrideBox->AddChildToVerticalBox(TargetRow))
+    if (UVerticalBoxSlot* VBoxSlot = OverrideBox->AddChildToVerticalBox(RICompactUI::MakeStackedContentRow(
+        WidgetTree,
+        TEXT("Workflow Id"),
+        RICompactUI::WrapFixedHeight(WidgetTree, RemoteSessionWorkflowBox, RICompactUI::GetInputHeight()),
+        RI_TestRowColor(),
+        RI_TestMutedTextColor(),
+        TEXT("RI_RemoteSessionWorkflowRow"))))
     {
         VBoxSlot->SetPadding(FMargin(0.f, 4.f, 0.f, 0.f));
-    }
-
-    UTextBlock* TargetLabel = RI_MakeText(WidgetTree, TEXT("Target Query"), RICompactUI::GetLabelFontSize(), true, RI_TestMutedTextColor());
-    if (UHorizontalBoxSlot* HBoxSlot = TargetRow->AddChildToHorizontalBox(TargetLabel))
-    {
-        HBoxSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
-        HBoxSlot->SetVerticalAlignment(VAlign_Center);
     }
 
     RemoteSessionTargetQueryBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("RI_RemoteSessionTargetQueryBox"));
     RemoteSessionTargetQueryBox->SetText(FText::FromString(TEXT("")));
     RemoteSessionTargetQueryBox->OnTextCommitted.AddDynamic(this, &UInspectorTestPageWidget::HandleRemoteSessionTargetQueryCommitted);
     RICompactUI::ConfigureEditableTextBox(RemoteSessionTargetQueryBox, RI_TestTextColor(), RICompactUI::GetValueFontSize(), RICompactUI::ERIInputVisualStyle::Strong);
-    if (UHorizontalBoxSlot* HBoxSlot = TargetRow->AddChildToHorizontalBox(RICompactUI::WrapFixedHeight(WidgetTree, RemoteSessionTargetQueryBox, RICompactUI::GetInputHeight())))
+    if (UVerticalBoxSlot* VBoxSlot = OverrideBox->AddChildToVerticalBox(RICompactUI::MakeStackedContentRow(
+        WidgetTree,
+        TEXT("Target Query"),
+        RICompactUI::WrapFixedHeight(WidgetTree, RemoteSessionTargetQueryBox, RICompactUI::GetInputHeight()),
+        RI_TestRowColor(),
+        RI_TestMutedTextColor(),
+        TEXT("RI_RemoteSessionTargetRow"))))
     {
-        HBoxSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-        HBoxSlot->SetVerticalAlignment(VAlign_Center);
+        VBoxSlot->SetPadding(FMargin(0.f, 4.f, 0.f, 0.f));
     }
 
-    UHorizontalBox* ButtonRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_RemoteSessionButtonRow"));
+    UVerticalBox* ButtonRow = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_RemoteSessionButtonRow"));
     if (UVerticalBoxSlot* VBoxSlot = PanelBox->AddChildToVerticalBox(ButtonRow))
     {
         VBoxSlot->SetPadding(FMargin(0.f, 5.f, 0.f, 0.f));
@@ -648,24 +630,29 @@ UWidget* UInspectorTestPageWidget::CreateRemoteSessionSection()
         const RICompactUI::ERIButtonVisualStyle Style = FCString::Strcmp(Label, TEXT("Run Remote Workflow")) == 0
             ? RICompactUI::ERIButtonVisualStyle::Primary
             : RICompactUI::ERIButtonVisualStyle::Secondary;
-        OutButton = RICompactUI::MakeLabeledButton(WidgetTree, Name, Label, Style, 88.f);
+        OutButton = RICompactUI::MakeLabeledButton(WidgetTree, Name, Label, Style, 0.0f);
         return OutButton;
     };
 
     MakeButton(TEXT("BTN_RemoteSessionRefresh"), TEXT("Refresh"), RemoteSessionRefreshButton)->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleRemoteSessionRefreshClicked);
-    if (UHorizontalBoxSlot* HBoxSlot = ButtonRow->AddChildToHorizontalBox(RemoteSessionRefreshButton))
+    if (UVerticalBoxSlot* VBoxSlot = ButtonRow->AddChildToVerticalBox(RemoteSessionRefreshButton))
     {
-        HBoxSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
+        VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+        VBoxSlot->SetHorizontalAlignment(HAlign_Fill);
     }
 
     MakeButton(TEXT("BTN_RemoteSessionConnect"), TEXT("Connect"), RemoteSessionConnectButton)->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleRemoteSessionConnectClicked);
-    if (UHorizontalBoxSlot* HBoxSlot = ButtonRow->AddChildToHorizontalBox(RemoteSessionConnectButton))
+    if (UVerticalBoxSlot* VBoxSlot = ButtonRow->AddChildToVerticalBox(RemoteSessionConnectButton))
     {
-        HBoxSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
+        VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+        VBoxSlot->SetHorizontalAlignment(HAlign_Fill);
     }
 
     MakeButton(TEXT("BTN_RemoteSessionRunWorkflow"), TEXT("Run Remote Workflow"), RemoteSessionRunWorkflowButton)->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleRemoteSessionRunWorkflowClicked);
-    ButtonRow->AddChildToHorizontalBox(RemoteSessionRunWorkflowButton);
+    if (UVerticalBoxSlot* VBoxSlot = ButtonRow->AddChildToVerticalBox(RemoteSessionRunWorkflowButton))
+    {
+        VBoxSlot->SetHorizontalAlignment(HAlign_Fill);
+    }
 
     UTextBlock* HelpText = RI_MakeText(
         WidgetTree,
@@ -710,23 +697,27 @@ UWidget* UInspectorTestPageWidget::CreateDiagnosticsSection()
         VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
     }
 
-    UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_ToolsDiagnosticsButtonRow"));
+    UVerticalBox* Row = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ToolsDiagnosticsButtonRow"));
     Box->AddChildToVerticalBox(Row);
 
     auto MakeButton = [this](const TCHAR* Name, const TCHAR* Label, UButton*& OutButton) -> UButton*
     {
-        OutButton = RICompactUI::MakeLabeledButton(WidgetTree, Name, Label, RICompactUI::ERIButtonVisualStyle::Secondary, 110.f);
+        OutButton = RICompactUI::MakeLabeledButton(WidgetTree, Name, Label, RICompactUI::ERIButtonVisualStyle::Secondary, 0.0f);
         return OutButton;
     };
 
     MakeButton(TEXT("BTN_DiagnosticsRoleCompare"), TEXT("Build Role Compare"), DiagnosticsRoleCompareButton)->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleBuildDiagnosticsRoleCompareClicked);
-    if (UHorizontalBoxSlot* HBoxSlot = Row->AddChildToHorizontalBox(DiagnosticsRoleCompareButton))
+    if (UVerticalBoxSlot* VBoxSlot = Row->AddChildToVerticalBox(DiagnosticsRoleCompareButton))
     {
-        HBoxSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
+        VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+        VBoxSlot->SetHorizontalAlignment(HAlign_Fill);
     }
 
     MakeButton(TEXT("BTN_DiagnosticsSessionCompare"), TEXT("Build Session Compare"), DiagnosticsSessionCompareButton)->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleBuildDiagnosticsSessionCompareClicked);
-    Row->AddChildToHorizontalBox(DiagnosticsSessionCompareButton);
+    if (UVerticalBoxSlot* VBoxSlot = Row->AddChildToVerticalBox(DiagnosticsSessionCompareButton))
+    {
+        VBoxSlot->SetHorizontalAlignment(HAlign_Fill);
+    }
 
     if (UVerticalBoxSlot* VBoxSlot = Box->AddChildToVerticalBox(CreateSectionTitle(TEXT("Role Compare"))))
     {
@@ -793,9 +784,6 @@ UWidget* UInspectorTestPageWidget::CreateActivityLogSection()
     UVerticalBox* Box = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ToolsActivityLogBox"));
     PanelBorder->SetContent(Box);
 
-    UHorizontalBox* HeaderRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_ToolsActivityLogHeaderRow"));
-    Box->AddChildToVerticalBox(HeaderRow);
-
     UTextBlock* HelpText = RI_MakeText(
         WidgetTree,
         TEXT("Recent RuntimeInspector actions and results. Routine page refreshes are intentionally excluded."),
@@ -803,18 +791,20 @@ UWidget* UInspectorTestPageWidget::CreateActivityLogSection()
         false,
         RI_TestMutedTextColor(),
         true);
-    if (UHorizontalBoxSlot* HBoxSlot = HeaderRow->AddChildToHorizontalBox(HelpText))
+    if (UVerticalBoxSlot* VBoxSlot = Box->AddChildToVerticalBox(HelpText))
     {
-        HBoxSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-        HBoxSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
-        HBoxSlot->SetVerticalAlignment(VAlign_Center);
+        VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
     }
 
-    ActivityLogClearButton = RICompactUI::MakeLabeledButton(WidgetTree, TEXT("BTN_ClearActivityLog"), TEXT("Clear"), RICompactUI::ERIButtonVisualStyle::Secondary, 72.f);
+    ActivityLogClearButton = RICompactUI::MakeLabeledButton(WidgetTree, TEXT("BTN_ClearActivityLog"), TEXT("Clear"), RICompactUI::ERIButtonVisualStyle::Secondary, 0.0f);
     ActivityLogClearButton->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleClearActivityLogClicked);
-    HeaderRow->AddChildToHorizontalBox(ActivityLogClearButton);
+    if (UVerticalBoxSlot* VBoxSlot = Box->AddChildToVerticalBox(ActivityLogClearButton))
+    {
+        VBoxSlot->SetHorizontalAlignment(HAlign_Fill);
+    }
 
-    UScrollBox* LogScroll = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("RI_ToolsActivityLogScroll"));
+    UInspectorTouchScrollBox* LogScroll = WidgetTree->ConstructWidget<UInspectorTouchScrollBox>(UInspectorTouchScrollBox::StaticClass(), TEXT("RI_ToolsActivityLogScroll"));
+    RIInspectorTouchScroll::Configure(LogScroll);
     USizeBox* LogSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_ToolsActivityLogSize"));
     LogSize->SetMinDesiredHeight(72.f);
     LogSize->SetMaxDesiredHeight(140.f);
@@ -1309,6 +1299,10 @@ void UInspectorTestPageWidget::UpdateUIFromState()
     {
         RICompactUI::SetWidgetEnabledState(Widget, bEnabled, DisabledReason, EnabledTooltip);
     };
+    auto HasWorkflowId = [this](const FString& WorkflowIdText) -> bool
+    {
+        return !WorkflowIdText.IsEmpty() && FindWorkflowById(FName(*WorkflowIdText)) != nullptr;
+    };
 
     if (SelectedWorkflowValueText)
     {
@@ -1382,8 +1376,8 @@ void UInspectorTestPageWidget::UpdateUIFromState()
         }
         SetEnabledState(
             RemoteSessionRunWorkflowButton,
-            !bRunning && !WorkflowIdText.IsEmpty(),
-            bRunning ? RunningReason : MissingRemoteWorkflowReason,
+            !bRunning && HasWorkflowId(WorkflowIdText),
+            bRunning ? RunningReason : (WorkflowIdText.IsEmpty() ? MissingRemoteWorkflowReason : TEXT("Remote workflow id is not defined in Tools workflows.")),
             TEXT("Run the selected workflow in the connected remote session."));
     }
 
@@ -2403,6 +2397,13 @@ void UInspectorTestPageWidget::HandleRemoteSessionRunWorkflowClicked()
     if (WorkflowIdText.IsEmpty())
     {
         SetStatusMessage(TEXT("Remote workflow id is empty."), true);
+        UpdateUIFromState();
+        return;
+    }
+
+    if (FindWorkflowById(FName(*WorkflowIdText)) == nullptr)
+    {
+        SetStatusMessage(FString::Printf(TEXT("Unknown remote workflow id: %s"), *WorkflowIdText), true);
         UpdateUIFromState();
         return;
     }

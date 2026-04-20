@@ -2,14 +2,49 @@
 #include "InspectorPropertyUtils.h"
 
 #include "Components/MeshComponent.h"
+#include "Materials/Material.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
+#if WITH_EDITOR
+#include "Materials/MaterialExpression.h"
+#include "Materials/MaterialExpressionScalarParameter.h"
+#include "Materials/MaterialExpressionVectorParameter.h"
+#endif
 #include "Misc/PackageName.h"
 #include "UObject/SavePackage.h"
 
 namespace
 {
+    enum class ERIMaterialPromoteSourceKind : uint8
+    {
+        Unsupported,
+        MIC,
+        Material
+    };
+
+    struct FRIMaterialPromoteSource
+    {
+        ERIMaterialPromoteSourceKind Kind = ERIMaterialPromoteSourceKind::Unsupported;
+        UMaterialInstanceConstant* MIC = nullptr;
+        UMaterial* Material = nullptr;
+        FString AssetPath;
+        FString Message;
+    };
+
+    static const TCHAR* RI_MaterialPromoteSourceKindToString(ERIMaterialPromoteSourceKind Kind)
+    {
+        switch (Kind)
+        {
+        case ERIMaterialPromoteSourceKind::MIC:
+            return TEXT("MIC");
+        case ERIMaterialPromoteSourceKind::Material:
+            return TEXT("Material");
+        default:
+            return TEXT("Unsupported");
+        }
+    }
+
     static bool RI_ParseLinearColorText(const FString& InText, FLinearColor& OutColor)
     {
         TArray<FString> Parts;
@@ -36,22 +71,155 @@ namespace
         return true;
     }
 
-    static UMaterialInstanceConstant* RI_ResolveWritableMIC(UMaterialInterface* Material)
+    static FString RI_FormatMaterialPromoteColor(const FLinearColor& Color)
     {
-        if (UMaterialInstanceConstant* MIC = Cast<UMaterialInstanceConstant>(Material))
+        return FString::Printf(TEXT("%.3f,%.3f,%.3f,%.3f"), Color.R, Color.G, Color.B, Color.A);
+    }
+
+    static FString RI_ExtractMaterialSourceAssetPath(const FString& SourceTag)
+    {
+        static const FString Prefix = TEXT("Material:");
+        if (!SourceTag.StartsWith(Prefix, ESearchCase::IgnoreCase))
         {
-            return MIC;
+            return FString();
         }
 
-        if (UMaterialInstanceDynamic* MID = Cast<UMaterialInstanceDynamic>(Material))
+        return SourceTag.RightChop(Prefix.Len()).TrimStartAndEnd();
+    }
+
+    static UMaterialInterface* RI_LoadMaterialSourceAsset(const FString& AssetPath)
+    {
+        if (AssetPath.IsEmpty())
         {
-            return Cast<UMaterialInstanceConstant>(MID->Parent);
+            return nullptr;
         }
 
-        return nullptr;
+        return Cast<UMaterialInterface>(StaticLoadObject(UObject::StaticClass(), nullptr, *AssetPath));
+    }
+
+    static UMaterialInterface* RI_ResolveWritableMaterialSourceInterface(UMaterialInterface* Material)
+    {
+        UMaterialInterface* Candidate = Material;
+        while (UMaterialInstanceDynamic* MID = Cast<UMaterialInstanceDynamic>(Candidate))
+        {
+            Candidate = MID->Parent;
+        }
+
+        return Candidate;
+    }
+
+    static FRIMaterialPromoteSource RI_ResolveMaterialPromoteSource(const FString& SourceTag, UMaterialInterface* RuntimeMaterial)
+    {
+        FRIMaterialPromoteSource Source;
+
+        UMaterialInterface* Candidate = nullptr;
+        const FString TaggedAssetPath = RI_ExtractMaterialSourceAssetPath(SourceTag);
+        if (!TaggedAssetPath.IsEmpty())
+        {
+            Candidate = RI_LoadMaterialSourceAsset(TaggedAssetPath);
+            if (!Candidate)
+            {
+                Source.Message = FString::Printf(
+                    TEXT("Material source asset could not be loaded: %s"),
+                    *TaggedAssetPath);
+                return Source;
+            }
+        }
+        else
+        {
+            Candidate = RuntimeMaterial;
+        }
+
+        Candidate = RI_ResolveWritableMaterialSourceInterface(Candidate);
+        if (UMaterialInstanceConstant* MIC = Cast<UMaterialInstanceConstant>(Candidate))
+        {
+            Source.Kind = ERIMaterialPromoteSourceKind::MIC;
+            Source.MIC = MIC;
+            Source.AssetPath = MIC->GetPathName();
+            return Source;
+        }
+
+        if (UMaterial* Material = Cast<UMaterial>(Candidate))
+        {
+            Source.Kind = ERIMaterialPromoteSourceKind::Material;
+            Source.Material = Material;
+            Source.AssetPath = Material->GetPathName();
+            return Source;
+        }
+
+        Source.Message = TEXT("Material slot does not resolve to a writable Material or MIC source");
+        return Source;
     }
 
 #if WITH_EDITOR
+    static UMaterialExpressionScalarParameter* RI_FindUniqueScalarParameterExpression(UMaterial* Material, const FName ParamName, FString& OutError)
+    {
+        OutError.Reset();
+        if (!Material)
+        {
+            OutError = TEXT("Source Material is invalid");
+            return nullptr;
+        }
+
+        UMaterialExpressionScalarParameter* Match = nullptr;
+        int32 MatchCount = 0;
+        for (UMaterialExpression* Expression : Material->GetExpressions())
+        {
+            if (UMaterialExpressionScalarParameter* ScalarParameter = Cast<UMaterialExpressionScalarParameter>(Expression))
+            {
+                if (ScalarParameter->ParameterName == ParamName)
+                {
+                    Match = ScalarParameter;
+                    ++MatchCount;
+                }
+            }
+        }
+
+        if (MatchCount == 1)
+        {
+            return Match;
+        }
+
+        OutError = MatchCount <= 0
+            ? TEXT("Scalar parameter not found on source Material")
+            : FString::Printf(TEXT("Multiple scalar parameters named %s found on source Material"), *ParamName.ToString());
+        return nullptr;
+    }
+
+    static UMaterialExpressionVectorParameter* RI_FindUniqueVectorParameterExpression(UMaterial* Material, const FName ParamName, FString& OutError)
+    {
+        OutError.Reset();
+        if (!Material)
+        {
+            OutError = TEXT("Source Material is invalid");
+            return nullptr;
+        }
+
+        UMaterialExpressionVectorParameter* Match = nullptr;
+        int32 MatchCount = 0;
+        for (UMaterialExpression* Expression : Material->GetExpressions())
+        {
+            if (UMaterialExpressionVectorParameter* VectorParameter = Cast<UMaterialExpressionVectorParameter>(Expression))
+            {
+                if (VectorParameter->ParameterName == ParamName)
+                {
+                    Match = VectorParameter;
+                    ++MatchCount;
+                }
+            }
+        }
+
+        if (MatchCount == 1)
+        {
+            return Match;
+        }
+
+        OutError = MatchCount <= 0
+            ? TEXT("Vector parameter not found on source Material")
+            : FString::Printf(TEXT("Multiple vector parameters named %s found on source Material"), *ParamName.ToString());
+        return nullptr;
+    }
+
     static bool RI_SaveAssetPackage(UObject* Asset, FString& OutError)
     {
         OutError.Reset();
@@ -101,63 +269,131 @@ bool UInspectorWorldSubsystem::BuildMaterialPromotePreview(const FRIPatchOperati
         return true;
     }
 
+    UMaterialInterface* RuntimeMaterial = nullptr;
     AActor* RuntimeActor = ResolveRuntimeActorTarget(Operation.Target.ActorPath, Operation.Target.ActorClass, Operation.Target.ActorBaseName);
-    if (!RuntimeActor)
+    if (RuntimeActor)
+    {
+        UActorComponent* TargetComponent = ResolveRuntimeComponentTarget(
+            RuntimeActor,
+            Operation.Target.ActorPath,
+            Operation.Target.ComponentPath,
+            Operation.Target.ComponentName,
+            Operation.Target.ComponentClass);
+        if (UMeshComponent* MeshComponent = Cast<UMeshComponent>(TargetComponent))
+        {
+            RuntimeMaterial = MeshComponent->GetMaterial(Operation.Target.MaterialSlotIndex);
+        }
+        else if (RI_ExtractMaterialSourceAssetPath(Operation.SourceTag).IsEmpty())
+        {
+            OutPreview.Message = TEXT("Target component is not a mesh component");
+            return true;
+        }
+    }
+    else if (RI_ExtractMaterialSourceAssetPath(Operation.SourceTag).IsEmpty())
     {
         OutPreview.Message = TEXT("Runtime actor not found");
         return true;
     }
 
-    UActorComponent* TargetComponent = ResolveRuntimeComponentTarget(
-        RuntimeActor,
-        Operation.Target.ActorPath,
-        Operation.Target.ComponentPath,
-        Operation.Target.ComponentName,
-        Operation.Target.ComponentClass);
-    UMeshComponent* MeshComponent = Cast<UMeshComponent>(TargetComponent);
-    if (!MeshComponent)
+    const FRIMaterialPromoteSource Source = RI_ResolveMaterialPromoteSource(Operation.SourceTag, RuntimeMaterial);
+    UE_LOG(
+        LogRuntimeInspector,
+        Log,
+        TEXT("[RI][PromoteMaterial] Preview SourceTag=%s Runtime=%s Resolved=%s Asset=%s Param=%s FieldKind=%d"),
+        *Operation.SourceTag,
+        *GetNameSafe(RuntimeMaterial),
+        RI_MaterialPromoteSourceKindToString(Source.Kind),
+        *Source.AssetPath,
+        *Operation.Field.FieldPath,
+        static_cast<int32>(Operation.Field.FieldKind));
+    if (Source.Kind == ERIMaterialPromoteSourceKind::Unsupported)
     {
-        OutPreview.Message = TEXT("Target component is not a mesh component");
-        return true;
-    }
-
-    UMaterialInterface* Material = MeshComponent->GetMaterial(Operation.Target.MaterialSlotIndex);
-    UMaterialInstanceConstant* MIC = RI_ResolveWritableMIC(Material);
-    if (!MIC)
-    {
-        OutPreview.Message = TEXT("Material slot does not resolve to a writable Material Instance Constant");
+        OutPreview.Message = Source.Message;
+        UE_LOG(LogRuntimeInspector, Warning, TEXT("[RI][PromoteMaterial] Preview unsupported: %s"), *OutPreview.Message);
         return true;
     }
 
     const FName ParamName(*Operation.Field.FieldPath);
     const FMaterialParameterInfo Info(ParamName);
-    OutPreview.AssetPath = MIC->GetPathName();
+    OutPreview.AssetPath = Source.AssetPath;
 
     if (Operation.Field.FieldKind == ERIPatchFieldKind::MaterialScalar)
     {
-        float CurrentValue = 0.0f;
-        if (!MIC->GetScalarParameterValue(Info, CurrentValue))
+        if (Source.Kind == ERIMaterialPromoteSourceKind::MIC)
         {
-            OutPreview.Message = TEXT("Scalar parameter not found on source MIC");
+            float CurrentValue = 0.0f;
+            if (!Source.MIC->GetScalarParameterValue(Info, CurrentValue))
+            {
+                OutPreview.Message = TEXT("Scalar parameter not found on source MIC");
+                UE_LOG(LogRuntimeInspector, Warning, TEXT("[RI][PromoteMaterial] Preview not found on MIC: %s"), *Operation.Field.FieldPath);
+                return true;
+            }
+
+            OutPreview.CurrentSourceValue = FString::SanitizeFloat(CurrentValue);
+        }
+#if WITH_EDITOR
+        else
+        {
+            FString FindError;
+            UMaterialExpressionScalarParameter* ScalarParameter = RI_FindUniqueScalarParameterExpression(Source.Material, ParamName, FindError);
+            if (!ScalarParameter)
+            {
+                OutPreview.Message = FindError;
+                UE_LOG(LogRuntimeInspector, Warning, TEXT("[RI][PromoteMaterial] Preview material lookup failed: %s"), *FindError);
+                return true;
+            }
+
+            OutPreview.CurrentSourceValue = FString::SanitizeFloat(ScalarParameter->DefaultValue);
+        }
+#else
+        else
+        {
+            OutPreview.Message = TEXT("Promote-to-source requires WITH_EDITOR");
             return true;
         }
-
-        OutPreview.CurrentSourceValue = FString::SanitizeFloat(CurrentValue);
+#endif
     }
     else
     {
-        FLinearColor CurrentColor = FLinearColor::Black;
-        if (!MIC->GetVectorParameterValue(Info, CurrentColor))
+        if (Source.Kind == ERIMaterialPromoteSourceKind::MIC)
         {
-            OutPreview.Message = TEXT("Vector parameter not found on source MIC");
+            FLinearColor CurrentColor = FLinearColor::Black;
+            if (!Source.MIC->GetVectorParameterValue(Info, CurrentColor))
+            {
+                OutPreview.Message = TEXT("Vector parameter not found on source MIC");
+                UE_LOG(LogRuntimeInspector, Warning, TEXT("[RI][PromoteMaterial] Preview not found on MIC: %s"), *Operation.Field.FieldPath);
+                return true;
+            }
+
+            OutPreview.CurrentSourceValue = RI_FormatMaterialPromoteColor(CurrentColor);
+        }
+#if WITH_EDITOR
+        else
+        {
+            FString FindError;
+            UMaterialExpressionVectorParameter* VectorParameter = RI_FindUniqueVectorParameterExpression(Source.Material, ParamName, FindError);
+            if (!VectorParameter)
+            {
+                OutPreview.Message = FindError;
+                UE_LOG(LogRuntimeInspector, Warning, TEXT("[RI][PromoteMaterial] Preview material lookup failed: %s"), *FindError);
+                return true;
+            }
+
+            OutPreview.CurrentSourceValue = RI_FormatMaterialPromoteColor(VectorParameter->DefaultValue);
+        }
+#else
+        else
+        {
+            OutPreview.Message = TEXT("Promote-to-source requires WITH_EDITOR");
             return true;
         }
-
-        OutPreview.CurrentSourceValue = FString::Printf(TEXT("%.3f,%.3f,%.3f,%.3f"), CurrentColor.R, CurrentColor.G, CurrentColor.B, CurrentColor.A);
+#endif
     }
 
     OutPreview.bSupported = true;
-    OutPreview.Message = TEXT("Ready to promote to MIC source");
+    OutPreview.Message = Source.Kind == ERIMaterialPromoteSourceKind::MIC
+        ? TEXT("Ready to promote to MIC source")
+        : TEXT("Ready to promote to Material source");
     OutPreview.DiffText = FString::Printf(
         TEXT("%s :: %s -> %s"),
         *OutPreview.AssetPath,
@@ -174,6 +410,15 @@ bool UInspectorWorldSubsystem::PromoteMaterialOperationToSource(const FRIPatchOp
     FRIPromoteOperationPreview Preview;
     BuildMaterialPromotePreview(Operation, Preview);
     OutResult.AssetPath = Preview.AssetPath;
+    UE_LOG(
+        LogRuntimeInspector,
+        Log,
+        TEXT("[RI][PromoteMaterial] Apply start SourceTag=%s Asset=%s Param=%s PreviewSupported=%d PreviewMessage=%s"),
+        *Operation.SourceTag,
+        *OutResult.AssetPath,
+        *Operation.Field.FieldPath,
+        Preview.bSupported ? 1 : 0,
+        *Preview.Message);
 
     if (!Preview.bSupported)
     {
@@ -181,6 +426,7 @@ bool UInspectorWorldSubsystem::PromoteMaterialOperationToSource(const FRIPatchOp
             ? ERIPromoteOperationStatus::NotFound
             : ERIPromoteOperationStatus::Unsupported;
         OutResult.Message = Preview.Message;
+        UE_LOG(LogRuntimeInspector, Warning, TEXT("[RI][PromoteMaterial] Apply blocked: %s"), *OutResult.Message);
         return false;
     }
 
@@ -189,34 +435,42 @@ bool UInspectorWorldSubsystem::PromoteMaterialOperationToSource(const FRIPatchOp
     OutResult.Message = TEXT("Promote-to-source requires WITH_EDITOR");
     return false;
 #else
+    UMaterialInterface* RuntimeMaterial = nullptr;
     AActor* RuntimeActor = ResolveRuntimeActorTarget(Operation.Target.ActorPath, Operation.Target.ActorClass, Operation.Target.ActorBaseName);
-    if (!RuntimeActor)
+    if (RuntimeActor)
+    {
+        UActorComponent* TargetComponent = ResolveRuntimeComponentTarget(
+            RuntimeActor,
+            Operation.Target.ActorPath,
+            Operation.Target.ComponentPath,
+            Operation.Target.ComponentName,
+            Operation.Target.ComponentClass);
+        if (UMeshComponent* MeshComponent = Cast<UMeshComponent>(TargetComponent))
+        {
+            RuntimeMaterial = MeshComponent->GetMaterial(Operation.Target.MaterialSlotIndex);
+        }
+        else if (RI_ExtractMaterialSourceAssetPath(Operation.SourceTag).IsEmpty())
+        {
+            OutResult.Status = ERIPromoteOperationStatus::Unsupported;
+            OutResult.Message = TEXT("Target component is not a mesh component");
+            return false;
+        }
+    }
+    else if (RI_ExtractMaterialSourceAssetPath(Operation.SourceTag).IsEmpty())
     {
         OutResult.Status = ERIPromoteOperationStatus::NotFound;
         OutResult.Message = TEXT("Runtime actor not found");
         return false;
     }
 
-    UActorComponent* TargetComponent = ResolveRuntimeComponentTarget(
-        RuntimeActor,
-        Operation.Target.ActorPath,
-        Operation.Target.ComponentPath,
-        Operation.Target.ComponentName,
-        Operation.Target.ComponentClass);
-    UMeshComponent* MeshComponent = Cast<UMeshComponent>(TargetComponent);
-    if (!MeshComponent)
+    const FRIMaterialPromoteSource Source = RI_ResolveMaterialPromoteSource(Operation.SourceTag, RuntimeMaterial);
+    if (Source.Kind == ERIMaterialPromoteSourceKind::Unsupported)
     {
-        OutResult.Status = ERIPromoteOperationStatus::Unsupported;
-        OutResult.Message = TEXT("Target component is not a mesh component");
-        return false;
-    }
-
-    UMaterialInterface* Material = MeshComponent->GetMaterial(Operation.Target.MaterialSlotIndex);
-    UMaterialInstanceConstant* MIC = RI_ResolveWritableMIC(Material);
-    if (!MIC)
-    {
-        OutResult.Status = ERIPromoteOperationStatus::Unsupported;
-        OutResult.Message = TEXT("Material slot does not resolve to a writable Material Instance Constant");
+        OutResult.Status = Source.Message.Contains(TEXT("not found"), ESearchCase::IgnoreCase)
+            ? ERIPromoteOperationStatus::NotFound
+            : ERIPromoteOperationStatus::Unsupported;
+        OutResult.Message = Source.Message;
+        UE_LOG(LogRuntimeInspector, Warning, TEXT("[RI][PromoteMaterial] Apply unsupported after resolve: %s"), *OutResult.Message);
         return false;
     }
 
@@ -233,9 +487,34 @@ bool UInspectorWorldSubsystem::PromoteMaterialOperationToSource(const FRIPatchOp
             return false;
         }
 
-        MIC->Modify();
-        MIC->SetScalarParameterValueEditorOnly(Info, NewValue);
-        MIC->PostEditChange();
+        if (Source.Kind == ERIMaterialPromoteSourceKind::MIC)
+        {
+            Source.MIC->Modify();
+            Source.MIC->PreEditChange(nullptr);
+            Source.MIC->SetScalarParameterValueEditorOnly(Info, NewValue);
+            Source.MIC->PostEditChange();
+        }
+        else
+        {
+            FString FindError;
+            UMaterialExpressionScalarParameter* ScalarParameter = RI_FindUniqueScalarParameterExpression(Source.Material, ParamName, FindError);
+            if (!ScalarParameter)
+            {
+                OutResult.Status = FindError.Contains(TEXT("not found"), ESearchCase::IgnoreCase)
+                    ? ERIPromoteOperationStatus::NotFound
+                    : ERIPromoteOperationStatus::Unsupported;
+                OutResult.Message = FindError;
+                UE_LOG(LogRuntimeInspector, Warning, TEXT("[RI][PromoteMaterial] Apply scalar material lookup failed: %s"), *OutResult.Message);
+                return false;
+            }
+
+            Source.Material->Modify();
+            Source.Material->PreEditChange(nullptr);
+            ScalarParameter->Modify();
+            ScalarParameter->DefaultValue = NewValue;
+            Source.Material->PostEditChange();
+        }
+
         OutResult.ValueWritten = FString::SanitizeFloat(NewValue);
     }
     else
@@ -248,22 +527,61 @@ bool UInspectorWorldSubsystem::PromoteMaterialOperationToSource(const FRIPatchOp
             return false;
         }
 
-        MIC->Modify();
-        MIC->SetVectorParameterValueEditorOnly(Info, NewColor);
-        MIC->PostEditChange();
-        OutResult.ValueWritten = FString::Printf(TEXT("%.3f,%.3f,%.3f,%.3f"), NewColor.R, NewColor.G, NewColor.B, NewColor.A);
+        if (Source.Kind == ERIMaterialPromoteSourceKind::MIC)
+        {
+            Source.MIC->Modify();
+            Source.MIC->PreEditChange(nullptr);
+            Source.MIC->SetVectorParameterValueEditorOnly(Info, NewColor);
+            Source.MIC->PostEditChange();
+        }
+        else
+        {
+            FString FindError;
+            UMaterialExpressionVectorParameter* VectorParameter = RI_FindUniqueVectorParameterExpression(Source.Material, ParamName, FindError);
+            if (!VectorParameter)
+            {
+                OutResult.Status = FindError.Contains(TEXT("not found"), ESearchCase::IgnoreCase)
+                    ? ERIPromoteOperationStatus::NotFound
+                    : ERIPromoteOperationStatus::Unsupported;
+                OutResult.Message = FindError;
+                UE_LOG(LogRuntimeInspector, Warning, TEXT("[RI][PromoteMaterial] Apply vector material lookup failed: %s"), *OutResult.Message);
+                return false;
+            }
+
+            Source.Material->Modify();
+            Source.Material->PreEditChange(nullptr);
+            VectorParameter->Modify();
+            VectorParameter->DefaultValue = NewColor;
+            Source.Material->PostEditChange();
+        }
+
+        OutResult.ValueWritten = RI_FormatMaterialPromoteColor(NewColor);
     }
 
     FString SaveError;
-    if (!RI_SaveAssetPackage(MIC, SaveError))
+    UObject* SourceAsset = Source.Kind == ERIMaterialPromoteSourceKind::MIC
+        ? static_cast<UObject*>(Source.MIC)
+        : static_cast<UObject*>(Source.Material);
+    if (!RI_SaveAssetPackage(SourceAsset, SaveError))
     {
         OutResult.Status = ERIPromoteOperationStatus::WriteFailed;
         OutResult.Message = SaveError;
+        UE_LOG(LogRuntimeInspector, Warning, TEXT("[RI][PromoteMaterial] Save failed Asset=%s Error=%s"), *GetNameSafe(SourceAsset), *SaveError);
         return false;
     }
 
     OutResult.Status = ERIPromoteOperationStatus::Promoted;
-    OutResult.Message = TEXT("Promoted to MIC source");
+    OutResult.Message = Source.Kind == ERIMaterialPromoteSourceKind::MIC
+        ? TEXT("Promoted to MIC source")
+        : TEXT("Promoted to Material source");
+    UE_LOG(
+        LogRuntimeInspector,
+        Log,
+        TEXT("[RI][PromoteMaterial] Apply success Resolved=%s Asset=%s Param=%s Value=%s"),
+        RI_MaterialPromoteSourceKindToString(Source.Kind),
+        *GetNameSafe(SourceAsset),
+        *Operation.Field.FieldPath,
+        *OutResult.ValueWritten);
     return true;
 #endif
 }

@@ -11,12 +11,16 @@
 #include "Components/ComboBoxString.h"
 #include "Components/ContentWidget.h"
 #include "Components/EditableTextBox.h"
+#include "Components/HorizontalBox.h"
+#include "Components/HorizontalBoxSlot.h"
+#include "Components/Image.h"
 #include "Components/PanelWidget.h"
 #include "Components/SizeBox.h"
 #include "Components/SizeBoxSlot.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
+#include "Engine/Texture2D.h"
 
 namespace RICompactUI
 {
@@ -495,6 +499,20 @@ namespace RICompactUI
         return GetThemePresetTokens().ErrorText;
     }
 
+    inline FLinearColor GetAxisAccentColor(int32 AxisIndex)
+    {
+        switch (AxisIndex)
+        {
+        case 0:
+            return FLinearColor(0.88f, 0.34f, 0.28f, 1.0f);
+        case 1:
+            return FLinearColor(0.42f, 0.76f, 0.34f, 1.0f);
+        case 2:
+        default:
+            return FLinearColor(0.35f, 0.58f, 0.92f, 1.0f);
+        }
+    }
+
     inline FLinearColor GetStatusTextColor(ERIStatusVisualStyle Style)
     {
         switch (Style)
@@ -596,6 +614,66 @@ namespace RICompactUI
         Text->SetClipping(EWidgetClipping::ClipToBounds);
         ApplyTextStyle(Text, Size, bBold, Color);
         return Text;
+    }
+
+    inline UTexture2D* GetFavoriteIconTexture(bool bFavorited)
+    {
+        static TWeakObjectPtr<UTexture2D> OutlineTexture;
+        static TWeakObjectPtr<UTexture2D> SolidTexture;
+
+        TWeakObjectPtr<UTexture2D>& CachedTexture = bFavorited ? SolidTexture : OutlineTexture;
+        if (!CachedTexture.IsValid())
+        {
+            const TCHAR* AssetPath = bFavorited
+                ? TEXT("/RuntimeInspector/UI/Assets/star_white_solid_64.star_white_solid_64")
+                : TEXT("/RuntimeInspector/UI/Assets/star_white_outline_64.star_white_outline_64");
+            CachedTexture = LoadObject<UTexture2D>(nullptr, AssetPath);
+        }
+
+        return CachedTexture.Get();
+    }
+
+    inline void SetFavoriteIconState(
+        UImage* Image,
+        bool bFavorited,
+        float DesiredSize,
+        const FLinearColor& ActiveColor,
+        const FLinearColor& InactiveColor)
+    {
+        if (!Image)
+        {
+            return;
+        }
+
+        if (UTexture2D* Texture = GetFavoriteIconTexture(bFavorited))
+        {
+            Image->SetBrushFromTexture(Texture, true);
+        }
+
+        if (DesiredSize > 0.f)
+        {
+            Image->SetDesiredSizeOverride(FVector2D(DesiredSize, DesiredSize));
+        }
+
+        Image->SetColorAndOpacity(bFavorited ? ActiveColor : InactiveColor);
+    }
+
+    inline UImage* MakeFavoriteIcon(
+        UWidgetTree* WidgetTree,
+        const FName& Name,
+        float DesiredSize,
+        bool bFavorited,
+        const FLinearColor& ActiveColor,
+        const FLinearColor& InactiveColor)
+    {
+        if (!WidgetTree)
+        {
+            return nullptr;
+        }
+
+        UImage* Image = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), Name);
+        SetFavoriteIconState(Image, bFavorited, DesiredSize, ActiveColor, InactiveColor);
+        return Image;
     }
 
     inline void ApplyTextColorRecursive(UWidget* Widget, const FLinearColor& Color)
@@ -742,10 +820,13 @@ namespace RICompactUI
         ButtonStyle.Hovered.DrawAs = ESlateBrushDrawType::RoundedBox;
         ButtonStyle.Pressed.DrawAs = ESlateBrushDrawType::RoundedBox;
         ButtonStyle.Disabled.DrawAs = ESlateBrushDrawType::RoundedBox;
-        ButtonStyle.Normal.OutlineSettings.CornerRadii = FVector4(Metrics.CornerRadius, Metrics.CornerRadius, Metrics.CornerRadius, Metrics.CornerRadius);
-        ButtonStyle.Hovered.OutlineSettings.CornerRadii = FVector4(Metrics.CornerRadius, Metrics.CornerRadius, Metrics.CornerRadius, Metrics.CornerRadius);
-        ButtonStyle.Pressed.OutlineSettings.CornerRadii = FVector4(Metrics.CornerRadius, Metrics.CornerRadius, Metrics.CornerRadius, Metrics.CornerRadius);
-        ButtonStyle.Disabled.OutlineSettings.CornerRadii = FVector4(Metrics.CornerRadius, Metrics.CornerRadius, Metrics.CornerRadius, Metrics.CornerRadius);
+        const float ButtonCornerRadius = (Style == ERIButtonVisualStyle::TabActive || Style == ERIButtonVisualStyle::TabInactive)
+            ? 0.0f
+            : Metrics.CornerRadius;
+        ButtonStyle.Normal.OutlineSettings.CornerRadii = FVector4(ButtonCornerRadius, ButtonCornerRadius, ButtonCornerRadius, ButtonCornerRadius);
+        ButtonStyle.Hovered.OutlineSettings.CornerRadii = FVector4(ButtonCornerRadius, ButtonCornerRadius, ButtonCornerRadius, ButtonCornerRadius);
+        ButtonStyle.Pressed.OutlineSettings.CornerRadii = FVector4(ButtonCornerRadius, ButtonCornerRadius, ButtonCornerRadius, ButtonCornerRadius);
+        ButtonStyle.Disabled.OutlineSettings.CornerRadii = FVector4(ButtonCornerRadius, ButtonCornerRadius, ButtonCornerRadius, ButtonCornerRadius);
         ButtonStyle.Normal.OutlineSettings.Width = Metrics.BorderWidth;
         ButtonStyle.Hovered.OutlineSettings.Width = Metrics.BorderWidth;
         ButtonStyle.Pressed.OutlineSettings.Width = Metrics.BorderWidth;
@@ -766,6 +847,47 @@ namespace RICompactUI
         if (bApplyTextColorToChildren)
         {
             ApplyTextColorRecursive(Button, Palette.Text);
+        }
+    }
+
+    inline void ConfigureSwatchButton(UButton* Button)
+    {
+        if (!Button)
+        {
+            return;
+        }
+
+        PRAGMA_DISABLE_DEPRECATION_WARNINGS
+        FButtonStyle ButtonStyle = Button->WidgetStyle;
+        const FSlateColor TransparentTint(FLinearColor::Transparent);
+        ButtonStyle.Normal.TintColor = TransparentTint;
+        ButtonStyle.Hovered.TintColor = TransparentTint;
+        ButtonStyle.Pressed.TintColor = TransparentTint;
+        ButtonStyle.Disabled.TintColor = TransparentTint;
+        ButtonStyle.Normal.DrawAs = ESlateBrushDrawType::RoundedBox;
+        ButtonStyle.Hovered.DrawAs = ESlateBrushDrawType::RoundedBox;
+        ButtonStyle.Pressed.DrawAs = ESlateBrushDrawType::RoundedBox;
+        ButtonStyle.Disabled.DrawAs = ESlateBrushDrawType::RoundedBox;
+        ButtonStyle.Normal.OutlineSettings.CornerRadii = FVector4(0.f, 0.f, 0.f, 0.f);
+        ButtonStyle.Hovered.OutlineSettings.CornerRadii = FVector4(0.f, 0.f, 0.f, 0.f);
+        ButtonStyle.Pressed.OutlineSettings.CornerRadii = FVector4(0.f, 0.f, 0.f, 0.f);
+        ButtonStyle.Disabled.OutlineSettings.CornerRadii = FVector4(0.f, 0.f, 0.f, 0.f);
+        ButtonStyle.Normal.OutlineSettings.Width = 0.0f;
+        ButtonStyle.Hovered.OutlineSettings.Width = 0.0f;
+        ButtonStyle.Pressed.OutlineSettings.Width = 0.0f;
+        ButtonStyle.Disabled.OutlineSettings.Width = 0.0f;
+        ButtonStyle.NormalPadding = FMargin(0.f);
+        ButtonStyle.PressedPadding = FMargin(0.f);
+        Button->WidgetStyle = ButtonStyle;
+        PRAGMA_ENABLE_DEPRECATION_WARNINGS
+
+        Button->SetBackgroundColor(FLinearColor::Transparent);
+        Button->SetColorAndOpacity(FLinearColor::White);
+        if (UButtonSlot* ButtonSlot = Cast<UButtonSlot>(Button->GetContentSlot()))
+        {
+            ButtonSlot->SetHorizontalAlignment(HAlign_Fill);
+            ButtonSlot->SetVerticalAlignment(VAlign_Fill);
+            ButtonSlot->SetPadding(FMargin(0.f));
         }
     }
 
@@ -866,6 +988,81 @@ namespace RICompactUI
         return Border;
     }
 
+    inline UBorder* MakeStackedContentRow(
+        UWidgetTree* WidgetTree,
+        const FString& Label,
+        UWidget* Content,
+        const FLinearColor& Background,
+        const FLinearColor& LabelColor,
+        const FName& Name = NAME_None,
+        float ContentGap = 3.0f,
+        const FMargin& Padding = FMargin(6.f, 4.f))
+    {
+        if (!WidgetTree || !Content)
+        {
+            return nullptr;
+        }
+
+        UBorder* Border = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), Name);
+        Border->SetPadding(Padding);
+        Border->SetBrushColor(Background);
+
+        UVerticalBox* Box = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
+        Border->SetContent(Box);
+
+        if (UVerticalBoxSlot* LabelSlot = Box->AddChildToVerticalBox(MakeText(WidgetTree, Label, GetLabelFontSize(), true, LabelColor, true)))
+        {
+            LabelSlot->SetPadding(FMargin(0.f, 0.f, 0.f, ContentGap));
+        }
+
+        if (UVerticalBoxSlot* ContentSlot = Box->AddChildToVerticalBox(Content))
+        {
+            ContentSlot->SetHorizontalAlignment(HAlign_Fill);
+        }
+
+        return Border;
+    }
+
+    inline UBorder* MakeStackedValueRow(
+        UWidgetTree* WidgetTree,
+        const FString& Label,
+        UTextBlock*& OutValueText,
+        const FLinearColor& Background,
+        const FLinearColor& LabelColor,
+        const FLinearColor& ValueColor,
+        bool bWrapValue = true,
+        const FName& ValueName = NAME_None,
+        const FName& BorderName = NAME_None)
+    {
+        if (!WidgetTree)
+        {
+            return nullptr;
+        }
+
+        OutValueText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), ValueName);
+        OutValueText->SetAutoWrapText(bWrapValue);
+        OutValueText->SetClipping(EWidgetClipping::ClipToBounds);
+        ApplyTextStyle(OutValueText, GetValueFontSize(), false, ValueColor);
+        return MakeStackedContentRow(WidgetTree, Label, OutValueText, Background, LabelColor, BorderName);
+    }
+
+    inline UBorder* MakeStackedValueRow(
+        UWidgetTree* WidgetTree,
+        const FString& Label,
+        TObjectPtr<UTextBlock>& OutValueText,
+        const FLinearColor& Background,
+        const FLinearColor& LabelColor,
+        const FLinearColor& ValueColor,
+        bool bWrapValue = true,
+        const FName& ValueName = NAME_None,
+        const FName& BorderName = NAME_None)
+    {
+        UTextBlock* RawValueText = OutValueText.Get();
+        UBorder* Border = MakeStackedValueRow(WidgetTree, Label, RawValueText, Background, LabelColor, ValueColor, bWrapValue, ValueName, BorderName);
+        OutValueText = RawValueText;
+        return Border;
+    }
+
     inline USizeBox* WrapFixedHeight(UWidgetTree* WidgetTree, UWidget* Child, float HeightOverride)
     {
         USizeBox* SizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
@@ -950,6 +1147,49 @@ namespace RICompactUI
         TextBox->SetClearKeyboardFocusOnCommit(false);
         TextBox->SetSelectAllTextOnCommit(false);
         TextBox->SetSelectAllTextWhenFocused(false);
+    }
+
+    inline UHorizontalBox* MakeAxisValueRow(
+        UWidgetTree* WidgetTree,
+        const FString& AxisLabel,
+        int32 AxisIndex,
+        UEditableTextBox*& OutTextBox,
+        const TCHAR* BaseName)
+    {
+        UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(
+            UHorizontalBox::StaticClass(),
+            FName(FString::Printf(TEXT("%sRow"), BaseName)));
+
+        UTextBlock* Label = MakeText(
+            WidgetTree,
+            AxisLabel,
+            FMath::Max(5, GetMutedFontSize()),
+            true,
+            GetAxisAccentColor(AxisIndex),
+            false);
+        Label->SetJustification(ETextJustify::Center);
+        if (UHorizontalBoxSlot* LabelSlot = Row->AddChildToHorizontalBox(Label))
+        {
+            LabelSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
+            LabelSlot->SetVerticalAlignment(VAlign_Center);
+            LabelSlot->SetPadding(FMargin(0.f, 0.f, 3.f, 0.f));
+        }
+
+        OutTextBox = WidgetTree->ConstructWidget<UEditableTextBox>(
+            UEditableTextBox::StaticClass(),
+            FName(FString::Printf(TEXT("%sValue"), BaseName)));
+        ConfigureEditableTextBox(OutTextBox, GetStrongTextColor());
+        OutTextBox->SetJustification(ETextJustify::Center);
+        OutTextBox->SetSelectAllTextWhenFocused(true);
+        OutTextBox->SetMinDesiredWidth(68.0f);
+        if (UHorizontalBoxSlot* ValueSlot = Row->AddChildToHorizontalBox(OutTextBox))
+        {
+            ValueSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+            ValueSlot->SetHorizontalAlignment(HAlign_Fill);
+            ValueSlot->SetVerticalAlignment(VAlign_Center);
+        }
+
+        return Row;
     }
 
     inline void ConfigureComboBoxString(

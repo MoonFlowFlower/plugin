@@ -16,6 +16,7 @@
 #include "InspectorFilePageWidget.h"
 #include "InspectorSettingsPageWidget.h"
 #include "InspectorTestPageWidget.h"
+#include "InspectorTouchScrollBox.h"
 #include "InspectorCompactWidgetUtils.h"
 
 #include "RuntimeInspectorInputProcessor.h"
@@ -31,6 +32,7 @@
 #include "Components/ButtonSlot.h"
 #include "Components/Border.h"
 #include "Components/BorderSlot.h"
+#include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/CheckBox.h"
 #include "Components/ComboBoxString.h"
@@ -53,6 +55,8 @@
 #include "Components/SizeBoxSlot.h"
 #include "Components/TextBlock.h"
 #include "Components/TreeView.h"
+#include "Components/UniformGridPanel.h"
+#include "Components/UniformGridSlot.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
 #include "Components/WidgetSwitcher.h"
@@ -65,15 +69,22 @@
 #include "Engine/Blueprint.h"
 #include "Engine/BlueprintGeneratedClass.h"
 #include "Engine/Engine.h"
+#include "Engine/EngineTypes.h"
+#include "Engine/GameViewportClient.h"
 #include "GameFramework/GameUserSettings.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshActor.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
-#include "Engine/Scene.h" 
+#include "Engine/Scene.h"
 
 #include "Framework/Application/SlateApplication.h"
+#include "GenericPlatform/GenericWindow.h"
+#include "ImageUtils.h"
 #include "Input/Events.h"
+#include "JsonObjectConverter.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
 
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Pawn.h"
@@ -81,8 +92,10 @@
 #include "Components/InputComponent.h"
 
 #include "HAL/PlatformFilemanager.h"
+#include "HAL/FileManager.h"
 #include "HAL/IConsoleManager.h"
 #include "HAL/PlatformApplicationMisc.h"
+#include "HAL/PlatformProcess.h"
 
 #include "Kismet/GameplayStatics.h"
 
@@ -90,7 +103,12 @@
 #include "Materials/MaterialInterface.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "Materials/MaterialInstanceDynamic.h"
-#include "MaterialDomain.h"   
+#if WITH_EDITOR
+#include "Materials/MaterialExpression.h"
+#include "Materials/MaterialExpressionScalarParameter.h"
+#include "Materials/MaterialExpressionVectorParameter.h"
+#endif
+#include "MaterialDomain.h"
 
 
 #include "Misc/FileHelper.h"
@@ -98,6 +116,8 @@
 #include "Misc/DefaultValueHelper.h"
 #include "Misc/DateTime.h"
 #include "Misc/ConfigCacheIni.h"
+#include "RenderingThread.h"
+#include "Slate/SceneViewport.h"
 
 #include "Serialization/JsonWriter.h"
 #include "Serialization/JsonSerializer.h"
@@ -107,16 +127,208 @@
 #include "UObject/NoExportTypes.h"
 #include "UObject/StructOnScope.h"
 #include "Widgets/SWindow.h"
+#include "UnrealClient.h"
+
+#if PLATFORM_WINDOWS
+#include "Windows/AllowWindowsPlatformTypes.h"
+#include <windows.h>
+#include "Windows/HideWindowsPlatformTypes.h"
+#endif
 
 // Forward declarations for helpers defined later in this file
 static FString RI_GetMaterialParamValueText(UPrimitiveComponent* Comp, int32 SlotIndex, EInspectorChangeType ChangeType, FName ParamName);
 static FString RI_GetActorDisplayLabel(const AActor* Actor);
 static void RI_ApplyLegacyActorHeaderVisibilityFix(UUserWidget* PanelWidget);
-static constexpr float RI_MinUsablePanelWidth = 700.0f;
+static constexpr float RI_MinUsablePanelWidth = 320.0f;
 static constexpr float RI_MinUsablePanelHeight = 680.0f;
-static constexpr float RI_DefaultPanelViewportWidthFraction = 0.44f;
+static constexpr float RI_DefaultPanelViewportWidthFraction = 0.22f;
 static constexpr float RI_DefaultPanelViewportHeightFraction = 0.96f;
-static constexpr float RI_DefaultPanelWidthMax = 920.0f;
+static constexpr float RI_DefaultPanelWidthMax = 420.0f;
+static constexpr float RI_ActorSplitRightViewportWidthFraction = 0.22f;
+static constexpr float RI_ActorSplitRightWidthMin = 320.0f;
+static constexpr float RI_ActorSplitRightWidthMax = 420.0f;
+static constexpr float RI_ActorSplitLeftViewportWidthFraction = 0.22f;
+static constexpr float RI_ActorSplitLeftWidthMin = 320.0f;
+static constexpr float RI_ActorSplitLeftWidthMax = 420.0f;
+static constexpr float RI_ActorSplitCenterClearMin = 180.0f;
+
+namespace
+{
+    static void RI_ForceWidgetTreeLayout(UUserWidget* RootWidget);
+    static FString RI_ParseWindowTitleFromDebugSummary(const FString& Summary)
+    {
+        if (Summary.IsEmpty() || !Summary.StartsWith(TEXT("Title=")))
+        {
+            return FString();
+        }
+
+        const FString WithoutPrefix = Summary.Mid(6);
+        FString LeftPart;
+        FString RightPart;
+        if (WithoutPrefix.Split(TEXT(" | "), &LeftPart, &RightPart))
+        {
+            return LeftPart.TrimStartAndEnd();
+        }
+
+        return WithoutPrefix.TrimStartAndEnd();
+    }
+
+#if PLATFORM_WINDOWS
+    static bool RI_SaveCapturedWindowBitmapToFile(HDC ReferenceDC, HBITMAP BitmapHandle, int32 Width, int32 Height, const FString& Filename, FString& OutError)
+    {
+        const FString Directory = FPaths::GetPath(Filename);
+        if (!Directory.IsEmpty())
+        {
+            IFileManager::Get().MakeDirectory(*Directory, true);
+        }
+
+        BITMAPINFO BitmapInfo;
+        FMemory::Memzero(BitmapInfo);
+        BitmapInfo.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        BitmapInfo.bmiHeader.biWidth = Width;
+        BitmapInfo.bmiHeader.biHeight = -Height;
+        BitmapInfo.bmiHeader.biPlanes = 1;
+        BitmapInfo.bmiHeader.biBitCount = 32;
+        BitmapInfo.bmiHeader.biCompression = BI_RGB;
+
+        FImage Image(Width, Height, ERawImageFormat::BGRA8, EGammaSpace::sRGB);
+        if (!GetDIBits(ReferenceDC, BitmapHandle, 0, Height, Image.RawData.GetData(), &BitmapInfo, DIB_RGB_COLORS))
+        {
+            OutError = TEXT("Failed to read the captured window bitmap");
+            return false;
+        }
+
+        if (!FImageUtils::SaveImageByExtension(*Filename, Image))
+        {
+            OutError = FString::Printf(TEXT("Failed to save screenshot to '%s'"), *Filename);
+            return false;
+        }
+
+        return true;
+    }
+
+    static bool RI_CaptureWindowHandleToFile(HWND WindowHandle, const FString& Filename, FString& OutError)
+    {
+        RECT WindowRect;
+        if (!GetWindowRect(WindowHandle, &WindowRect))
+        {
+            OutError = TEXT("Failed to query the target window bounds");
+            return false;
+        }
+
+        const int32 Width = WindowRect.right - WindowRect.left;
+        const int32 Height = WindowRect.bottom - WindowRect.top;
+        if (Width <= 0 || Height <= 0)
+        {
+            OutError = TEXT("Target window has an invalid size");
+            return false;
+        }
+
+        if (IsIconic(WindowHandle))
+        {
+            ShowWindow(WindowHandle, SW_RESTORE);
+        }
+
+        ShowWindow(WindowHandle, SW_SHOW);
+        BringWindowToTop(WindowHandle);
+        SetForegroundWindow(WindowHandle);
+        SetActiveWindow(WindowHandle);
+        RedrawWindow(WindowHandle, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+        FPlatformProcess::Sleep(0.15f);
+
+        HDC ScreenDC = GetDC(nullptr);
+        if (ScreenDC)
+        {
+            HDC ScreenMemoryDC = CreateCompatibleDC(ScreenDC);
+            if (ScreenMemoryDC)
+            {
+                HBITMAP ScreenBitmap = CreateCompatibleBitmap(ScreenDC, Width, Height);
+                if (ScreenBitmap)
+                {
+                    HGDIOBJ PreviousScreenBitmap = SelectObject(ScreenMemoryDC, ScreenBitmap);
+                    const BOOL bScreenCaptured = BitBlt(
+                        ScreenMemoryDC,
+                        0,
+                        0,
+                        Width,
+                        Height,
+                        ScreenDC,
+                        WindowRect.left,
+                        WindowRect.top,
+                        SRCCOPY | CAPTUREBLT);
+                    SelectObject(ScreenMemoryDC, PreviousScreenBitmap);
+
+                    if (bScreenCaptured)
+                    {
+                        const bool bSaved = RI_SaveCapturedWindowBitmapToFile(ScreenDC, ScreenBitmap, Width, Height, Filename, OutError);
+                        DeleteObject(ScreenBitmap);
+                        DeleteDC(ScreenMemoryDC);
+                        ReleaseDC(nullptr, ScreenDC);
+                        return bSaved;
+                    }
+
+                    DeleteObject(ScreenBitmap);
+                }
+
+                DeleteDC(ScreenMemoryDC);
+            }
+
+            ReleaseDC(nullptr, ScreenDC);
+        }
+
+        HDC WindowDC = GetWindowDC(WindowHandle);
+        if (!WindowDC)
+        {
+            OutError = TEXT("Failed to acquire the target window device context");
+            return false;
+        }
+
+        HDC MemoryDC = CreateCompatibleDC(WindowDC);
+        if (!MemoryDC)
+        {
+            ReleaseDC(WindowHandle, WindowDC);
+            OutError = TEXT("Failed to create a compatible device context");
+            return false;
+        }
+
+        HBITMAP BitmapHandle = CreateCompatibleBitmap(WindowDC, Width, Height);
+        if (!BitmapHandle)
+        {
+            DeleteDC(MemoryDC);
+            ReleaseDC(WindowHandle, WindowDC);
+            OutError = TEXT("Failed to allocate the screenshot bitmap");
+            return false;
+        }
+
+        HGDIOBJ PreviousBitmap = SelectObject(MemoryDC, BitmapHandle);
+#ifndef PW_RENDERFULLCONTENT
+#define PW_RENDERFULLCONTENT 0x00000002
+#endif
+        BOOL bCaptured = PrintWindow(WindowHandle, MemoryDC, PW_RENDERFULLCONTENT);
+        if (!bCaptured)
+        {
+            bCaptured = BitBlt(MemoryDC, 0, 0, Width, Height, WindowDC, 0, 0, SRCCOPY | CAPTUREBLT);
+        }
+
+        SelectObject(MemoryDC, PreviousBitmap);
+
+        if (!bCaptured)
+        {
+            DeleteObject(BitmapHandle);
+            DeleteDC(MemoryDC);
+            ReleaseDC(WindowHandle, WindowDC);
+            OutError = TEXT("Failed to capture the target window pixels");
+            return false;
+        }
+
+        const bool bSaved = RI_SaveCapturedWindowBitmapToFile(WindowDC, BitmapHandle, Width, Height, Filename, OutError);
+        DeleteObject(BitmapHandle);
+        DeleteDC(MemoryDC);
+        ReleaseDC(WindowHandle, WindowDC);
+        return bSaved;
+    }
+#endif
+}
 static constexpr float RI_DefaultPanelHeightMin = 680.0f;
 static constexpr float RI_DefaultPanelViewportInsetX = 8.0f;
 
@@ -204,6 +416,9 @@ static const FName RI_SelfTestId_PromoteMaterialApply(TEXT("promote_material_app
 static const FName RI_SelfTestId_AuditReport(TEXT("audit_report"));
 static const FName RI_SelfTestId_FilePage(TEXT("file_page_injection"));
 static const FName RI_SelfTestId_ContextStrip(TEXT("context_strip"));
+static const FName RI_SelfTestId_CaptureChangesFirstOpenPerf(TEXT("capture_changes_first_open_perf"));
+static const FName RI_SelfTestId_TransformSourcePersistencePrepare(TEXT("transform_source_persistence_prepare"));
+static const FName RI_SelfTestId_TransformSourcePersistenceVerifyRestore(TEXT("transform_source_persistence_verify_restore"));
 static const FName RI_SelfTestId_WorkflowPageView(TEXT("workflow_page_view"));
 static const FName RI_SelfTestId_TestPageLayout(TEXT("test_page_layout"));
 static const FName RI_SelfTestId_PanelInteraction(TEXT("panel_interaction"));
@@ -433,8 +648,10 @@ static const FName RI_WorkflowId_MainlineRemotePackagedFoundation(TEXT("mainline
 static const FName RI_WorkflowId_MainlineRemotePackagedPatchPull(TEXT("mainline_remote_packaged_patch_pull"));
 static const FName RI_WorkflowId_MainlineRemotePackagedToSourceClosure(TEXT("mainline_remote_packaged_to_source_closure"));
 static const FName RI_WorkflowId_FabScreenshotFoundation(TEXT("fab_screenshot_foundation"));
+static const FName RI_WorkflowId_CaptureChangesFirstOpenPerf(TEXT("capture_changes_first_open_perf"));
 static const FName RI_WorkflowMatrixId_Default(TEXT("mainline_remote_workflow_matrix_default"));
 static const FName RI_WorkflowMatrixId_RemotePackagedDefault(TEXT("mainline_remote_packaged_matrix_default"));
+static const FName RI_ValidationScenarioId_ChangesFirstOpenPerfCapture(TEXT("changes_first_open_perf_capture"));
 
 static FString RI_WorldTypeLabel(EWorldType::Type WorldType)
 {
@@ -574,6 +791,190 @@ static FRIEditableSettings RI_MakeEditableSettings(const URuntimeInspectorSettin
     return Result;
 }
 
+static FString RI_GetRuntimeInspectorSettingsSection()
+{
+    return URuntimeInspectorSettings::StaticClass()->GetPathName();
+}
+
+static void RI_AddUniqueNormalizedConfigPath(TArray<FString>& OutFiles, const FString& Filename)
+{
+    if (Filename.IsEmpty())
+    {
+        return;
+    }
+
+    FString NormalizedFilename = Filename;
+    FPaths::NormalizeFilename(NormalizedFilename);
+    OutFiles.AddUnique(NormalizedFilename);
+}
+
+static TArray<FString> RI_CollectSettingsAuthorityFiles(const URuntimeInspectorSettings* Settings)
+{
+    TArray<FString> Result;
+    if (!Settings)
+    {
+        return Result;
+    }
+
+    RI_AddUniqueNormalizedConfigPath(Result, Settings->GetDefaultConfigFilename());
+    RI_AddUniqueNormalizedConfigPath(Result, GGameIni);
+
+    const FString TempConfigRoot = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Temp"));
+    if (IFileManager::Get().DirectoryExists(*TempConfigRoot))
+    {
+        TArray<FString> TempDefaultGameFiles;
+        IFileManager::Get().FindFilesRecursive(
+            TempDefaultGameFiles,
+            *TempConfigRoot,
+            TEXT("DefaultGame.ini"),
+            true,
+            false,
+            false);
+
+        for (const FString& TempFilename : TempDefaultGameFiles)
+        {
+            if (TempFilename.Contains(TEXT("/Config/DefaultGame.ini"), ESearchCase::IgnoreCase))
+            {
+                RI_AddUniqueNormalizedConfigPath(Result, TempFilename);
+            }
+        }
+    }
+
+    Result.Sort([](const FString& A, const FString& B)
+    {
+        const FDateTime TimeA = IFileManager::Get().GetTimeStamp(*A);
+        const FDateTime TimeB = IFileManager::Get().GetTimeStamp(*B);
+        if (TimeA != TimeB)
+        {
+            return TimeA < TimeB;
+        }
+        return A < B;
+    });
+
+    return Result;
+}
+
+static void RI_ApplyEditableSettingsToRuntimeInspectorSettings(URuntimeInspectorSettings* Settings, const FRIEditableSettings& InSettings)
+{
+    if (!Settings)
+    {
+        return;
+    }
+
+    Settings->ToggleKey = InSettings.ToggleKey;
+    Settings->PickKey = InSettings.PickKey;
+    Settings->bPickKeyRequiresCtrl = InSettings.bPickKeyRequiresCtrl;
+    Settings->bPickKeyRequiresShift = InSettings.bPickKeyRequiresShift;
+    Settings->bEnableRightMousePick = InSettings.bEnableRightMousePick;
+    Settings->bRightMousePickRequiresCtrl = InSettings.bRightMousePickRequiresCtrl;
+    Settings->bRightMousePickRequiresShift = InSettings.bRightMousePickRequiresShift;
+    Settings->bEnableOutlinePP = InSettings.bEnableOutlinePP;
+    Settings->OutlinePPWeight = FMath::Max(0.0f, InSettings.OutlinePPWeight);
+    Settings->bEnableApplyDebounce = InSettings.bEnableApplyDebounce;
+    Settings->ApplyDebounceSeconds = FMath::Clamp(InSettings.ApplyDebounceSeconds, 0.0f, 0.20f);
+    Settings->bRequireUnlock = InSettings.bRequireUnlock;
+    Settings->bAutoLockOnClose = InSettings.bAutoLockOnClose;
+}
+
+static void RI_ReadEditableSettingsFromConfigFile(FRIEditableSettings& InOutSettings, const FString& Filename)
+{
+    if (!GConfig || Filename.IsEmpty())
+    {
+        return;
+    }
+
+    const FString Section = RI_GetRuntimeInspectorSettingsSection();
+
+    FString KeyName;
+    if (GConfig->GetString(*Section, TEXT("ToggleKey"), KeyName, Filename))
+    {
+        const FKey ParsedKey = FKey(FName(*KeyName));
+        if (ParsedKey.IsValid())
+        {
+            InOutSettings.ToggleKey = ParsedKey;
+        }
+    }
+    if (GConfig->GetString(*Section, TEXT("PickKey"), KeyName, Filename))
+    {
+        const FKey ParsedKey = FKey(FName(*KeyName));
+        if (ParsedKey.IsValid())
+        {
+            InOutSettings.PickKey = ParsedKey;
+        }
+    }
+
+    GConfig->GetBool(*Section, TEXT("bPickKeyRequiresCtrl"), InOutSettings.bPickKeyRequiresCtrl, Filename);
+    GConfig->GetBool(*Section, TEXT("bPickKeyRequiresShift"), InOutSettings.bPickKeyRequiresShift, Filename);
+    GConfig->GetBool(*Section, TEXT("bEnableRightMousePick"), InOutSettings.bEnableRightMousePick, Filename);
+    GConfig->GetBool(*Section, TEXT("bRightMousePickRequiresCtrl"), InOutSettings.bRightMousePickRequiresCtrl, Filename);
+    GConfig->GetBool(*Section, TEXT("bRightMousePickRequiresShift"), InOutSettings.bRightMousePickRequiresShift, Filename);
+    GConfig->GetBool(*Section, TEXT("bEnableOutlinePP"), InOutSettings.bEnableOutlinePP, Filename);
+    GConfig->GetFloat(*Section, TEXT("OutlinePPWeight"), InOutSettings.OutlinePPWeight, Filename);
+    GConfig->GetBool(*Section, TEXT("bEnableApplyDebounce"), InOutSettings.bEnableApplyDebounce, Filename);
+    GConfig->GetFloat(*Section, TEXT("ApplyDebounceSeconds"), InOutSettings.ApplyDebounceSeconds, Filename);
+    GConfig->GetBool(*Section, TEXT("bRequireUnlock"), InOutSettings.bRequireUnlock, Filename);
+    GConfig->GetBool(*Section, TEXT("bAutoLockOnClose"), InOutSettings.bAutoLockOnClose, Filename);
+}
+
+static void RI_WriteEditableSettingsToConfigFile(const FRIEditableSettings& InSettings, const FString& Filename)
+{
+    if (!GConfig || Filename.IsEmpty())
+    {
+        return;
+    }
+
+    const FString Section = RI_GetRuntimeInspectorSettingsSection();
+    GConfig->SetString(*Section, TEXT("ToggleKey"), *InSettings.ToggleKey.GetFName().ToString(), Filename);
+    GConfig->SetString(*Section, TEXT("PickKey"), *InSettings.PickKey.GetFName().ToString(), Filename);
+    GConfig->SetBool(*Section, TEXT("bPickKeyRequiresCtrl"), InSettings.bPickKeyRequiresCtrl, Filename);
+    GConfig->SetBool(*Section, TEXT("bPickKeyRequiresShift"), InSettings.bPickKeyRequiresShift, Filename);
+    GConfig->SetBool(*Section, TEXT("bEnableRightMousePick"), InSettings.bEnableRightMousePick, Filename);
+    GConfig->SetBool(*Section, TEXT("bRightMousePickRequiresCtrl"), InSettings.bRightMousePickRequiresCtrl, Filename);
+    GConfig->SetBool(*Section, TEXT("bRightMousePickRequiresShift"), InSettings.bRightMousePickRequiresShift, Filename);
+    GConfig->SetBool(*Section, TEXT("bEnableOutlinePP"), InSettings.bEnableOutlinePP, Filename);
+    GConfig->SetFloat(*Section, TEXT("OutlinePPWeight"), InSettings.OutlinePPWeight, Filename);
+    GConfig->SetBool(*Section, TEXT("bEnableApplyDebounce"), InSettings.bEnableApplyDebounce, Filename);
+    GConfig->SetFloat(*Section, TEXT("ApplyDebounceSeconds"), InSettings.ApplyDebounceSeconds, Filename);
+    GConfig->SetBool(*Section, TEXT("bRequireUnlock"), InSettings.bRequireUnlock, Filename);
+    GConfig->SetBool(*Section, TEXT("bAutoLockOnClose"), InSettings.bAutoLockOnClose, Filename);
+}
+
+static void RI_LoadSettingsFromConfigAuthority(URuntimeInspectorSettings* Settings)
+{
+    if (!Settings)
+    {
+        return;
+    }
+
+    const TArray<FString> AuthorityFiles = RI_CollectSettingsAuthorityFiles(Settings);
+    if (GConfig)
+    {
+        for (const FString& AuthorityFile : AuthorityFiles)
+        {
+            if (!AuthorityFile.IsEmpty())
+            {
+                GConfig->LoadFile(AuthorityFile);
+            }
+        }
+    }
+
+    Settings->LoadConfig();
+
+    FRIEditableSettings EditableSettings = RI_MakeEditableSettings(Settings);
+    for (const FString& AuthorityFile : AuthorityFiles)
+    {
+        RI_ReadEditableSettingsFromConfigFile(EditableSettings, AuthorityFile);
+    }
+    RI_ApplyEditableSettingsToRuntimeInspectorSettings(Settings, EditableSettings);
+
+    UE_LOG(
+        LogRuntimeInspector,
+        Log,
+        TEXT("[RI][SettingsAuthority] Load Outline=%.3f Files=%s"),
+        EditableSettings.OutlinePPWeight,
+        AuthorityFiles.Num() > 0 ? *FString::Join(AuthorityFiles, TEXT(" | ")) : TEXT("<none>"));
+}
+
 static UBlueprint* RI_LoadPreferredSelfTestBlueprint()
 {
     static const TCHAR* CandidatePaths[] =
@@ -611,6 +1012,24 @@ static UMaterialInstanceConstant* RI_LoadPreferredSelfTestMIC()
     return nullptr;
 }
 
+static UMaterial* RI_LoadPreferredSelfTestMaterial()
+{
+    static const TCHAR* CandidatePaths[] =
+    {
+        TEXT("/RuntimeInspector/Test/M_Test.M_Test")
+    };
+
+    for (const TCHAR* CandidatePath : CandidatePaths)
+    {
+        if (UMaterial* Material = LoadObject<UMaterial>(nullptr, CandidatePath))
+        {
+            return Material;
+        }
+    }
+
+    return nullptr;
+}
+
 static UStaticMesh* RI_LoadPreferredSelfTestMesh()
 {
     static const TCHAR* CandidatePaths[] =
@@ -628,6 +1047,27 @@ static UStaticMesh* RI_LoadPreferredSelfTestMesh()
     }
 
     return nullptr;
+}
+
+static FString RI_ResolveMaterialPromoteSourceAssetPath(UMaterialInterface* Material)
+{
+    UMaterialInterface* Candidate = Material;
+    while (UMaterialInstanceDynamic* MID = Cast<UMaterialInstanceDynamic>(Candidate))
+    {
+        Candidate = MID->Parent;
+    }
+
+    if (UMaterialInstanceConstant* MIC = Cast<UMaterialInstanceConstant>(Candidate))
+    {
+        return MIC->GetPathName();
+    }
+
+    if (UMaterial* BaseMaterial = Cast<UMaterial>(Candidate))
+    {
+        return BaseMaterial->GetPathName();
+    }
+
+    return FString();
 }
 
 static bool RI_TryParseBoolText(const FString& InText, bool& OutValue)
@@ -657,6 +1097,70 @@ static int32 RI_GetPanelChildIndex(const UPanelWidget* Parent, const UWidget* Ch
     }
 
     return Parent->GetChildIndex(const_cast<UWidget*>(Child));
+}
+
+static UWidget* RI_FindDirectChildInPanel(const UPanelWidget* Parent, const UWidget* Descendant)
+{
+    if (!Parent || !Descendant)
+    {
+        return nullptr;
+    }
+
+    for (const UWidget* Cursor = Descendant; Cursor; Cursor = Cursor->GetParent())
+    {
+        if (Cursor->GetParent() == Parent)
+        {
+            return const_cast<UWidget*>(Cursor);
+        }
+    }
+
+    return nullptr;
+}
+
+static void RI_EnsureVerticalChildAt(UVerticalBox* HostPanel, UWidget* Child, int32 DesiredIndex)
+{
+    if (!HostPanel || !Child)
+    {
+        return;
+    }
+
+    UPanelWidget* ExistingParent = Child->GetParent();
+    const int32 CurrentIndex = RI_GetPanelChildIndex(HostPanel, Child);
+    if (ExistingParent == HostPanel && CurrentIndex == DesiredIndex)
+    {
+        return;
+    }
+
+    if (ExistingParent)
+    {
+        ExistingParent->RemoveChild(Child);
+    }
+
+    HostPanel->InsertChildAt(FMath::Clamp(DesiredIndex, 0, HostPanel->GetChildrenCount()), Child);
+}
+
+static FString RI_DescribePanelChildOrder(const UPanelWidget* Parent)
+{
+    if (!Parent)
+    {
+        return TEXT("None");
+    }
+
+    TArray<FString> ChildDescriptions;
+    ChildDescriptions.Reserve(Parent->GetChildrenCount());
+    for (int32 ChildIndex = 0; ChildIndex < Parent->GetChildrenCount(); ++ChildIndex)
+    {
+        const UWidget* Child = Parent->GetChildAt(ChildIndex);
+        ChildDescriptions.Add(FString::Printf(
+            TEXT("%d:%s[vis=%d]"),
+            ChildIndex,
+            *GetNameSafe(Child),
+            Child ? static_cast<int32>(Child->GetVisibility()) : static_cast<int32>(ESlateVisibility::Collapsed)));
+    }
+
+    return ChildDescriptions.Num() > 0
+        ? FString::Join(ChildDescriptions, TEXT(","))
+        : TEXT("Empty");
 }
 
 static bool RI_IsVerticalSlotRule(const UWidget* Widget, ESlateSizeRule::Type Rule)
@@ -691,6 +1195,163 @@ static bool RI_AreSelfTestPrimitiveValuesEquivalent(const FString& A, const FStr
     return A.Equals(B, ESearchCase::IgnoreCase);
 }
 
+static bool RI_AreTransformPersistenceValuesEquivalent(const FName PropertyName, const FString& A, const FString& B)
+{
+    if (PropertyName == TEXT("RelativeLocation")
+        || PropertyName == TEXT("RelativeScale3D")
+        || PropertyName == TEXT("ActorWorldLocation")
+        || PropertyName == TEXT("ActorWorldScale"))
+    {
+        FVector AVec = FVector::ZeroVector;
+        FVector BVec = FVector::ZeroVector;
+        return TBaseStructure<FVector>::Get()->ImportText(*A, &AVec, nullptr, PPF_None, nullptr, TEXT("RITransformPersistenceVectorA"))
+            && TBaseStructure<FVector>::Get()->ImportText(*B, &BVec, nullptr, PPF_None, nullptr, TEXT("RITransformPersistenceVectorB"))
+            && AVec.Equals(BVec, 0.01f);
+    }
+
+    if (PropertyName == TEXT("RelativeRotation") || PropertyName == TEXT("ActorWorldRotation"))
+    {
+        FRotator ARot = FRotator::ZeroRotator;
+        FRotator BRot = FRotator::ZeroRotator;
+        return TBaseStructure<FRotator>::Get()->ImportText(*A, &ARot, nullptr, PPF_None, nullptr, TEXT("RITransformPersistenceRotatorA"))
+            && TBaseStructure<FRotator>::Get()->ImportText(*B, &BRot, nullptr, PPF_None, nullptr, TEXT("RITransformPersistenceRotatorB"))
+            && ARot.Equals(BRot, 0.01f);
+    }
+
+    return A.Equals(B, ESearchCase::IgnoreCase);
+}
+
+static bool RI_BuildSceneComponentTransformPatchedText(USceneComponent* Component, FName PropertyName, FString& OutBaselineText, FString& OutPatchedText)
+{
+    OutBaselineText.Reset();
+    OutPatchedText.Reset();
+
+    if (!Component || !InspectorPropertyUtils::GetValueAsText(Component, PropertyName, OutBaselineText))
+    {
+        return false;
+    }
+
+    if (PropertyName == TEXT("RelativeLocation"))
+    {
+        const FVector PatchedLocation = Component->GetRelativeLocation() + FVector(2.0, -1.0, 0.5);
+        OutPatchedText = FString::Printf(
+            TEXT("(X=%.6f,Y=%.6f,Z=%.6f)"),
+            PatchedLocation.X,
+            PatchedLocation.Y,
+            PatchedLocation.Z);
+    }
+    else if (PropertyName == TEXT("RelativeRotation"))
+    {
+        const FRotator OriginalRotation = Component->GetRelativeRotation();
+        const FRotator PatchedRotation(
+            OriginalRotation.Pitch + 5.0,
+            OriginalRotation.Yaw - 3.0,
+            OriginalRotation.Roll + 1.5);
+        OutPatchedText = FString::Printf(
+            TEXT("(Pitch=%.6f,Yaw=%.6f,Roll=%.6f)"),
+            PatchedRotation.Pitch,
+            PatchedRotation.Yaw,
+            PatchedRotation.Roll);
+    }
+    else if (PropertyName == TEXT("RelativeScale3D"))
+    {
+        FVector PatchedScale = Component->GetRelativeScale3D() + FVector(0.1, 0.2, -0.05);
+        PatchedScale.X = FMath::Max(0.05f, PatchedScale.X);
+        PatchedScale.Y = FMath::Max(0.05f, PatchedScale.Y);
+        PatchedScale.Z = FMath::Max(0.05f, PatchedScale.Z);
+        OutPatchedText = FString::Printf(
+            TEXT("(X=%.6f,Y=%.6f,Z=%.6f)"),
+            PatchedScale.X,
+            PatchedScale.Y,
+            PatchedScale.Z);
+    }
+
+    return !OutPatchedText.IsEmpty() && !RI_AreTransformPersistenceValuesEquivalent(PropertyName, OutBaselineText, OutPatchedText);
+}
+
+static bool RI_BuildActorWorldTransformPatchedText(AActor* Actor, FName PropertyName, FString& OutBaselineText, FString& OutPatchedText)
+{
+    OutBaselineText.Reset();
+    OutPatchedText.Reset();
+
+    if (!Actor)
+    {
+        return false;
+    }
+
+    if (PropertyName == TEXT("ActorWorldLocation"))
+    {
+        const FVector BaselineLocation = Actor->GetActorLocation();
+        const FVector PatchedLocation = BaselineLocation + FVector(2.0, -1.0, 0.5);
+        OutBaselineText = FString::Printf(
+            TEXT("(X=%.6f,Y=%.6f,Z=%.6f)"),
+            BaselineLocation.X,
+            BaselineLocation.Y,
+            BaselineLocation.Z);
+        OutPatchedText = FString::Printf(
+            TEXT("(X=%.6f,Y=%.6f,Z=%.6f)"),
+            PatchedLocation.X,
+            PatchedLocation.Y,
+            PatchedLocation.Z);
+    }
+    else if (PropertyName == TEXT("ActorWorldRotation"))
+    {
+        const FRotator BaselineRotation = Actor->GetActorRotation();
+        const FRotator PatchedRotation(
+            BaselineRotation.Pitch + 5.0,
+            BaselineRotation.Yaw - 3.0,
+            BaselineRotation.Roll + 1.5);
+        OutBaselineText = FString::Printf(
+            TEXT("(Pitch=%.6f,Yaw=%.6f,Roll=%.6f)"),
+            BaselineRotation.Pitch,
+            BaselineRotation.Yaw,
+            BaselineRotation.Roll);
+        OutPatchedText = FString::Printf(
+            TEXT("(Pitch=%.6f,Yaw=%.6f,Roll=%.6f)"),
+            PatchedRotation.Pitch,
+            PatchedRotation.Yaw,
+            PatchedRotation.Roll);
+    }
+    else if (PropertyName == TEXT("ActorWorldScale"))
+    {
+        FVector BaselineScale = Actor->GetActorScale3D();
+        FVector PatchedScale = BaselineScale + FVector(0.1, 0.2, -0.05);
+        PatchedScale.X = FMath::Max(0.05f, PatchedScale.X);
+        PatchedScale.Y = FMath::Max(0.05f, PatchedScale.Y);
+        PatchedScale.Z = FMath::Max(0.05f, PatchedScale.Z);
+        OutBaselineText = FString::Printf(
+            TEXT("(X=%.6f,Y=%.6f,Z=%.6f)"),
+            BaselineScale.X,
+            BaselineScale.Y,
+            BaselineScale.Z);
+        OutPatchedText = FString::Printf(
+            TEXT("(X=%.6f,Y=%.6f,Z=%.6f)"),
+            PatchedScale.X,
+            PatchedScale.Y,
+            PatchedScale.Z);
+    }
+
+    return !OutPatchedText.IsEmpty() && !RI_AreTransformPersistenceValuesEquivalent(PropertyName, OutBaselineText, OutPatchedText);
+}
+
+static FString RI_MakeTransformPersistenceSummaryLine(
+    const TCHAR* Prefix,
+    bool bPassed,
+    bool bBlocked,
+    const FString& ActorLabel,
+    const FString& ComponentName,
+    const FString& Extra)
+{
+    return FString::Printf(
+        TEXT("%s=%s | Actor=%s Component=%s%s%s"),
+        Prefix,
+        bBlocked ? TEXT("BLOCKED") : (bPassed ? TEXT("PASS") : TEXT("FAIL")),
+        ActorLabel.IsEmpty() ? TEXT("None") : *ActorLabel,
+        ComponentName.IsEmpty() ? TEXT("None") : *ComponentName,
+        Extra.IsEmpty() ? TEXT("") : TEXT(" | "),
+        Extra.IsEmpty() ? TEXT("") : *Extra);
+}
+
 static FString RI_FormatLinearColorText(const FLinearColor& Color)
 {
     return FString::Printf(TEXT("%.3f,%.3f,%.3f,%.3f"), Color.R, Color.G, Color.B, Color.A);
@@ -706,6 +1367,182 @@ static FLinearColor RI_MakeDistinctSelfTestColor(const FLinearColor& Original)
 
     return Candidate;
 }
+
+static float RI_MakeDistinctSelfTestScalar(float Original)
+{
+    return FMath::IsNearlyEqual(Original, 0.37f, 0.001f) ? 0.73f : 0.37f;
+}
+
+#if WITH_EDITOR
+struct FRIMaterialPromoteSelfTestParam
+{
+    ERIPatchFieldKind FieldKind = ERIPatchFieldKind::MaterialVector;
+    FName ParamName = NAME_None;
+    FString OriginalSourceText;
+    FString TargetText;
+    float OriginalScalar = 0.0f;
+    float TargetScalar = 0.0f;
+    FLinearColor OriginalVector = FLinearColor::Black;
+    FLinearColor TargetVector = FLinearColor::Black;
+};
+
+static bool RI_SelectWritableMaterialPromoteSelfTestParam(UMaterialInterface* SourceAsset, FRIMaterialPromoteSelfTestParam& OutParam)
+{
+    OutParam = FRIMaterialPromoteSelfTestParam();
+    if (!SourceAsset)
+    {
+        return false;
+    }
+
+    if (UMaterialInstanceConstant* MIC = Cast<UMaterialInstanceConstant>(SourceAsset))
+    {
+        const FName PreferredVectorNames[] = { TEXT("Color"), TEXT("EmissiveColor"), TEXT("BaseColor") };
+        const FName PreferredScalarNames[] = { TEXT("Intensity"), TEXT("Scalar"), TEXT("Roughness"), TEXT("Metallic") };
+
+        TArray<FMaterialParameterInfo> VectorInfos;
+        TArray<FGuid> VectorIds;
+        MIC->GetAllVectorParameterInfo(VectorInfos, VectorIds);
+        if (VectorInfos.Num() > 0)
+        {
+            OutParam.FieldKind = ERIPatchFieldKind::MaterialVector;
+            OutParam.ParamName = VectorInfos[0].Name;
+            for (const FName PreferredName : PreferredVectorNames)
+            {
+                if (VectorInfos.ContainsByPredicate([PreferredName](const FMaterialParameterInfo& Info) { return Info.Name == PreferredName; }))
+                {
+                    OutParam.ParamName = PreferredName;
+                    break;
+                }
+            }
+
+            FLinearColor CurrentColor = FLinearColor::Black;
+            if (!MIC->GetVectorParameterValue(FMaterialParameterInfo(OutParam.ParamName), CurrentColor))
+            {
+                return false;
+            }
+
+            OutParam.OriginalVector = CurrentColor;
+            OutParam.TargetVector = RI_MakeDistinctSelfTestColor(CurrentColor);
+            OutParam.OriginalSourceText = RI_FormatLinearColorText(CurrentColor);
+            OutParam.TargetText = RI_FormatLinearColorText(OutParam.TargetVector);
+            return true;
+        }
+
+        TArray<FMaterialParameterInfo> ScalarInfos;
+        TArray<FGuid> ScalarIds;
+        MIC->GetAllScalarParameterInfo(ScalarInfos, ScalarIds);
+        if (ScalarInfos.Num() > 0)
+        {
+            OutParam.FieldKind = ERIPatchFieldKind::MaterialScalar;
+            OutParam.ParamName = ScalarInfos[0].Name;
+            for (const FName PreferredName : PreferredScalarNames)
+            {
+                if (ScalarInfos.ContainsByPredicate([PreferredName](const FMaterialParameterInfo& Info) { return Info.Name == PreferredName; }))
+                {
+                    OutParam.ParamName = PreferredName;
+                    break;
+                }
+            }
+
+            float CurrentValue = 0.0f;
+            if (!MIC->GetScalarParameterValue(FMaterialParameterInfo(OutParam.ParamName), CurrentValue))
+            {
+                return false;
+            }
+
+            OutParam.OriginalScalar = CurrentValue;
+            OutParam.TargetScalar = RI_MakeDistinctSelfTestScalar(CurrentValue);
+            OutParam.OriginalSourceText = FString::SanitizeFloat(CurrentValue);
+            OutParam.TargetText = FString::SanitizeFloat(OutParam.TargetScalar);
+            return true;
+        }
+
+        return false;
+    }
+
+    if (UMaterial* Material = Cast<UMaterial>(SourceAsset))
+    {
+        const FName PreferredVectorNames[] = { TEXT("Color"), TEXT("EmissiveColor"), TEXT("BaseColor") };
+        const FName PreferredScalarNames[] = { TEXT("Intensity"), TEXT("Scalar"), TEXT("Roughness"), TEXT("Metallic") };
+
+        TArray<UMaterialExpressionVectorParameter*> VectorParameters;
+        TArray<UMaterialExpressionScalarParameter*> ScalarParameters;
+        for (UMaterialExpression* Expression : Material->GetExpressions())
+        {
+            if (UMaterialExpressionVectorParameter* VectorParameter = Cast<UMaterialExpressionVectorParameter>(Expression))
+            {
+                VectorParameters.Add(VectorParameter);
+            }
+            else if (UMaterialExpressionScalarParameter* ScalarParameter = Cast<UMaterialExpressionScalarParameter>(Expression))
+            {
+                ScalarParameters.Add(ScalarParameter);
+            }
+        }
+
+        if (VectorParameters.Num() > 0)
+        {
+            UMaterialExpressionVectorParameter* Selected = VectorParameters[0];
+            for (const FName PreferredName : PreferredVectorNames)
+            {
+                if (UMaterialExpressionVectorParameter* const* Match = VectorParameters.FindByPredicate(
+                    [PreferredName](const UMaterialExpressionVectorParameter* Parameter)
+                    {
+                        return Parameter && Parameter->ParameterName == PreferredName;
+                    }))
+                {
+                    Selected = *Match;
+                    break;
+                }
+            }
+
+            if (!Selected)
+            {
+                return false;
+            }
+
+            OutParam.FieldKind = ERIPatchFieldKind::MaterialVector;
+            OutParam.ParamName = Selected->ParameterName;
+            OutParam.OriginalVector = Selected->DefaultValue;
+            OutParam.TargetVector = RI_MakeDistinctSelfTestColor(Selected->DefaultValue);
+            OutParam.OriginalSourceText = RI_FormatLinearColorText(Selected->DefaultValue);
+            OutParam.TargetText = RI_FormatLinearColorText(OutParam.TargetVector);
+            return true;
+        }
+
+        if (ScalarParameters.Num() > 0)
+        {
+            UMaterialExpressionScalarParameter* Selected = ScalarParameters[0];
+            for (const FName PreferredName : PreferredScalarNames)
+            {
+                if (UMaterialExpressionScalarParameter* const* Match = ScalarParameters.FindByPredicate(
+                    [PreferredName](const UMaterialExpressionScalarParameter* Parameter)
+                    {
+                        return Parameter && Parameter->ParameterName == PreferredName;
+                    }))
+                {
+                    Selected = *Match;
+                    break;
+                }
+            }
+
+            if (!Selected)
+            {
+                return false;
+            }
+
+            OutParam.FieldKind = ERIPatchFieldKind::MaterialScalar;
+            OutParam.ParamName = Selected->ParameterName;
+            OutParam.OriginalScalar = Selected->DefaultValue;
+            OutParam.TargetScalar = RI_MakeDistinctSelfTestScalar(Selected->DefaultValue);
+            OutParam.OriginalSourceText = FString::SanitizeFloat(Selected->DefaultValue);
+            OutParam.TargetText = FString::SanitizeFloat(OutParam.TargetScalar);
+            return true;
+        }
+    }
+
+    return false;
+}
+#endif
 
 static bool RI_SelectWritablePrimitivePropertyForSelfTest(
     AActor* Actor,
@@ -820,6 +1657,109 @@ static bool RI_SelectWritablePrimitivePropertyForSelfTest(
     return false;
 #endif
 
+}
+
+static bool RI_SelectTransformPersistenceComponentTarget(
+    AActor* Actor,
+    USceneComponent*& OutComponent,
+    FString& OutError)
+{
+    OutComponent = nullptr;
+    OutError.Reset();
+
+    if (!Actor)
+    {
+        OutError = TEXT("Actor unavailable");
+        return false;
+    }
+
+    TArray<USceneComponent*> Candidates;
+    for (UActorComponent* Component : Actor->GetComponents())
+    {
+        if (USceneComponent* SceneComponent = Cast<USceneComponent>(Component))
+        {
+            Candidates.Add(SceneComponent);
+        }
+    }
+
+    if (Candidates.Num() <= 0)
+    {
+        OutError = TEXT("Actor has no scene component");
+        return false;
+    }
+
+    const USceneComponent* RootComponent = Actor->GetRootComponent();
+    Candidates.Sort([RootComponent](const USceneComponent& A, const USceneComponent& B)
+    {
+        auto ScoreComponent = [RootComponent](const USceneComponent& Component) -> int32
+        {
+            int32 Score = 0;
+            if (Component.GetClass() == UStaticMeshComponent::StaticClass())
+            {
+                Score += 16;
+            }
+            else if (Cast<UStaticMeshComponent>(&Component))
+            {
+                Score += 8;
+            }
+            if (&Component != RootComponent)
+            {
+                Score += 4;
+            }
+            if (!Component.GetName().Contains(TEXT("DefaultSceneRoot"), ESearchCase::IgnoreCase))
+            {
+                Score += 2;
+            }
+            if (!Component.GetName().Contains(TEXT("Arrow"), ESearchCase::IgnoreCase))
+            {
+                Score += 1;
+            }
+            if (Component.GetName().Contains(TEXT("Cube"), ESearchCase::IgnoreCase)
+                || Component.GetName().Contains(TEXT("Plane"), ESearchCase::IgnoreCase)
+                || Component.GetName().Contains(TEXT("Sphere"), ESearchCase::IgnoreCase))
+            {
+                Score += 6;
+            }
+            if (Component.GetName().Contains(TEXT("CameraProxy"), ESearchCase::IgnoreCase)
+                || Component.GetName().Contains(TEXT("DrawFrustum"), ESearchCase::IgnoreCase)
+                || Component.GetName().Contains(TEXT("Billboard"), ESearchCase::IgnoreCase))
+            {
+                Score -= 12;
+            }
+            return Score;
+        };
+
+        const int32 ScoreA = ScoreComponent(A);
+        const int32 ScoreB = ScoreComponent(B);
+        if (ScoreA != ScoreB)
+        {
+            return ScoreA > ScoreB;
+        }
+
+        return A.GetName() < B.GetName();
+    });
+
+    OutComponent = Candidates[0];
+    return OutComponent != nullptr;
+}
+
+static FRIPatchBundle RI_BuildTransformPersistenceRestoreBundle(const FRIPatchBundle& PromoteBundle)
+{
+    FRIPatchBundle RestoreBundle = PromoteBundle;
+    RestoreBundle.BundleId = PromoteBundle.BundleId.IsEmpty()
+        ? TEXT("TransformSourcePersistenceRestore")
+        : FString::Printf(TEXT("%s_Restore"), *PromoteBundle.BundleId);
+    RestoreBundle.DisplayName = PromoteBundle.DisplayName.IsEmpty()
+        ? TEXT("Transform Source Persistence Restore")
+        : FString::Printf(TEXT("%s Restore"), *PromoteBundle.DisplayName);
+    RestoreBundle.CapturedAtUtc = FDateTime::UtcNow().ToIso8601();
+
+    for (FRIPatchOperation& Operation : RestoreBundle.Operations)
+    {
+        Swap(Operation.BaselineValue, Operation.PatchedValue);
+    }
+
+    return RestoreBundle;
 }
 
 static void RI_RefreshPropertyList(UUserWidget* PanelWidget, EInspectorRefreshReason Reason)
@@ -1778,6 +2718,46 @@ static void RI_CmdApplyFabScreenshotState(const TArray<FString>& Args, UWorld* W
     S->PushToast(ERIToastType::Success, SuccessText, 2.0f);
 }
 
+static void RI_CmdRunValidationCapture(const TArray<FString>& Args, UWorld* World)
+{
+    UInspectorWorldSubsystem* S = RI_GetWorldSubsystem(World);
+    if (!S)
+    {
+        return;
+    }
+
+    const FName ScenarioId = Args.Num() > 0
+        ? FName(*Args[0])
+        : RI_ValidationScenarioId_ChangesFirstOpenPerfCapture;
+    FRIValidationCaptureReport Report;
+    if (!S->RunValidationCaptureScenario(ScenarioId, Report))
+    {
+        S->PushToast(ERIToastType::Warning, Report.Summary.IsEmpty() ? TEXT("Validation capture failed") : Report.Summary, 3.0f);
+        return;
+    }
+
+    S->PushToast(ERIToastType::Success, Report.Summary.IsEmpty() ? TEXT("Validation capture complete") : Report.Summary, 2.0f);
+}
+
+static void RI_CmdExportLastValidationCapture(const TArray<FString>& Args, UWorld* World)
+{
+    UInspectorWorldSubsystem* S = RI_GetWorldSubsystem(World);
+    if (!S)
+    {
+        return;
+    }
+
+    FString ExportPath;
+    FString ExportError;
+    if (!S->ExportLastValidationCaptureReport(ExportPath, ExportError))
+    {
+        S->PushToast(ERIToastType::Warning, ExportError.IsEmpty() ? TEXT("Validation capture export failed") : ExportError, 3.0f);
+        return;
+    }
+
+    S->PushToast(ERIToastType::Success, FString::Printf(TEXT("Validation capture exported: %s"), *FPaths::GetCleanFilename(ExportPath)), 2.0f);
+}
+
 static void RI_CmdShowInspectorPage(const TArray<FString>& Args, UWorld* World)
 {
     UInspectorWorldSubsystem* S = RI_GetWorldSubsystem(World);
@@ -1863,6 +2843,18 @@ static FAutoConsoleCommandWithWorldAndArgs CCmdRIApplyFabScreenshotState(
     TEXT("ri.ApplyFabScreenshotState"),
     TEXT("Apply the RuntimeInspector Fab screenshot presentation state. Usage: ri.ApplyFabScreenshotState [foundation|remote_session|promote_or_audit]"),
     FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RI_CmdApplyFabScreenshotState)
+);
+
+static FAutoConsoleCommandWithWorldAndArgs CCmdRIRunValidationCapture(
+    TEXT("ri.RunValidationCapture"),
+    TEXT("Run a RuntimeInspector validation capture. Usage: ri.RunValidationCapture [changes_first_open_perf_capture]"),
+    FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RI_CmdRunValidationCapture)
+);
+
+static FAutoConsoleCommandWithWorldAndArgs CCmdRIExportLastValidationCapture(
+    TEXT("ri.ExportLastValidationCapture"),
+    TEXT("Export the last RuntimeInspector validation capture report."),
+    FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RI_CmdExportLastValidationCapture)
 );
 
 static FAutoConsoleCommandWithWorldAndArgs CCmdRIShowInspectorPage(
@@ -2045,9 +3037,35 @@ int32 UInspectorWorldSubsystem::GetActorFunctionRowCountForAutomation() const
 #endif
 }
 
+bool UInspectorWorldSubsystem::HasActorGroupsTouchScrollSupportForAutomation() const
+{
+#if !RUNTIME_INSPECTOR_ENABLED
+    return false;
+#else
+    const bool bLegacyHostPresent = ActorGroupsScrollBoxStrong != nullptr || ActorPinnedScrollBoxStrong != nullptr;
+    if (bLegacyHostPresent)
+    {
+        const bool bGroupsTouchOk = ActorGroupsScrollBoxStrong != nullptr
+            && RIInspectorTouchScroll::HasTouchSupport(ActorGroupsScrollBoxStrong);
+        const bool bPinnedTouchOk = ActorPinnedScrollBoxStrong == nullptr
+            || RIInspectorTouchScroll::HasTouchSupport(ActorPinnedScrollBoxStrong);
+        return bGroupsTouchOk && bPinnedTouchOk;
+    }
+
+    return ActorGroupsSectionWidget.IsValid()
+        && ActorGroupsSectionWidget->HasTouchScrollSupportForAutomation();
+#endif
+}
+
 FString UInspectorWorldSubsystem::GetActorPropertyHostDebugSummaryForAutomation() const
 {
 #if RUNTIME_INSPECTOR_ENABLED
+    UUserWidget* Panel = const_cast<UInspectorWorldSubsystem*>(this)->PanelWidget.Get();
+    if (Panel)
+    {
+        RI_ForceWidgetTreeLayout(Panel);
+    }
+
     auto DescribeWidget = [](const UWidget* Widget) -> FString
     {
         if (!Widget)
@@ -2065,15 +3083,59 @@ FString UInspectorWorldSubsystem::GetActorPropertyHostDebugSummaryForAutomation(
             static_cast<int32>(Widget->GetVisibility()));
     };
 
+    UPanelWidget* StripParent = ActorTopContextStrip.IsValid()
+        ? Cast<UPanelWidget>(ActorTopContextStrip->GetParent())
+        : nullptr;
+    UWidget* SearchWidget = Panel && Panel->WidgetTree
+        ? Panel->WidgetTree->FindWidget(TEXT("ETB_Search"))
+        : nullptr;
+    UWidget* SearchDirectChild = RI_FindDirectChildInPanel(ActorWorkbenchSidebarHost.Get(), SearchWidget);
+    UBorder* SharedStrip = Panel && Panel->WidgetTree
+        ? Cast<UBorder>(Panel->WidgetTree->FindWidget(TEXT("RI_SharedContextStrip")))
+        : nullptr;
+    const bool bGroupTouchOk = HasActorGroupsTouchScrollSupportForAutomation();
+    const bool bPinnedTouchOk = ActorPinnedScrollBoxStrong == nullptr
+        || RIInspectorTouchScroll::HasTouchSupport(ActorPinnedScrollBoxStrong);
+    const bool bPropertyTouchOk = ActorPropertiesSectionWidget.IsValid() && ActorPropertiesSectionWidget->HasTouchScrollSupportForAutomation();
+    const bool bFunctionTouchOk = ActorFunctionsSectionWidget.IsValid() && ActorFunctionsSectionWidget->HasTouchScrollSupportForAutomation();
+    const int32 CategorySectionCount = ActorPropertiesSectionWidget.IsValid()
+        ? ActorPropertiesSectionWidget->GetCategorySectionCountForAutomation()
+        : INDEX_NONE;
+    const FString CategorySummary = ActorPropertiesSectionWidget.IsValid()
+        ? ActorPropertiesSectionWidget->GetCategoryDebugSummaryForAutomation()
+        : FString(TEXT("None"));
+    const bool bActorTransformBlockVisible = ActorPropertiesSectionWidget.IsValid()
+        && ActorPropertiesSectionWidget->HasActorTransformBlockForAutomation();
+    const FString ActorTransformSummary = ActorPropertiesSectionWidget.IsValid()
+        ? ActorPropertiesSectionWidget->GetActorTransformDebugSummaryForAutomation()
+        : FString(TEXT("Hidden"));
+
     return FString::Printf(
-        TEXT("PageStack=%s | SelectionBand=%s | Body=%s | Left=%s | RightHost=%s | Property=%s | Function=%s"),
+        TEXT("Sidebar=%s | SidebarChildren=%s | SearchRow=%s SearchIndex=%d | PageStack=%s | ActorTopStrip=%s StripParent=%s StripIndex=%d | SharedStrip=%s Hidden=%d | SelectionBand=%s | Body=%s | Left=%s Touch=%d PinnedTouch=%d | RightHost=%s | Property=%s Touch=%d Categories=%d Summary=%s ActorTransform=%d[%s] | Function=%s Touch=%d"),
+        *DescribeWidget(ActorWorkbenchSidebarHost.Get()),
+        *RI_DescribePanelChildOrder(ActorWorkbenchSidebarHost.Get()),
+        *DescribeWidget(SearchDirectChild),
+        RI_GetPanelChildIndex(ActorWorkbenchSidebarHost.Get(), SearchDirectChild),
         *DescribeWidget(ActorWorkbenchPageStackHost.Get()),
+        *DescribeWidget(ActorTopContextStrip.Get()),
+        *DescribeWidget(StripParent),
+        RI_GetPanelChildIndex(StripParent, ActorTopContextStrip.Get()),
+        *DescribeWidget(SharedStrip),
+        (!SharedStrip || SharedStrip->GetVisibility() != ESlateVisibility::Visible) ? 1 : 0,
         *DescribeWidget(ActorWorkspaceSelectionBand.Get()),
         *DescribeWidget(ActorWorkbenchBodyHost.Get()),
         *DescribeWidget(ActorGroupsSectionHostBox.Get()),
+        bGroupTouchOk ? 1 : 0,
+        bPinnedTouchOk ? 1 : 0,
         *DescribeWidget(ActorPropertyFunctionHostBox.Get()),
         *DescribeWidget(ActorPropertiesSectionWidget.Get()),
-        *DescribeWidget(ActorFunctionsSectionWidget.Get()));
+        bPropertyTouchOk ? 1 : 0,
+        CategorySectionCount,
+        *CategorySummary,
+        bActorTransformBlockVisible ? 1 : 0,
+        *ActorTransformSummary,
+        *DescribeWidget(ActorFunctionsSectionWidget.Get()),
+        bFunctionTouchOk ? 1 : 0);
 #else
     return TEXT("RuntimeInspector disabled");
 #endif
@@ -2082,6 +3144,11 @@ FString UInspectorWorldSubsystem::GetActorPropertyHostDebugSummaryForAutomation(
 FString UInspectorWorldSubsystem::GetActorPropertyAnchorChainForAutomation() const
 {
 #if RUNTIME_INSPECTOR_ENABLED
+    if (UUserWidget* Panel = const_cast<UInspectorWorldSubsystem*>(this)->PanelWidget.Get())
+    {
+        RI_ForceWidgetTreeLayout(Panel);
+    }
+
     const UUserWidget* Panel = PanelWidget.Get();
     if (!Panel || !Panel->WidgetTree)
     {
@@ -2122,6 +3189,11 @@ FString UInspectorWorldSubsystem::GetActorPropertyAnchorChainForAutomation() con
 FString UInspectorWorldSubsystem::GetInspectBodyChildrenDebugSummaryForAutomation() const
 {
 #if RUNTIME_INSPECTOR_ENABLED
+    if (UUserWidget* Panel = const_cast<UInspectorWorldSubsystem*>(this)->PanelWidget.Get())
+    {
+        RI_ForceWidgetTreeLayout(Panel);
+    }
+
     const UUserWidget* Panel = PanelWidget.Get();
     if (!Panel || !Panel->WidgetTree)
     {
@@ -2229,6 +3301,11 @@ FString UInspectorWorldSubsystem::GetInspectBodyChildrenDebugSummaryForAutomatio
 FString UInspectorWorldSubsystem::GetPanelPresentationDebugSummaryForAutomation() const
 {
 #if RUNTIME_INSPECTOR_ENABLED
+    if (UUserWidget* Panel = const_cast<UInspectorWorldSubsystem*>(this)->PanelWidget.Get())
+    {
+        RI_ForceWidgetTreeLayout(Panel);
+    }
+
     auto DescribeWidget = [](const UWidget* Widget) -> FString
     {
         if (!Widget)
@@ -2299,11 +3376,258 @@ FString UInspectorWorldSubsystem::GetPanelPresentationDebugSummaryForAutomation(
 #endif
 }
 
+FString UInspectorWorldSubsystem::GetPageRoutingDebugSummaryForAutomation() const
+{
+#if !RUNTIME_INSPECTOR_ENABLED
+    return TEXT("RuntimeInspector disabled");
+#else
+    if (UUserWidget* Panel = const_cast<UInspectorWorldSubsystem*>(this)->PanelWidget.Get())
+    {
+        RI_ForceWidgetTreeLayout(Panel);
+    }
+
+    UWidgetSwitcher* Switcher = ContentSwitcher.Get();
+    if (!Switcher)
+    {
+        Switcher = const_cast<UInspectorWorldSubsystem*>(this)->FindContentSwitcher();
+        const_cast<UInspectorWorldSubsystem*>(this)->ContentSwitcher = Switcher;
+    }
+
+    const int32 ActiveIndex = Switcher ? Switcher->GetActiveWidgetIndex() : INDEX_NONE;
+    const UWidget* ActiveWidget = Switcher ? Switcher->GetActiveWidget() : nullptr;
+    const UPanelWidget* ActiveHost = Cast<UPanelWidget>(ActiveWidget);
+
+    UPanelWidget* ResolvedFileHost = FileHostPanel.Get();
+    if (!ResolvedFileHost)
+    {
+        ResolvedFileHost = const_cast<UInspectorWorldSubsystem*>(this)->FindFileHostPanel();
+        const_cast<UInspectorWorldSubsystem*>(this)->FileHostPanel = ResolvedFileHost;
+    }
+
+    UPanelWidget* ResolvedSettingsHost = SettingsHostPanel.Get();
+    if (!ResolvedSettingsHost)
+    {
+        ResolvedSettingsHost = const_cast<UInspectorWorldSubsystem*>(this)->FindSettingsHostPanel();
+        const_cast<UInspectorWorldSubsystem*>(this)->SettingsHostPanel = ResolvedSettingsHost;
+    }
+
+    UPanelWidget* ResolvedTestHost = TestHostPanel.Get();
+    if (!ResolvedTestHost)
+    {
+        ResolvedTestHost = const_cast<UInspectorWorldSubsystem*>(this)->FindTestHostPanel();
+        const_cast<UInspectorWorldSubsystem*>(this)->TestHostPanel = ResolvedTestHost;
+    }
+
+    const ERIVisiblePage VisiblePage = GetVisiblePage();
+    const TCHAR* VisiblePageLabel =
+        VisiblePage == ERIVisiblePage::Changes ? TEXT("Changes") :
+        VisiblePage == ERIVisiblePage::Settings ? TEXT("Settings") :
+        VisiblePage == ERIVisiblePage::Tools ? TEXT("Tools") :
+        TEXT("Actor");
+
+    return FString::Printf(
+        TEXT("Visible=%s ActiveIndex=%d ActiveHost=%s FileHost=%s SettingsHost=%s TestHost=%s"),
+        VisiblePageLabel,
+        ActiveIndex,
+        *GetNameSafe(ActiveHost),
+        *GetNameSafe(ResolvedFileHost),
+        *GetNameSafe(ResolvedSettingsHost),
+        *GetNameSafe(ResolvedTestHost));
+#endif
+}
+
+FString UInspectorWorldSubsystem::GetActorTopContextValueDebugSummaryForAutomation() const
+{
+#if !RUNTIME_INSPECTOR_ENABLED
+    return TEXT("RuntimeInspector disabled");
+#else
+    if (UUserWidget* Panel = const_cast<UInspectorWorldSubsystem*>(this)->PanelWidget.Get())
+    {
+        RI_ForceWidgetTreeLayout(Panel);
+    }
+
+    auto GetTextValue = [](const UTextBlock* TextBlock) -> FString
+    {
+        if (!TextBlock)
+        {
+            return TEXT("<null>");
+        }
+
+        return TextBlock->GetText().ToString().Replace(TEXT("\n"), TEXT("\\n"));
+    };
+
+    return FString::Printf(
+        TEXT("Actor=%s | Class=%s | Source=%s | Staged=%s"),
+        *GetTextValue(ActorTopContextActorText.Get()),
+        *GetTextValue(ActorTopContextClassText.Get()),
+        *GetTextValue(ActorTopContextSourceText.Get()),
+        *GetTextValue(ActorTopContextStagedText.Get()));
+#endif
+}
+
+FString UInspectorWorldSubsystem::GetActorFooterDebugSummaryForAutomation() const
+{
+#if !RUNTIME_INSPECTOR_ENABLED
+    return TEXT("RuntimeInspector disabled");
+#else
+    if (UUserWidget* Panel = const_cast<UInspectorWorldSubsystem*>(this)->PanelWidget.Get())
+    {
+        RI_ForceWidgetTreeLayout(Panel);
+    }
+
+    const UUserWidget* Panel = PanelWidget.Get();
+    if (!Panel || !Panel->WidgetTree)
+    {
+        return TEXT("Panel=None");
+    }
+
+    const UWidget* FooterRoot = Panel->WidgetTree->FindWidget(TEXT("Modified"));
+    if (!FooterRoot)
+    {
+        return TEXT("Modified=None");
+    }
+
+    auto DescribeWidgetTree = [](const UWidget* Widget, int32 Depth, const auto& DescribeWidgetTreeRef) -> FString
+    {
+        if (!Widget)
+        {
+            return TEXT("None");
+        }
+
+        const FVector2D LocalSize = Widget->GetCachedGeometry().GetLocalSize();
+        FString TextSuffix;
+        if (const UTextBlock* TextBlock = Cast<UTextBlock>(Widget))
+        {
+            TextSuffix = FString::Printf(TEXT(",text=\"%s\""), *TextBlock->GetText().ToString().Replace(TEXT("\n"), TEXT("\\n")));
+        }
+
+        FString Result = FString::Printf(
+            TEXT("%s[%s,%.1fx%.1f,vis=%d%s]"),
+            *Widget->GetName(),
+            *Widget->GetClass()->GetName(),
+            LocalSize.X,
+            LocalSize.Y,
+            static_cast<int32>(Widget->GetVisibility()),
+            *TextSuffix);
+
+        if (Depth >= 3)
+        {
+            return Result;
+        }
+
+        TArray<FString> Children;
+        if (const UPanelWidget* PanelWidgetChild = Cast<UPanelWidget>(Widget))
+        {
+            for (int32 Index = 0; Index < PanelWidgetChild->GetChildrenCount(); ++Index)
+            {
+                Children.Add(DescribeWidgetTreeRef(PanelWidgetChild->GetChildAt(Index), Depth + 1, DescribeWidgetTreeRef));
+            }
+        }
+        else if (const UContentWidget* ContentWidget = Cast<UContentWidget>(Widget))
+        {
+            if (const UWidget* Content = ContentWidget->GetContent())
+            {
+                Children.Add(DescribeWidgetTreeRef(Content, Depth + 1, DescribeWidgetTreeRef));
+            }
+        }
+
+        if (Children.Num() > 0)
+        {
+            Result += FString::Printf(TEXT("{%s}"), *FString::Join(Children, TEXT(" || ")));
+        }
+
+        return Result;
+    };
+
+    return DescribeWidgetTree(FooterRoot, 0, DescribeWidgetTree);
+#endif
+}
+
+FString UInspectorWorldSubsystem::GetContextLabelAnchorChainsForAutomation() const
+{
+#if !RUNTIME_INSPECTOR_ENABLED
+    return TEXT("RuntimeInspector disabled");
+#else
+    if (UUserWidget* Panel = const_cast<UInspectorWorldSubsystem*>(this)->PanelWidget.Get())
+    {
+        RI_ForceWidgetTreeLayout(Panel);
+    }
+
+    const UUserWidget* Panel = PanelWidget.Get();
+    if (!Panel || !Panel->WidgetTree)
+    {
+        return TEXT("Panel=None");
+    }
+
+    auto DescribeWidget = [](const UWidget* Widget) -> FString
+    {
+        if (!Widget)
+        {
+            return TEXT("None");
+        }
+
+        const FVector2D LocalSize = Widget->GetCachedGeometry().GetLocalSize();
+        return FString::Printf(
+            TEXT("%s(%s,%.1fx%.1f,vis=%d)"),
+            *Widget->GetName(),
+            *Widget->GetClass()->GetName(),
+            LocalSize.X,
+            LocalSize.Y,
+            static_cast<int32>(Widget->GetVisibility()));
+    };
+
+    auto BuildAnchorChain = [&DescribeWidget](const UWidget* LeafWidget) -> FString
+    {
+        TArray<FString> Parts;
+        const UWidget* Current = LeafWidget;
+        while (Current)
+        {
+            Parts.Add(DescribeWidget(Current));
+            Current = Current->GetParent();
+        }
+        return FString::Join(Parts, TEXT(" -> "));
+    };
+
+    const TCHAR* Labels[] = {
+        TEXT("Selected Actor"),
+        TEXT("Actor Class"),
+        TEXT("Source Asset"),
+        TEXT("Staged State")
+    };
+
+    TArray<UWidget*> Widgets;
+    Panel->WidgetTree->GetAllWidgets(Widgets);
+
+    TArray<FString> Matches;
+    for (const TCHAR* Label : Labels)
+    {
+        const FString LabelValue(Label);
+        for (UWidget* Widget : Widgets)
+        {
+            UTextBlock* TextBlock = Cast<UTextBlock>(Widget);
+            if (!TextBlock || !TextBlock->GetText().ToString().Equals(LabelValue, ESearchCase::CaseSensitive))
+            {
+                continue;
+            }
+
+            Matches.Add(FString::Printf(TEXT("%s => %s"), Label, *BuildAnchorChain(TextBlock)));
+        }
+    }
+
+    return Matches.Num() > 0 ? FString::Join(Matches, TEXT(" | ")) : TEXT("NoContextLabelsFound");
+#endif
+}
+
 FString UInspectorWorldSubsystem::GetPanelHostWindowDebugSummaryForAutomation() const
 {
 #if !RUNTIME_INSPECTOR_ENABLED
     return TEXT("RuntimeInspector disabled");
 #else
+    if (UUserWidget* Panel = const_cast<UInspectorWorldSubsystem*>(this)->PanelWidget.Get())
+    {
+        RI_ForceWidgetTreeLayout(Panel);
+    }
+
     const UUserWidget* Panel = PanelWidget.Get();
     if (!Panel || !FSlateApplication::IsInitialized())
     {
@@ -2330,6 +3654,17 @@ FString UInspectorWorldSubsystem::GetPanelHostWindowDebugSummaryForAutomation() 
         WindowRect.GetSize().Y,
         WindowRect.Left,
         WindowRect.Top);
+#endif
+}
+
+FString UInspectorWorldSubsystem::GetLastPickDebugSummaryForAutomation() const
+{
+#if !RUNTIME_INSPECTOR_ENABLED
+    return TEXT("RuntimeInspector disabled");
+#else
+    return LastPickDebugSummary.IsEmpty()
+        ? TEXT("Source=None Hit=0 Actor=None Component=None Reason=Unknown")
+        : LastPickDebugSummary;
 #endif
 }
 
@@ -2586,6 +3921,9 @@ static FString RI_GetMeshMaterialSlotName(UMeshComponent* MeshComp, int32 SlotIn
 
 #if RUNTIME_INSPECTOR_ENABLED
 static const TCHAR* DefaultPanelPath = TEXT("/RuntimeInspector/UI/WBP_InspectorPanel.WBP_InspectorPanel_C");
+static const TCHAR* DefaultFilePagePath = TEXT("/RuntimeInspector/UI/WBP_ChangesPage.WBP_ChangesPage_C");
+static const TCHAR* DefaultSettingsPagePath = TEXT("/RuntimeInspector/UI/WBP_SettingsPage.WBP_SettingsPage_C");
+static const TCHAR* DefaultTestPagePath = TEXT("/RuntimeInspector/UI/WBP_ToolsPage.WBP_ToolsPage_C");
 #endif
 
 void UInspectorWorldSubsystem::Initialize(FSubsystemCollectionBase& Collection)
@@ -2596,13 +3934,19 @@ void UInspectorWorldSubsystem::Initialize(FSubsystemCollectionBase& Collection)
     const double StartSeconds = FPlatformTime::Seconds();
     PanelWidgetClass = TSoftClassPtr<UUserWidget>(FSoftObjectPath(DefaultPanelPath));
     ConfirmDialogWidgetClass = TSoftClassPtr<UUserWidget>(FSoftObjectPath(RI_ConfirmDialogClassPath));
+    FilePageWidgetClass = TSoftClassPtr<UInspectorFilePageWidget>(FSoftObjectPath(DefaultFilePagePath));
+    SettingsPageWidgetClass = TSoftClassPtr<UInspectorSettingsPageWidget>(FSoftObjectPath(DefaultSettingsPagePath));
+    TestPageWidgetClass = TSoftClassPtr<UInspectorTestPageWidget>(FSoftObjectPath(DefaultTestPagePath));
     PanelWidgetClass.LoadSynchronous();
     UE_LOG(
         LogRuntimeInspector,
         Log,
-        TEXT("[RI][Perf] Initialize PanelClassPrewarm %.2f ms | Loaded=%d"),
+        TEXT("[RI][Perf] Initialize PanelClassPrewarm %.2f ms | Panel=%d File=%d Settings=%d Tools=%d"),
         (FPlatformTime::Seconds() - StartSeconds) * 1000.0,
-        PanelWidgetClass.Get() ? 1 : 0);
+        PanelWidgetClass.Get() ? 1 : 0,
+        0,
+        0,
+        0);
 #endif
 
 #if RUNTIME_INSPECTOR_ENABLED
@@ -2610,6 +3954,16 @@ void UInspectorWorldSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 #endif
 
     bUnlocked = false;
+
+#if RUNTIME_INSPECTOR_ENABLED
+    if (URuntimeInspectorSettings* Settings = GetMutableDefault<URuntimeInspectorSettings>())
+    {
+        RI_LoadSettingsFromConfigAuthority(Settings);
+        RebindInspectorKeys();
+        RefreshOutlineRuntimeSettings();
+    }
+#endif
+
     LastSavedSettingsSnapshot = GetEditableSettings();
     LastSavedThemePresetSnapshot = GetThemePreset();
     LastAppliedThemePresetFingerprint = static_cast<int32>(RICompactUI::GetActiveThemePreset());
@@ -2620,7 +3974,7 @@ void UInspectorWorldSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 void UInspectorWorldSubsystem::Deinitialize()
 {
 #if RUNTIME_INSPECTOR_ENABLED
-   
+
     RestoreFabScreenshotPanelTransform();
     RestoreFabScreenshotApplicationScale();
     Close();
@@ -2630,7 +3984,7 @@ void UInspectorWorldSubsystem::Deinitialize()
     bUnlocked = false;
 
 #endif
-   
+
 
     Super::Deinitialize();
 }
@@ -2709,6 +4063,25 @@ void UInspectorWorldSubsystem::MaybePrecreatePanelWidget()
 
     const double StartSeconds = FPlatformTime::Seconds();
     EnsurePanelWidget();
+
+    if (UUserWidget* Panel = PanelWidget.Get())
+    {
+        const double SharedContextPrewarmStartSeconds = FPlatformTime::Seconds();
+        Panel->TakeWidget();
+        BindPanelTabButtons();
+        EnsureSharedContextStripInjected();
+        HideSharedContextStripForActorPage();
+        UE_LOG(
+            LogRuntimeInspector,
+            Log,
+            TEXT("[RI][Perf] SharedContextStripPrewarm %.2f ms"),
+            (FPlatformTime::Seconds() - SharedContextPrewarmStartSeconds) * 1000.0);
+        RecordValidationCaptureMetric(
+            TEXT("SharedContextStripPrewarm"),
+            (FPlatformTime::Seconds() - SharedContextPrewarmStartSeconds) * 1000.0,
+            TEXT("Precreate"));
+    }
+
     bPanelWidgetPrecreated = PanelWidget.IsValid();
     if (bPanelWidgetPrecreated)
     {
@@ -2755,15 +4128,7 @@ void UInspectorWorldSubsystem::MaybePrecreateFilePageWidget()
         return;
     }
 
-    UInspectorFilePageWidget* Page = nullptr;
-    if (APlayerController* PC = GetLocalPC())
-    {
-        Page = CreateWidget<UInspectorFilePageWidget>(PC, UInspectorFilePageWidget::StaticClass());
-    }
-    else if (UWorld* World = GetWorld())
-    {
-        Page = CreateWidget<UInspectorFilePageWidget>(World, UInspectorFilePageWidget::StaticClass());
-    }
+    UInspectorFilePageWidget* Page = CreateFilePageWidgetInstance();
 
     if (!Page)
     {
@@ -2780,8 +4145,9 @@ void UInspectorWorldSubsystem::MaybePrecreateFilePageWidget()
     UE_LOG(
         LogRuntimeInspector,
         Log,
-        TEXT("[RI][Perf] FilePagePrecreate %.2f ms"),
-        (FPlatformTime::Seconds() - StartSeconds) * 1000.0);
+        TEXT("[RI][Perf] FilePagePrecreate %.2f ms | Class=%s"),
+        (FPlatformTime::Seconds() - StartSeconds) * 1000.0,
+        *GetNameSafe(Page ? Page->GetClass() : nullptr));
 #endif
 }
 
@@ -2793,15 +4159,7 @@ void UInspectorWorldSubsystem::MaybePrecreateSettingsPageWidget()
         return;
     }
 
-    UInspectorSettingsPageWidget* Page = nullptr;
-    if (APlayerController* PC = GetLocalPC())
-    {
-        Page = CreateWidget<UInspectorSettingsPageWidget>(PC, UInspectorSettingsPageWidget::StaticClass());
-    }
-    else if (UWorld* World = GetWorld())
-    {
-        Page = CreateWidget<UInspectorSettingsPageWidget>(World, UInspectorSettingsPageWidget::StaticClass());
-    }
+    UInspectorSettingsPageWidget* Page = CreateSettingsPageWidgetInstance();
 
     if (!Page)
     {
@@ -2818,9 +4176,76 @@ void UInspectorWorldSubsystem::MaybePrecreateSettingsPageWidget()
     UE_LOG(
         LogRuntimeInspector,
         Log,
-        TEXT("[RI][Perf] SettingsPagePrecreate %.2f ms"),
-        (FPlatformTime::Seconds() - StartSeconds) * 1000.0);
+        TEXT("[RI][Perf] SettingsPagePrecreate %.2f ms | Class=%s"),
+        (FPlatformTime::Seconds() - StartSeconds) * 1000.0,
+        *GetNameSafe(Page ? Page->GetClass() : nullptr));
 #endif
+}
+
+UInspectorFilePageWidget* UInspectorWorldSubsystem::CreateFilePageWidgetInstance()
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    UClass* WidgetClass = FilePageWidgetClass.LoadSynchronous();
+    if (!WidgetClass || !WidgetClass->IsChildOf(UInspectorFilePageWidget::StaticClass()))
+    {
+        WidgetClass = UInspectorFilePageWidget::StaticClass();
+    }
+
+    if (APlayerController* PC = GetLocalPC())
+    {
+        return CreateWidget<UInspectorFilePageWidget>(PC, WidgetClass);
+    }
+
+    if (UWorld* World = GetWorld())
+    {
+        return CreateWidget<UInspectorFilePageWidget>(World, WidgetClass);
+    }
+#endif
+    return nullptr;
+}
+
+UInspectorSettingsPageWidget* UInspectorWorldSubsystem::CreateSettingsPageWidgetInstance()
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    UClass* WidgetClass = SettingsPageWidgetClass.LoadSynchronous();
+    if (!WidgetClass || !WidgetClass->IsChildOf(UInspectorSettingsPageWidget::StaticClass()))
+    {
+        WidgetClass = UInspectorSettingsPageWidget::StaticClass();
+    }
+
+    if (APlayerController* PC = GetLocalPC())
+    {
+        return CreateWidget<UInspectorSettingsPageWidget>(PC, WidgetClass);
+    }
+
+    if (UWorld* World = GetWorld())
+    {
+        return CreateWidget<UInspectorSettingsPageWidget>(World, WidgetClass);
+    }
+#endif
+    return nullptr;
+}
+
+UInspectorTestPageWidget* UInspectorWorldSubsystem::CreateTestPageWidgetInstance()
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    UClass* WidgetClass = TestPageWidgetClass.LoadSynchronous();
+    if (!WidgetClass || !WidgetClass->IsChildOf(UInspectorTestPageWidget::StaticClass()))
+    {
+        WidgetClass = UInspectorTestPageWidget::StaticClass();
+    }
+
+    if (APlayerController* PC = GetLocalPC())
+    {
+        return CreateWidget<UInspectorTestPageWidget>(PC, WidgetClass);
+    }
+
+    if (UWorld* World = GetWorld())
+    {
+        return CreateWidget<UInspectorTestPageWidget>(World, WidgetClass);
+    }
+#endif
+    return nullptr;
 }
 
 void UInspectorWorldSubsystem::ValidateSelection()
@@ -2828,12 +4253,46 @@ void UInspectorWorldSubsystem::ValidateSelection()
 #if RUNTIME_INSPECTOR_ENABLED
     if (SelectedActor.IsValid())
     {
+        bSelectedActorRecoveryPending = false;
+        SelectedActorRecoveryWaitSeconds = 0.f;
         return;
     }
 
-    // 弱引用无效：清空一切，避免 UI 继续引用旧 Items
-    if (SelectedActor.Get() != nullptr || ItemPool.Num() > 0)
+    if (TryRecoverSelectedActorFromIdentity())
     {
+        return;
+    }
+
+    const bool bHasRecoveryIdentity = !SelectedActorRecoveryPath.IsEmpty() || !SelectedActorRecoveryBaseName.IsEmpty();
+    if (bHasRecoveryIdentity)
+    {
+        bSelectedActorRecoveryPending = true;
+        SelectedActorRecoveryWaitSeconds += 0.2f;
+        if (SelectedActorRecoveryWaitSeconds < 1.2f)
+        {
+            return;
+        }
+
+        UE_LOG(
+            LogRuntimeInspector,
+            Warning,
+            TEXT("[RI][SelectionRecovery] Timed out | Path=%s Class=%s Base=%s Wait=%.2f"),
+            *SelectedActorRecoveryPath,
+            *SelectedActorRecoveryClassPath,
+            *SelectedActorRecoveryBaseName,
+            SelectedActorRecoveryWaitSeconds);
+    }
+
+    const bool bShouldBroadcastTargetInvalid =
+        bSelectedActorRecoveryPending
+        || SelectedActor.Get() != nullptr
+        || ItemPool.Num() > 0;
+
+    ClearSelectedActorRecoveryState();
+
+    if (bShouldBroadcastTargetInvalid)
+    {
+        // 弱引用无效：清空一切，避免 UI 继续引用旧 Items
         SelectedActor = nullptr;
         ClearItemPool();
         RefreshPanel(EInspectorRefreshReason::TargetInvalid);
@@ -2927,11 +4386,11 @@ void UInspectorWorldSubsystem::RebindInspectorKeys()
 
 void UInspectorWorldSubsystem::TryBindInputs()
 {
-   
+
 #if RUNTIME_INSPECTOR_ENABLED
     APlayerController* PC = GetLocalPC();
-    
-    
+
+
 
     if (!PC) return;
     RebindInspectorKeys();
@@ -2954,6 +4413,11 @@ void UInspectorWorldSubsystem::Toggle()
 }
 
 void UInspectorWorldSubsystem::Open()
+{
+    OpenToPage(ERIVisiblePage::Actor);
+}
+
+void UInspectorWorldSubsystem::OpenToPage(ERIVisiblePage InitialPage)
 {
 #if RUNTIME_INSPECTOR_ENABLED
     const double StartSeconds = FPlatformTime::Seconds();
@@ -2984,21 +4448,29 @@ void UInspectorWorldSubsystem::Open()
         RI_ApplyLegacyActorHeaderVisibilityFix(W);
     }
     EnsurePanelInteractionInitialized();
-
     bHasCompletedInitialActorPanelRefresh = false;
-    if (!ContentSwitcher.IsValid()
-        || !ActorTabButton.IsValid()
-        || !FileTabButton.IsValid()
-        || !SettingsTabButton.IsValid()
-        || !TestTabButton.IsValid())
+
+    switch (InitialPage)
     {
-        BindPanelTabButtons();
+    case ERIVisiblePage::Changes:
+        CancelDeferredOpenActorRefresh();
+        ShowFilePage();
+        break;
+    case ERIVisiblePage::Settings:
+        CancelDeferredOpenActorRefresh();
+        ShowSettingsPage();
+        break;
+    case ERIVisiblePage::Tools:
+        CancelDeferredOpenActorRefresh();
+        ShowTestPage();
+        break;
+    case ERIVisiblePage::Actor:
+    default:
+        PrepareActorPageForPresentation(false);
+        PrepareActorPageForPresentation(true);
+        ScheduleDeferredOpenActorRefresh(true);
+        break;
     }
-    EnsureSharedContextStripInjected();
-    UpdateSharedContextStrip();
-    EnsureActorFunctionsSectionInjected();
-    SetContentSwitcherIndex(0);
-    ScheduleDeferredOpenActorRefresh(true);
 
     // 让鼠标可用（也可以后续做成设置项）
     if (APlayerController* PC = GetLocalPC())
@@ -3009,7 +4481,16 @@ void UInspectorWorldSubsystem::Open()
         PC->SetInputMode(Mode);
     }
     EnableOutlinePP(true);
-    UE_LOG(LogRuntimeInspector, Log, TEXT("[RI][Perf] Open %.2f ms"), (FPlatformTime::Seconds() - StartSeconds) * 1000.0);
+    UE_LOG(
+        LogRuntimeInspector,
+        Log,
+        TEXT("[RI][Perf] Open %.2f ms | InitialPage=%d"),
+        (FPlatformTime::Seconds() - StartSeconds) * 1000.0,
+        static_cast<int32>(InitialPage));
+    RecordValidationCaptureMetric(
+        TEXT("Open"),
+        (FPlatformTime::Seconds() - StartSeconds) * 1000.0,
+        FString::Printf(TEXT("InitialPage=%d"), static_cast<int32>(InitialPage)));
 #endif
 }
 
@@ -3069,7 +4550,1390 @@ void UInspectorWorldSubsystem::Close()
 void UInspectorWorldSubsystem::RefreshSharedContextStrip()
 {
 #if RUNTIME_INSPECTOR_ENABLED
+    const double StartSeconds = FPlatformTime::Seconds();
     UpdateSharedContextStrip();
+    UE_LOG(
+        LogRuntimeInspector,
+        Log,
+        TEXT("[RI][Perf] SharedContextStrip %.2f ms | Page=%d"),
+        (FPlatformTime::Seconds() - StartSeconds) * 1000.0,
+        static_cast<int32>(GetVisiblePage()));
+    RecordValidationCaptureMetric(
+        TEXT("SharedContextStrip"),
+        (FPlatformTime::Seconds() - StartSeconds) * 1000.0,
+        FString::Printf(TEXT("Page=%d"), static_cast<int32>(GetVisiblePage())));
+#endif
+}
+
+bool UInspectorWorldSubsystem::RunValidationCaptureScenario(FName ScenarioId, FRIValidationCaptureReport& OutReport)
+{
+    OutReport = FRIValidationCaptureReport();
+
+#if !RUNTIME_INSPECTOR_ENABLED
+    OutReport.ScenarioId = ScenarioId.ToString();
+    OutReport.bBlocked = true;
+    OutReport.Summary = TEXT("Validation capture blocked: RuntimeInspector disabled");
+    LastValidationCaptureReport = OutReport;
+    return false;
+#else
+    const FName ResolvedScenarioId = ScenarioId.IsNone()
+        ? RI_ValidationScenarioId_ChangesFirstOpenPerfCapture
+        : ScenarioId;
+
+    if (ResolvedScenarioId == RI_ValidationScenarioId_ChangesFirstOpenPerfCapture
+        || ResolvedScenarioId == RI_SelfTestId_CaptureChangesFirstOpenPerf)
+    {
+        return RunChangesFirstOpenValidationCapture(OutReport);
+    }
+
+    OutReport.ScenarioId = ResolvedScenarioId.ToString();
+    OutReport.bBlocked = false;
+    OutReport.Summary = FString::Printf(TEXT("Unknown validation capture scenario: %s"), *ResolvedScenarioId.ToString());
+    LastValidationCaptureReport = OutReport;
+    return false;
+#endif
+}
+
+bool UInspectorWorldSubsystem::ExportLastValidationCaptureReport(FString& OutFilePath, FString& OutError) const
+{
+    OutFilePath.Reset();
+    OutError.Reset();
+
+#if !RUNTIME_INSPECTOR_ENABLED
+    OutError = TEXT("RuntimeInspector disabled");
+    return false;
+#else
+    if (LastValidationCaptureReport.CaptureId.IsEmpty())
+    {
+        OutError = TEXT("No validation capture report available");
+        return false;
+    }
+
+    FRIValidationCaptureReport ReportCopy = LastValidationCaptureReport;
+    return SaveValidationCaptureReport(ReportCopy, OutError) ? (OutFilePath = ReportCopy.ReportPath, true) : false;
+#endif
+}
+
+void UInspectorWorldSubsystem::BeginValidationCapture(FName ScenarioId)
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    bValidationCaptureActive = true;
+    ValidationCaptureStartedSeconds = FPlatformTime::Seconds();
+    ActiveValidationCaptureScenarioId = ScenarioId;
+    ActiveValidationCaptureReport = FRIValidationCaptureReport();
+    ActiveValidationCaptureReport.CaptureId = FGuid::NewGuid().ToString(EGuidFormats::DigitsWithHyphens);
+    ActiveValidationCaptureReport.ScenarioId = ScenarioId.ToString();
+    ActiveValidationCaptureReport.StartedAt = FDateTime::UtcNow().ToIso8601();
+    ActiveValidationCaptureReport.ArtifactDirectory = GetValidationCaptureScenarioDir(ActiveValidationCaptureReport.CaptureId);
+    IFileManager::Get().MakeDirectory(*ActiveValidationCaptureReport.ArtifactDirectory, true);
+
+    const FString BeginLine = FString::Printf(
+        TEXT("[RI][Capture] Begin Id=%s Scenario=%s"),
+        *ActiveValidationCaptureReport.CaptureId,
+        *ActiveValidationCaptureReport.ScenarioId);
+    UE_LOG(LogRuntimeInspector, Log, TEXT("%s"), *BeginLine);
+    AppendValidationCaptureLogLine(BeginLine);
+#else
+    (void)ScenarioId;
+#endif
+}
+
+void UInspectorWorldSubsystem::RecordValidationCaptureMetric(const FString& MetricName, double ValueMs, const FString& Details)
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    if (!bValidationCaptureActive)
+    {
+        return;
+    }
+
+    FRIValidationCaptureMetric Metric;
+    Metric.Name = MetricName;
+    Metric.ValueMs = ValueMs;
+    Metric.Details = Details;
+    ActiveValidationCaptureReport.Metrics.Add(Metric);
+
+    const FString MetricLine = Details.IsEmpty()
+        ? FString::Printf(TEXT("[RI][Capture] Metric Id=%s Name=%s Ms=%.2f"), *ActiveValidationCaptureReport.CaptureId, *MetricName, ValueMs)
+        : FString::Printf(TEXT("[RI][Capture] Metric Id=%s Name=%s Ms=%.2f Details=%s"), *ActiveValidationCaptureReport.CaptureId, *MetricName, ValueMs, *Details);
+    AppendValidationCaptureLogLine(MetricLine);
+#else
+    (void)MetricName;
+    (void)ValueMs;
+    (void)Details;
+#endif
+}
+
+void UInspectorWorldSubsystem::AppendValidationCaptureLogLine(const FString& LogLine)
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    if (!bValidationCaptureActive)
+    {
+        return;
+    }
+
+    ActiveValidationCaptureReport.KeyLogLines.Add(LogLine);
+#else
+    (void)LogLine;
+#endif
+}
+
+void UInspectorWorldSubsystem::CaptureValidationStateSnapshot(FRIValidationCaptureReport& OutReport) const
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    const FRIRuntimeSessionSummary SessionSummary = GetRuntimeSessionSummary();
+    OutReport.SessionState.bSessionAvailable = SessionSummary.bSessionAvailable;
+    OutReport.SessionState.bIsPIEWorld = SessionSummary.bIsPIEWorld;
+    OutReport.SessionState.bHasLocalPlayerController = SessionSummary.bHasLocalPlayerController;
+    OutReport.SessionState.WorldTypeLabel = SessionSummary.WorldTypeLabel;
+    OutReport.SessionState.NetModeLabel = SessionSummary.NetModeLabel;
+    OutReport.SessionState.MapName = SessionSummary.MapName;
+    OutReport.SessionState.Summary = SessionSummary.Summary;
+
+    const TCHAR* VisiblePageLabel = TEXT("Actor");
+    switch (GetVisiblePage())
+    {
+    case ERIVisiblePage::Changes:
+        VisiblePageLabel = TEXT("Changes");
+        break;
+    case ERIVisiblePage::Settings:
+        VisiblePageLabel = TEXT("Settings");
+        break;
+    case ERIVisiblePage::Tools:
+        VisiblePageLabel = TEXT("Tools");
+        break;
+    case ERIVisiblePage::Actor:
+    default:
+        VisiblePageLabel = TEXT("Actor");
+        break;
+    }
+
+    OutReport.PageState.bPanelOpen = bOpen;
+    OutReport.PageState.bHasStagedPatch = HasStagedPatch();
+    OutReport.PageState.VisiblePage = VisiblePageLabel;
+
+    FString ActorLabel;
+    FString ActorClass;
+    FString SourcePath;
+    FString StagedState;
+    bool bActorMissing = false;
+    bool bContextStripHasStagedPatch = false;
+    BuildContextStripDisplayState(ActorLabel, ActorClass, SourcePath, StagedState, bActorMissing, bContextStripHasStagedPatch);
+
+    OutReport.PageState.StagedState = StagedState;
+    OutReport.SelectedActor.bActorMissing = bActorMissing;
+    OutReport.SelectedActor.ActorLabel = ActorLabel;
+    OutReport.SelectedActor.ActorClass = ActorClass;
+    OutReport.SelectedActor.SourcePath = SourcePath;
+#else
+    (void)OutReport;
+#endif
+}
+
+bool UInspectorWorldSubsystem::CaptureValidationScreenshot(const FString& ScreenshotBaseName, FString& OutPath, FString& OutError)
+{
+    OutPath.Reset();
+    OutError.Reset();
+
+#if !RUNTIME_INSPECTOR_ENABLED
+    OutError = TEXT("RuntimeInspector disabled");
+    return false;
+#else
+    if (!bValidationCaptureActive)
+    {
+        OutError = TEXT("Validation capture is not active");
+        return false;
+    }
+
+    ActiveValidationCaptureReport.HostWindowSummary = GetPanelHostWindowDebugSummaryForAutomation();
+    ActiveValidationCaptureReport.HostWindowTitle = RI_ParseWindowTitleFromDebugSummary(ActiveValidationCaptureReport.HostWindowSummary);
+    if (!ActiveValidationCaptureReport.HostWindowSummary.IsEmpty())
+    {
+        AppendValidationCaptureLogLine(FString::Printf(
+            TEXT("[RI][Capture] HostWindow Id=%s Summary=%s"),
+            *ActiveValidationCaptureReport.CaptureId,
+            *ActiveValidationCaptureReport.HostWindowSummary));
+    }
+
+    UWorld* World = GetWorld();
+    UGameViewportClient* ViewportClient = World ? World->GetGameViewport() : nullptr;
+    FViewport* Viewport = ViewportClient ? ViewportClient->Viewport : nullptr;
+    if (!Viewport)
+    {
+        OutError = TEXT("Viewport unavailable");
+        return false;
+    }
+
+    IFileManager::Get().MakeDirectory(*ActiveValidationCaptureReport.ArtifactDirectory, true);
+    OutPath = FPaths::Combine(ActiveValidationCaptureReport.ArtifactDirectory, FString::Printf(TEXT("%s.png"), *ScreenshotBaseName));
+
+#if PLATFORM_WINDOWS
+    if (FSlateApplication::IsInitialized())
+    {
+        if (UUserWidget* Panel = PanelWidget.Get())
+        {
+            if (TSharedPtr<SWidget> CachedWidget = Panel->GetCachedWidget())
+            {
+                if (TSharedPtr<SWindow> Window = FSlateApplication::Get().FindWidgetWindow(CachedWidget.ToSharedRef()))
+                {
+                    if (TSharedPtr<FGenericWindow> NativeWindow = Window->GetNativeWindow())
+                    {
+                        if (void* OSWindowHandle = NativeWindow->GetOSWindowHandle())
+                        {
+                            const bool bWindowCaptureOk = RI_CaptureWindowHandleToFile(static_cast<HWND>(OSWindowHandle), OutPath, OutError);
+                            if (bWindowCaptureOk && IFileManager::Get().FileExists(*OutPath))
+                            {
+                                ActiveValidationCaptureReport.ScreenshotMode = TEXT("internal_window_capture");
+                                ActiveValidationCaptureReport.ScreenshotPaths.Add(OutPath);
+                                AppendValidationCaptureLogLine(FString::Printf(TEXT("[RI][Capture] Screenshot Id=%s Path=%s"), *ActiveValidationCaptureReport.CaptureId, *OutPath));
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+#endif
+
+    FScreenshotRequest::RequestScreenshot(OutPath, false, false);
+    Viewport->TakeHighResScreenShot();
+    FlushRenderingCommands();
+
+    const double DeadlineSeconds = FPlatformTime::Seconds() + 2.0;
+    while (FPlatformTime::Seconds() < DeadlineSeconds)
+    {
+        if (IFileManager::Get().FileExists(*OutPath))
+        {
+            ActiveValidationCaptureReport.ScreenshotMode = TEXT("internal_viewport_fallback");
+            ActiveValidationCaptureReport.ScreenshotPaths.Add(OutPath);
+            AppendValidationCaptureLogLine(FString::Printf(TEXT("[RI][Capture] Screenshot Id=%s Path=%s"), *ActiveValidationCaptureReport.CaptureId, *OutPath));
+            return true;
+        }
+
+        if (FSlateApplication::IsInitialized())
+        {
+            FSlateApplication::Get().Tick(ESlateTickType::All);
+        }
+        FPlatformProcess::Sleep(0.05f);
+        FlushRenderingCommands();
+    }
+
+    ActiveValidationCaptureReport.ScreenshotMode = TEXT("internal_capture_failed");
+    OutError = FString::Printf(TEXT("Screenshot was not written: %s"), *OutPath);
+    return false;
+#endif
+}
+
+bool UInspectorWorldSubsystem::SaveValidationCaptureReport(FRIValidationCaptureReport& InOutReport, FString& OutError) const
+{
+    OutError.Reset();
+
+#if !RUNTIME_INSPECTOR_ENABLED
+    OutError = TEXT("RuntimeInspector disabled");
+    return false;
+#else
+    if (InOutReport.CaptureId.IsEmpty())
+    {
+        OutError = TEXT("Validation capture report has no capture id");
+        return false;
+    }
+
+    if (InOutReport.ArtifactDirectory.IsEmpty())
+    {
+        InOutReport.ArtifactDirectory = GetValidationCaptureScenarioDir(InOutReport.CaptureId);
+    }
+
+    IFileManager::Get().MakeDirectory(*InOutReport.ArtifactDirectory, true);
+    InOutReport.ReportPath = FPaths::Combine(InOutReport.ArtifactDirectory, TEXT("report.json"));
+
+    FString Payload;
+    if (!FJsonObjectConverter::UStructToJsonObjectString(InOutReport, Payload))
+    {
+        OutError = TEXT("Failed to serialize validation capture report");
+        return false;
+    }
+
+    if (!FFileHelper::SaveStringToFile(Payload, *InOutReport.ReportPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
+    {
+        OutError = FString::Printf(TEXT("Failed to save validation capture report: %s"), *InOutReport.ReportPath);
+        return false;
+    }
+
+    return true;
+#endif
+}
+
+FString UInspectorWorldSubsystem::BuildValidationCaptureSummaryText(const FRIValidationCaptureReport& Report) const
+{
+    const TCHAR* ScreenshotStatus = Report.ScreenshotPaths.Num() > 0 ? TEXT("present") : TEXT("external-required");
+    return FString::Printf(
+        TEXT("ValidationCapture=%s | Scenario=%s | Page=%s | Screens=%d | Screenshot=%s | Mode=%s | Host=%s | Metrics=%d | Report=%s"),
+        Report.bBlocked ? TEXT("BLOCKED") : (Report.bPassed ? TEXT("PASS") : TEXT("FAIL")),
+        *Report.ScenarioId,
+        *Report.PageState.VisiblePage,
+        Report.ScreenshotPaths.Num(),
+        ScreenshotStatus,
+        Report.ScreenshotMode.IsEmpty() ? TEXT("unknown") : *Report.ScreenshotMode,
+        Report.HostWindowTitle.IsEmpty() ? TEXT("None") : *Report.HostWindowTitle,
+        Report.Metrics.Num(),
+        Report.ReportPath.IsEmpty() ? TEXT("None") : *Report.ReportPath);
+}
+
+FString UInspectorWorldSubsystem::GetValidationCaptureRootDir() const
+{
+    return FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("RuntimeInspector"), TEXT("Validation")));
+}
+
+FString UInspectorWorldSubsystem::GetValidationCaptureScenarioDir(const FString& CaptureId) const
+{
+    return FPaths::Combine(GetValidationCaptureRootDir(), CaptureId);
+}
+
+FString UInspectorWorldSubsystem::GetTransformSourcePersistenceRootDir() const
+{
+    return FPaths::ConvertRelativePathToFull(
+        FPaths::Combine(GetValidationCaptureRootDir(), TEXT("TransformSourcePersistence")));
+}
+
+FString UInspectorWorldSubsystem::GetTransformSourcePersistencePendingPath() const
+{
+    return FPaths::Combine(GetTransformSourcePersistenceRootDir(), TEXT("pending_state.json"));
+}
+
+FString UInspectorWorldSubsystem::GetTransformSourcePersistenceScenarioDir(const FString& CaptureId) const
+{
+    return FPaths::Combine(GetTransformSourcePersistenceRootDir(), CaptureId);
+}
+
+bool UInspectorWorldSubsystem::SaveTransformSourcePersistenceCheckpoint(const FRITransformSourcePersistenceCheckpoint& InCheckpoint, FString& OutPath, FString& OutError) const
+{
+    OutPath.Reset();
+    OutError.Reset();
+
+#if !RUNTIME_INSPECTOR_ENABLED
+    OutError = TEXT("RuntimeInspector disabled");
+    return false;
+#else
+    if (InCheckpoint.CaptureId.IsEmpty())
+    {
+        OutError = TEXT("Transform persistence checkpoint has no capture id");
+        return false;
+    }
+
+    const FString RootDir = GetTransformSourcePersistenceRootDir();
+    IFileManager::Get().MakeDirectory(*RootDir, true);
+    OutPath = GetTransformSourcePersistencePendingPath();
+
+    FString Payload;
+    if (!FJsonObjectConverter::UStructToJsonObjectString(InCheckpoint, Payload))
+    {
+        OutError = TEXT("Failed to serialize transform persistence checkpoint");
+        OutPath.Reset();
+        return false;
+    }
+
+    if (!FFileHelper::SaveStringToFile(Payload, *OutPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
+    {
+        OutError = FString::Printf(TEXT("Failed to save transform persistence checkpoint: %s"), *OutPath);
+        OutPath.Reset();
+        return false;
+    }
+
+    return true;
+#endif
+}
+
+bool UInspectorWorldSubsystem::LoadTransformSourcePersistenceCheckpoint(FRITransformSourcePersistenceCheckpoint& OutCheckpoint, FString& OutPath, FString& OutError) const
+{
+    OutCheckpoint = FRITransformSourcePersistenceCheckpoint();
+    OutPath = GetTransformSourcePersistencePendingPath();
+    OutError.Reset();
+
+#if !RUNTIME_INSPECTOR_ENABLED
+    OutError = TEXT("RuntimeInspector disabled");
+    return false;
+#else
+    FString Payload;
+    if (!FFileHelper::LoadFileToString(Payload, *OutPath))
+    {
+        OutError = FString::Printf(TEXT("Transform persistence checkpoint missing: %s"), *OutPath);
+        return false;
+    }
+
+    if (!FJsonObjectConverter::JsonObjectStringToUStruct<FRITransformSourcePersistenceCheckpoint>(Payload, &OutCheckpoint, 0, 0))
+    {
+        OutError = FString::Printf(TEXT("Failed to deserialize transform persistence checkpoint: %s"), *OutPath);
+        OutCheckpoint = FRITransformSourcePersistenceCheckpoint();
+        return false;
+    }
+
+    return true;
+#endif
+}
+
+bool UInspectorWorldSubsystem::SaveTransformSourcePersistenceReport(FRITransformSourcePersistenceReport& InOutReport, FString& OutError) const
+{
+    OutError.Reset();
+
+#if !RUNTIME_INSPECTOR_ENABLED
+    OutError = TEXT("RuntimeInspector disabled");
+    return false;
+#else
+    if (InOutReport.CaptureId.IsEmpty())
+    {
+        OutError = TEXT("Transform persistence report has no capture id");
+        return false;
+    }
+
+    if (InOutReport.ArtifactDirectory.IsEmpty())
+    {
+        InOutReport.ArtifactDirectory = GetTransformSourcePersistenceScenarioDir(InOutReport.CaptureId);
+    }
+
+    IFileManager::Get().MakeDirectory(*InOutReport.ArtifactDirectory, true);
+    const FString PhaseLabel = FPaths::MakeValidFileName(InOutReport.PhaseId.IsEmpty() ? TEXT("report") : InOutReport.PhaseId);
+    InOutReport.ReportPath = FPaths::Combine(InOutReport.ArtifactDirectory, FString::Printf(TEXT("%s_report.json"), *PhaseLabel));
+
+    FString Payload;
+    if (!FJsonObjectConverter::UStructToJsonObjectString(InOutReport, Payload))
+    {
+        OutError = TEXT("Failed to serialize transform persistence report");
+        return false;
+    }
+
+    if (!FFileHelper::SaveStringToFile(Payload, *InOutReport.ReportPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
+    {
+        OutError = FString::Printf(TEXT("Failed to save transform persistence report: %s"), *InOutReport.ReportPath);
+        return false;
+    }
+
+    return true;
+#endif
+}
+
+bool UInspectorWorldSubsystem::RunChangesFirstOpenValidationCapture(FRIValidationCaptureReport& OutReport)
+{
+    OutReport = FRIValidationCaptureReport();
+
+#if !RUNTIME_INSPECTOR_ENABLED
+    OutReport.ScenarioId = RI_ValidationScenarioId_ChangesFirstOpenPerfCapture.ToString();
+    OutReport.bBlocked = true;
+    OutReport.Summary = TEXT("Validation capture blocked: RuntimeInspector disabled");
+    LastValidationCaptureReport = OutReport;
+    return false;
+#else
+    if (!IsSelfTestPIEAvailable())
+    {
+        OutReport.ScenarioId = RI_ValidationScenarioId_ChangesFirstOpenPerfCapture.ToString();
+        OutReport.bBlocked = true;
+        OutReport.Summary = TEXT("Validation capture blocked: PIE with local player required");
+        LastValidationCaptureReport = OutReport;
+        return false;
+    }
+
+    AActor* PreviousSelectedActor = SelectedActor.Get();
+    const bool bWasOpen = bOpen;
+    const ERIVisiblePage PreviousPage = bWasOpen ? GetVisiblePage() : ERIVisiblePage::Actor;
+    const bool bHadStagedPatch = bHasStagedPatch;
+    const FRIPatchBundle PreviousStagedPatch = StagedPatchBundle;
+
+    auto RestoreState = [&]()
+    {
+        StagedPatchBundle = PreviousStagedPatch;
+        bHasStagedPatch = bHadStagedPatch;
+        SetSelectedActor(PreviousSelectedActor);
+        if (bWasOpen)
+        {
+            if (!bOpen)
+            {
+                OpenToPage(PreviousPage);
+            }
+            else
+            {
+                switch (PreviousPage)
+                {
+                case ERIVisiblePage::Changes:
+                    HandleFileTabClicked();
+                    break;
+                case ERIVisiblePage::Settings:
+                    HandleSettingsTabClicked();
+                    break;
+                case ERIVisiblePage::Tools:
+                    HandleTestTabClicked();
+                    break;
+                case ERIVisiblePage::Actor:
+                default:
+                    HandleActorTabClicked();
+                    break;
+                }
+            }
+        }
+        else
+        {
+            Close();
+        }
+    };
+
+    AActor* StableActor = PreviousSelectedActor;
+    if (!StableActor)
+    {
+        StableActor = ResolvePreferredFabScreenshotActor();
+    }
+    if (!StableActor)
+    {
+        if (UWorld* World = GetWorld())
+        {
+            for (TActorIterator<AActor> It(World); It; ++It)
+            {
+                AActor* CandidateActor = *It;
+                const bool bCandidateValid = CandidateActor
+                    && !CandidateActor->IsPendingKillPending()
+                    && !CandidateActor->ActorHasTag(TEXT("RuntimeInspectorIgnore"))
+                    && !CandidateActor->GetClass()->GetName().StartsWith(TEXT("BP_RuntimeInspector"))
+                    && !CandidateActor->GetName().StartsWith(TEXT("BP_RuntimeInspector"));
+                if (bCandidateValid)
+                {
+                    StableActor = CandidateActor;
+                    break;
+                }
+            }
+        }
+    }
+    if (StableActor)
+    {
+        SetSelectedActor(StableActor);
+    }
+
+    Close();
+    ReleasePanelWidgetForRecreate();
+    bPanelWidgetPrecreated = false;
+
+    BeginValidationCapture(RI_ValidationScenarioId_ChangesFirstOpenPerfCapture);
+    MaybePrecreatePanelWidget();
+    MaybePrecreateSecondaryPageWidgets();
+
+    Toggle();
+    if (bDeferredOpenActorRefreshScheduled)
+    {
+        HandleDeferredOpenActorRefreshTimerElapsed();
+    }
+    HandleFileTabClicked();
+
+    FString ScreenshotPath;
+    FString ScreenshotError;
+    const bool bScreenshotOk = CaptureValidationScreenshot(TEXT("changes-first-open"), ScreenshotPath, ScreenshotError);
+    if (!bScreenshotOk)
+    {
+        AppendValidationCaptureLogLine(FString::Printf(TEXT("[RI][Capture] ScreenshotFailed Id=%s Error=%s"), *ActiveValidationCaptureReport.CaptureId, *ScreenshotError));
+    }
+    if (!ActiveValidationCaptureReport.HostWindowSummary.IsEmpty())
+    {
+        AppendValidationCaptureLogLine(FString::Printf(
+            TEXT("[RI][Capture] HostWindowSummary Id=%s Value=%s"),
+            *ActiveValidationCaptureReport.CaptureId,
+            *ActiveValidationCaptureReport.HostWindowSummary));
+    }
+
+    CaptureValidationStateSnapshot(ActiveValidationCaptureReport);
+    ActiveValidationCaptureReport.DurationMs = FMath::Max(0, FMath::RoundToInt(static_cast<float>((FPlatformTime::Seconds() - ValidationCaptureStartedSeconds) * 1000.0)));
+
+    auto HasMetricPrefix = [this](const TCHAR* Prefix) -> bool
+    {
+        for (const FRIValidationCaptureMetric& Metric : ActiveValidationCaptureReport.Metrics)
+        {
+            if (Metric.Name.StartsWith(Prefix, ESearchCase::CaseSensitive))
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    const bool bPageOk = GetVisiblePage() == ERIVisiblePage::Changes;
+    const bool bMetricsOk = HasMetricPrefix(TEXT("ShowFilePage"))
+        && HasMetricPrefix(TEXT("FileFastRefresh"))
+        && HasMetricPrefix(TEXT("SharedContextStrip"));
+
+    ActiveValidationCaptureReport.bBlocked = false;
+    ActiveValidationCaptureReport.bPassed = bPageOk && bMetricsOk;
+    ActiveValidationCaptureReport.Summary = BuildValidationCaptureSummaryText(ActiveValidationCaptureReport);
+
+    const FString EndLine = FString::Printf(
+        TEXT("[RI][Capture] End Id=%s Result=%s"),
+        *ActiveValidationCaptureReport.CaptureId,
+        ActiveValidationCaptureReport.bPassed ? TEXT("PASS") : TEXT("FAIL"));
+    UE_LOG(LogRuntimeInspector, Log, TEXT("%s"), *EndLine);
+    AppendValidationCaptureLogLine(EndLine);
+
+    FString SaveError;
+    if (!SaveValidationCaptureReport(ActiveValidationCaptureReport, SaveError))
+    {
+        ActiveValidationCaptureReport.bPassed = false;
+        ActiveValidationCaptureReport.Summary = FString::Printf(TEXT("%s | Save=%s"), *ActiveValidationCaptureReport.Summary, *SaveError);
+        AppendValidationCaptureLogLine(FString::Printf(TEXT("[RI][Capture] SaveFailed Id=%s Error=%s"), *ActiveValidationCaptureReport.CaptureId, *SaveError));
+    }
+    else
+    {
+        ActiveValidationCaptureReport.Summary = BuildValidationCaptureSummaryText(ActiveValidationCaptureReport);
+    }
+
+    OutReport = ActiveValidationCaptureReport;
+    LastValidationCaptureReport = OutReport;
+    bValidationCaptureActive = false;
+    ValidationCaptureStartedSeconds = 0.0;
+    ActiveValidationCaptureScenarioId = NAME_None;
+    ActiveValidationCaptureReport = FRIValidationCaptureReport();
+
+    RestoreState();
+    return OutReport.bPassed;
+#endif
+}
+
+bool UInspectorWorldSubsystem::RunTransformSourcePersistencePrepareSelfTest(FString& OutReport)
+{
+    OutReport.Reset();
+
+#if !RUNTIME_INSPECTOR_ENABLED
+    OutReport = TEXT("TransformSourcePersistencePrepare=BLOCKED | RuntimeInspector disabled");
+    return false;
+#else
+    const double StartSeconds = FPlatformTime::Seconds();
+    FRITransformSourcePersistenceReport Report;
+    Report.CaptureId = FGuid::NewGuid().ToString(EGuidFormats::DigitsWithHyphens);
+    Report.PhaseId = TEXT("prepare");
+    Report.StartedAt = FDateTime::UtcNow().ToIso8601();
+    Report.ArtifactDirectory = GetTransformSourcePersistenceScenarioDir(Report.CaptureId);
+
+    auto AppendReportLine = [&Report](const FString& Line)
+    {
+        Report.KeyLogLines.Add(Line);
+        UE_LOG(LogRuntimeInspector, Log, TEXT("%s"), *Line);
+    };
+
+    auto FinalizeReport = [this, StartSeconds, &Report, &OutReport](bool bPassed, bool bBlocked, const FString& Summary) -> bool
+    {
+        Report.bPassed = bPassed;
+        Report.bBlocked = bBlocked;
+        Report.Summary = Summary;
+        Report.DurationMs = FMath::Max(0, FMath::RoundToInt(static_cast<float>((FPlatformTime::Seconds() - StartSeconds) * 1000.0)));
+
+        FString SaveError;
+        if (!SaveTransformSourcePersistenceReport(Report, SaveError))
+        {
+            Report.bPassed = false;
+            Report.Summary = FString::Printf(TEXT("%s | Save=%s"), *Summary, *SaveError);
+        }
+
+        OutReport = Report.ReportPath.IsEmpty()
+            ? Report.Summary
+            : FString::Printf(TEXT("%s | Report=%s%s%s"),
+                *Report.Summary,
+                *Report.ReportPath,
+                Report.PendingStatePath.IsEmpty() ? TEXT("") : TEXT(" | PendingState="),
+                Report.PendingStatePath.IsEmpty() ? TEXT("") : *Report.PendingStatePath);
+        return Report.bPassed;
+    };
+
+    AppendReportLine(FString::Printf(TEXT("[RI][TransformPersist] Prepare Begin Id=%s"), *Report.CaptureId));
+
+    if (!IsSelfTestPIEAvailable())
+    {
+        return FinalizeReport(false, true, TEXT("TransformSourcePersistencePrepare=BLOCKED | PIE with local player required"));
+    }
+
+    const FString PendingPath = GetTransformSourcePersistencePendingPath();
+    if (IFileManager::Get().FileExists(*PendingPath))
+    {
+        Report.PendingStatePath = PendingPath;
+        return FinalizeReport(false, true, FString::Printf(TEXT("TransformSourcePersistencePrepare=BLOCKED | Pending checkpoint exists=%s"), *PendingPath));
+    }
+
+    if (HasStagedPatch())
+    {
+        return FinalizeReport(false, true, TEXT("TransformSourcePersistencePrepare=BLOCKED | Clear staged patch before running"));
+    }
+
+    if (ModifiedValueByKey.Num() > 0 || BaselineValueByKey.Num() > 0)
+    {
+        return FinalizeReport(
+            false,
+            true,
+            FString::Printf(
+                TEXT("TransformSourcePersistencePrepare=BLOCKED | Runtime modified state must be clean (Modified=%d Baseline=%d)"),
+                ModifiedValueByKey.Num(),
+                BaselineValueByKey.Num()));
+    }
+
+    AActor* TargetActor = ResolvePreferredFabScreenshotActor();
+    if (!TargetActor)
+    {
+        return FinalizeReport(false, false, TEXT("TransformSourcePersistencePrepare=FAIL | Preferred test actor unavailable"));
+    }
+
+    UBlueprintGeneratedClass* BlueprintClass = Cast<UBlueprintGeneratedClass>(TargetActor->GetClass());
+#if WITH_EDITOR
+    UBlueprint* SourceBlueprint = BlueprintClass ? Cast<UBlueprint>(BlueprintClass->ClassGeneratedBy) : nullptr;
+#else
+    UBlueprint* SourceBlueprint = nullptr;
+#endif
+    if (!BlueprintClass || !SourceBlueprint)
+    {
+        return FinalizeReport(
+            false,
+            false,
+            FString::Printf(TEXT("TransformSourcePersistencePrepare=FAIL | Preferred actor is not Blueprint-backed: %s"), *TargetActor->GetPathName()));
+    }
+
+    USceneComponent* TargetComponent = nullptr;
+    FString TargetComponentError;
+    if (!RI_SelectTransformPersistenceComponentTarget(TargetActor, TargetComponent, TargetComponentError) || !TargetComponent)
+    {
+        return FinalizeReport(
+            false,
+            false,
+            FString::Printf(
+                TEXT("TransformSourcePersistencePrepare=FAIL | Stable component target unavailable on %s: %s"),
+                *TargetActor->GetPathName(),
+                TargetComponentError.IsEmpty() ? TEXT("unknown") : *TargetComponentError));
+    }
+
+    Report.ActorLabel = RI_GetActorDisplayLabel(TargetActor);
+    Report.ActorClass = TargetActor->GetClass()->GetPathName();
+    Report.ComponentName = TargetComponent->GetName();
+    Report.ComponentClass = TargetComponent->GetClass()->GetPathName();
+    Report.SourceAssetPath = SourceBlueprint->GetPathName();
+
+    const FString TargetActorPath = TargetActor->GetPathName();
+    const FString TargetActorClassPath = TargetActor->GetClass()->GetPathName();
+    const FString TargetActorBaseName = RI_ExtractActorBaseName(TargetActor->GetName());
+    const FString TargetComponentPath = TargetComponent->GetPathName();
+    const FString TargetComponentName = TargetComponent->GetName();
+    const FString TargetComponentClassPath = TargetComponent->GetClass()->GetPathName();
+
+    const TWeakObjectPtr<AActor> PreviousSelectedActor = SelectedActor;
+    const bool bHadStagedPatch = bHasStagedPatch;
+    const FRIPatchBundle PreviousStagedPatch = StagedPatchBundle;
+    TArray<FName> AppliedRuntimeFields;
+    FRIPatchBundle PromoteBundle;
+    bool bSourcePromoted = false;
+
+    auto ResolveCurrentActor = [&]() -> AActor*
+    {
+        return ResolveRuntimeActorTarget(
+            TargetActorPath,
+            TargetActorClassPath,
+            TargetActorBaseName);
+    };
+
+    auto ResolveCurrentComponent = [&]() -> USceneComponent*
+    {
+        AActor* CurrentActor = ResolveCurrentActor();
+        if (!CurrentActor)
+        {
+            return nullptr;
+        }
+
+        return Cast<USceneComponent>(ResolveRuntimeComponentTarget(
+            CurrentActor,
+            TargetActorPath,
+            TargetComponentPath,
+            TargetComponentName,
+            TargetComponentClassPath));
+    };
+
+    auto RestoreSessionShellState = [this, PreviousSelectedActor, bHadStagedPatch, PreviousStagedPatch]()
+    {
+        if (bHadStagedPatch)
+        {
+            StagedPatchBundle = PreviousStagedPatch;
+            bHasStagedPatch = PreviousStagedPatch.Operations.Num() > 0;
+        }
+        else
+        {
+            ClearStagedPatch();
+        }
+
+        if (SelectedActor.Get() != PreviousSelectedActor.Get())
+        {
+            SetSelectedActor(PreviousSelectedActor.Get());
+        }
+    };
+
+    auto RestoreCurrentRuntimeValues = [&]() -> bool
+    {
+        USceneComponent* CurrentComponent = ResolveCurrentComponent();
+        if (!CurrentComponent)
+        {
+            return false;
+        }
+
+        bool bRestoreOk = true;
+        for (const FRITransformSourcePersistenceValueState& ValueState : Report.Values)
+        {
+            FString RestoreError;
+            const bool bFieldOk = ApplyPropertyTextNow(CurrentComponent, FName(*ValueState.FieldPath), ValueState.BaselineValue, RestoreError);
+            bRestoreOk = bRestoreOk && bFieldOk;
+        }
+        return bRestoreOk;
+    };
+
+    auto CleanupOnFailure = [&]()
+    {
+        if (bSourcePromoted && PromoteBundle.Operations.Num() > 0)
+        {
+            FRIPromoteResult RestoreResult;
+            FString RestoreError;
+            PromotePatchToSource(RI_BuildTransformPersistenceRestoreBundle(PromoteBundle), RestoreResult, RestoreError);
+        }
+
+        if (AppliedRuntimeFields.Num() > 0)
+        {
+            RestoreCurrentRuntimeValues();
+        }
+
+        ClearStagedPatch();
+        RestoreSessionShellState();
+    };
+
+    SetSelectedActor(TargetActor);
+
+    const FName TransformFields[] = {
+        TEXT("RelativeLocation"),
+        TEXT("RelativeRotation"),
+        TEXT("RelativeScale3D")
+    };
+
+    for (const FName FieldName : TransformFields)
+    {
+        UInspectorPropertyItem* PropertyItem = GetOrCreatePropertyItem(TargetComponent, FieldName);
+        if (!PropertyItem)
+        {
+            CleanupOnFailure();
+            return FinalizeReport(
+                false,
+                false,
+                FString::Printf(TEXT("TransformSourcePersistencePrepare=FAIL | PropertyItem=%s"), *FieldName.ToString()));
+        }
+
+        FString BaselineText;
+        FString PatchedText;
+        if (!RI_BuildSceneComponentTransformPatchedText(TargetComponent, FieldName, BaselineText, PatchedText))
+        {
+            CleanupOnFailure();
+            return FinalizeReport(
+                false,
+                false,
+                FString::Printf(TEXT("TransformSourcePersistencePrepare=FAIL | Failed to build patched component transform for %s"), *FieldName.ToString()));
+        }
+
+        FRITransformSourcePersistenceValueState ValueState;
+        ValueState.FieldPath = FieldName.ToString();
+        ValueState.BaselineValue = BaselineText;
+        ValueState.PatchedValue = PatchedText;
+        Report.Values.Add(MoveTemp(ValueState));
+    }
+
+    for (FRITransformSourcePersistenceValueState& ValueState : Report.Values)
+    {
+        const FName TrackingPropertyName(*ValueState.FieldPath);
+
+        FString ApplyError;
+        if (!ApplyPropertyTextNow(TargetComponent, TrackingPropertyName, ValueState.PatchedValue, ApplyError))
+        {
+            CleanupOnFailure();
+            return FinalizeReport(
+                false,
+                false,
+                FString::Printf(TEXT("TransformSourcePersistencePrepare=FAIL | RuntimeApply[%s]=%s"), *ValueState.FieldPath, *ApplyError));
+        }
+
+        AppliedRuntimeFields.Add(TrackingPropertyName);
+
+        UInspectorPropertyItem* PropertyItem = GetOrCreatePropertyItem(TargetComponent, TrackingPropertyName);
+        FString AfterApplyText = PropertyItem ? PropertyItem->GetValueText() : FString();
+        const bool bReadAfterApply = PropertyItem != nullptr;
+        ValueState.ObservedRuntimeValue = AfterApplyText;
+        ValueState.bRuntimeMatched = bReadAfterApply
+            && RI_AreTransformPersistenceValuesEquivalent(TrackingPropertyName, AfterApplyText, ValueState.PatchedValue);
+        if (!ValueState.bRuntimeMatched)
+        {
+            CleanupOnFailure();
+            return FinalizeReport(
+                false,
+                false,
+                FString::Printf(TEXT("TransformSourcePersistencePrepare=FAIL | RuntimeVerify[%s]=%s"), *ValueState.FieldPath, bReadAfterApply ? *AfterApplyText : TEXT("<unreadable>")));
+        }
+
+        FString TrackingAfterApplyText;
+        const bool bReadTrackingAfterApply = InspectorPropertyUtils::GetValueAsText(TargetComponent, TrackingPropertyName, TrackingAfterApplyText);
+        if (!bReadTrackingAfterApply)
+        {
+            CleanupOnFailure();
+            return FinalizeReport(
+                false,
+                false,
+                FString::Printf(TEXT("TransformSourcePersistencePrepare=FAIL | TrackingVerify[%s]=<unreadable>"), *ValueState.FieldPath));
+        }
+    }
+
+    FString StageError;
+    if (!StageSelectionAsPatch(StageError))
+    {
+        CleanupOnFailure();
+        return FinalizeReport(false, false, FString::Printf(TEXT("TransformSourcePersistencePrepare=FAIL | Stage=%s"), *StageError));
+    }
+
+    const FRIPatchBundle CapturedBundle = GetStagedPatch();
+    PromoteBundle = CapturedBundle;
+    PromoteBundle.BundleId = FString::Printf(TEXT("TransformSourcePersistence_%s"), *Report.CaptureId);
+    PromoteBundle.DisplayName = TEXT("Transform Source Persistence");
+    PromoteBundle.Operations.Reset();
+
+    for (const FRIPatchOperation& Operation : CapturedBundle.Operations)
+    {
+        const bool bFieldTracked = Report.Values.ContainsByPredicate([&Operation](const FRITransformSourcePersistenceValueState& Candidate)
+        {
+            return Candidate.FieldPath == Operation.Field.FieldPath;
+        });
+
+        const bool bTargetMatches = Operation.Target.TargetKind == ERIPatchTargetKind::Component
+            && Operation.Target.ComponentName == TargetComponentName
+            && Operation.Target.ComponentClass == TargetComponentClassPath;
+
+        if (bFieldTracked && bTargetMatches)
+        {
+            PromoteBundle.Operations.Add(Operation);
+        }
+    }
+
+    if (PromoteBundle.Operations.Num() != UE_ARRAY_COUNT(TransformFields))
+    {
+        CleanupOnFailure();
+        return FinalizeReport(
+            false,
+            false,
+            FString::Printf(TEXT("TransformSourcePersistencePrepare=FAIL | Expected 3 component ops, got %d"), PromoteBundle.Operations.Num()));
+    }
+
+    FRIPromotePreview Preview;
+    FString PreviewError;
+    if (!CreatePromotePreview(PromoteBundle, Preview, PreviewError))
+    {
+        CleanupOnFailure();
+        return FinalizeReport(false, false, FString::Printf(TEXT("TransformSourcePersistencePrepare=FAIL | Preview=%s"), *PreviewError));
+    }
+
+    if (Preview.SupportedOperationCount != PromoteBundle.Operations.Num())
+    {
+        CleanupOnFailure();
+        return FinalizeReport(
+            false,
+            false,
+            FString::Printf(TEXT("TransformSourcePersistencePrepare=FAIL | PreviewSupported=%d/%d"), Preview.SupportedOperationCount, PromoteBundle.Operations.Num()));
+    }
+
+    FRIPromoteResult PromoteResult;
+    FString PromoteError;
+    if (!PromotePatchToSource(PromoteBundle, PromoteResult, PromoteError))
+    {
+        CleanupOnFailure();
+        return FinalizeReport(
+            false,
+            false,
+            FString::Printf(TEXT("TransformSourcePersistencePrepare=FAIL | Promote=%s"), PromoteError.IsEmpty() ? TEXT("failed") : *PromoteError));
+    }
+    bSourcePromoted = true;
+
+    FRIPromotePreview AfterPromotePreview;
+    FString AfterPromotePreviewError;
+    if (!CreatePromotePreview(PromoteBundle, AfterPromotePreview, AfterPromotePreviewError))
+    {
+        CleanupOnFailure();
+        return FinalizeReport(
+            false,
+            false,
+            FString::Printf(TEXT("TransformSourcePersistencePrepare=FAIL | PostPreview=%s"), *AfterPromotePreviewError));
+    }
+
+    for (FRITransformSourcePersistenceValueState& ValueState : Report.Values)
+    {
+        const FRIPromoteOperationPreview* OperationPreview = AfterPromotePreview.Operations.FindByPredicate([&ValueState](const FRIPromoteOperationPreview& Candidate)
+        {
+            return Candidate.Operation.Field.FieldPath == ValueState.FieldPath;
+        });
+
+        if (!OperationPreview)
+        {
+            CleanupOnFailure();
+            return FinalizeReport(
+                false,
+                false,
+                FString::Printf(TEXT("TransformSourcePersistencePrepare=FAIL | Missing source preview for %s"), *ValueState.FieldPath));
+        }
+
+        ValueState.ObservedSourceValue = OperationPreview->CurrentSourceValue;
+        ValueState.bSourceMatched = RI_AreTransformPersistenceValuesEquivalent(
+            FName(*ValueState.FieldPath),
+            OperationPreview->CurrentSourceValue,
+            ValueState.PatchedValue);
+
+        if (!ValueState.bSourceMatched)
+        {
+            CleanupOnFailure();
+            return FinalizeReport(
+                false,
+                false,
+                FString::Printf(TEXT("TransformSourcePersistencePrepare=FAIL | SourceVerify[%s]=%s"), *ValueState.FieldPath, *OperationPreview->CurrentSourceValue));
+        }
+
+        if (Report.SourceAssetPath.IsEmpty() && !OperationPreview->AssetPath.IsEmpty())
+        {
+            Report.SourceAssetPath = OperationPreview->AssetPath;
+        }
+    }
+
+    FRITransformSourcePersistenceCheckpoint Checkpoint;
+    Checkpoint.CaptureId = Report.CaptureId;
+    Checkpoint.PreparedAt = FDateTime::UtcNow().ToIso8601();
+    Checkpoint.ActorPath = TargetActorPath;
+    Checkpoint.ActorClass = TargetActorClassPath;
+    Checkpoint.ActorBaseName = TargetActorBaseName;
+    Checkpoint.ActorLabel = Report.ActorLabel;
+    Checkpoint.ComponentPath = TargetComponentPath;
+    Checkpoint.ComponentName = TargetComponentName;
+    Checkpoint.ComponentClass = TargetComponentClassPath;
+    Checkpoint.SourceAssetPath = Report.SourceAssetPath;
+    Checkpoint.ArtifactDirectory = Report.ArtifactDirectory;
+    Checkpoint.Bundle = PromoteBundle;
+    Checkpoint.Values = Report.Values;
+
+    FString PendingSaveError;
+    if (!SaveTransformSourcePersistenceCheckpoint(Checkpoint, Report.PendingStatePath, PendingSaveError))
+    {
+        CleanupOnFailure();
+        return FinalizeReport(
+            false,
+            false,
+            FString::Printf(TEXT("TransformSourcePersistencePrepare=FAIL | PendingState=%s"), *PendingSaveError));
+    }
+
+    ClearStagedPatch();
+    RestoreSessionShellState();
+
+    AppendReportLine(FString::Printf(
+        TEXT("[RI][TransformPersist] Prepare End Id=%s Pending=%s"),
+        *Report.CaptureId,
+        *Report.PendingStatePath));
+
+    return FinalizeReport(
+        true,
+        false,
+        RI_MakeTransformPersistenceSummaryLine(
+            TEXT("TransformSourcePersistencePrepare"),
+            true,
+            false,
+            Report.ActorLabel,
+            Report.ComponentName,
+            FString::Printf(TEXT("Ops=%d"), Report.Values.Num())));
+#endif
+}
+
+FString UInspectorWorldSubsystem::RunTransformSourcePersistencePrepareSelfTestSimple()
+{
+#if !RUNTIME_INSPECTOR_ENABLED
+    return TEXT("RuntimeInspector disabled");
+#else
+    FString Report;
+    RunTransformSourcePersistencePrepareSelfTest(Report);
+    return Report;
+#endif
+}
+
+bool UInspectorWorldSubsystem::RunTransformSourcePersistenceVerifyRestoreSelfTest(FString& OutReport)
+{
+    OutReport.Reset();
+
+#if !RUNTIME_INSPECTOR_ENABLED
+    OutReport = TEXT("TransformSourcePersistenceVerifyRestore=BLOCKED | RuntimeInspector disabled");
+    return false;
+#else
+    const double StartSeconds = FPlatformTime::Seconds();
+    FRITransformSourcePersistenceCheckpoint Checkpoint;
+    FString PendingPath;
+    FString LoadError;
+    if (!LoadTransformSourcePersistenceCheckpoint(Checkpoint, PendingPath, LoadError))
+    {
+        OutReport = FString::Printf(TEXT("TransformSourcePersistenceVerifyRestore=BLOCKED | %s"), *LoadError);
+        return false;
+    }
+
+    FRITransformSourcePersistenceReport Report;
+    Report.CaptureId = Checkpoint.CaptureId.IsEmpty()
+        ? FGuid::NewGuid().ToString(EGuidFormats::DigitsWithHyphens)
+        : Checkpoint.CaptureId;
+    Report.PhaseId = TEXT("verify_restore");
+    Report.StartedAt = FDateTime::UtcNow().ToIso8601();
+    Report.ArtifactDirectory = Checkpoint.ArtifactDirectory.IsEmpty()
+        ? GetTransformSourcePersistenceScenarioDir(Report.CaptureId)
+        : Checkpoint.ArtifactDirectory;
+    Report.PendingStatePath = PendingPath;
+    Report.ActorLabel = Checkpoint.ActorLabel;
+    Report.ActorClass = Checkpoint.ActorClass;
+    Report.SourceAssetPath = Checkpoint.SourceAssetPath;
+    Report.ComponentName = Checkpoint.ComponentName;
+    Report.ComponentClass = Checkpoint.ComponentClass;
+    Report.Values = Checkpoint.Values;
+
+    auto IsInvalidCheckpointTargetValue = [](const FString& Value) -> bool
+    {
+        return Value.IsEmpty()
+            || Value.Equals(TEXT("None"), ESearchCase::IgnoreCase)
+            || Value.Contains(TEXT("Transient.None"), ESearchCase::IgnoreCase)
+            || Value.EndsWith(TEXT(":PersistentLevel.None"), ESearchCase::IgnoreCase)
+            || Value.EndsWith(TEXT(".None"), ESearchCase::IgnoreCase);
+    };
+
+    const FRIPatchTarget* BundleTarget = Checkpoint.Bundle.Operations.Num() > 0
+        ? &Checkpoint.Bundle.Operations[0].Target
+        : nullptr;
+    const FString EffectiveActorPath = (!IsInvalidCheckpointTargetValue(Checkpoint.ActorPath) || !BundleTarget)
+        ? Checkpoint.ActorPath
+        : BundleTarget->ActorPath;
+    const FString EffectiveActorClass = (!IsInvalidCheckpointTargetValue(Checkpoint.ActorClass) || !BundleTarget)
+        ? Checkpoint.ActorClass
+        : BundleTarget->ActorClass;
+    const FString EffectiveActorBaseName = (!IsInvalidCheckpointTargetValue(Checkpoint.ActorBaseName) || !BundleTarget)
+        ? Checkpoint.ActorBaseName
+        : BundleTarget->ActorBaseName;
+    const FString EffectiveComponentPath = (!IsInvalidCheckpointTargetValue(Checkpoint.ComponentPath) || !BundleTarget)
+        ? Checkpoint.ComponentPath
+        : BundleTarget->ComponentPath;
+    const FString EffectiveComponentName = (!IsInvalidCheckpointTargetValue(Checkpoint.ComponentName) || !BundleTarget)
+        ? Checkpoint.ComponentName
+        : BundleTarget->ComponentName;
+    const FString EffectiveComponentClass = (!IsInvalidCheckpointTargetValue(Checkpoint.ComponentClass) || !BundleTarget)
+        ? Checkpoint.ComponentClass
+        : BundleTarget->ComponentClass;
+
+    Report.ActorClass = EffectiveActorClass;
+    Report.ComponentName = EffectiveComponentName;
+    Report.ComponentClass = EffectiveComponentClass;
+
+    auto AppendReportLine = [&Report](const FString& Line)
+    {
+        Report.KeyLogLines.Add(Line);
+        UE_LOG(LogRuntimeInspector, Log, TEXT("%s"), *Line);
+    };
+
+    auto FinalizeReport = [this, StartSeconds, &Report, &OutReport](bool bPassed, bool bBlocked, const FString& Summary) -> bool
+    {
+        Report.bPassed = bPassed;
+        Report.bBlocked = bBlocked;
+        Report.Summary = Summary;
+        Report.DurationMs = FMath::Max(0, FMath::RoundToInt(static_cast<float>((FPlatformTime::Seconds() - StartSeconds) * 1000.0)));
+
+        FString SaveError;
+        if (!SaveTransformSourcePersistenceReport(Report, SaveError))
+        {
+            Report.bPassed = false;
+            Report.Summary = FString::Printf(TEXT("%s | Save=%s"), *Summary, *SaveError);
+        }
+
+        OutReport = Report.ReportPath.IsEmpty()
+            ? Report.Summary
+            : FString::Printf(TEXT("%s | Report=%s"), *Report.Summary, *Report.ReportPath);
+        return Report.bPassed;
+    };
+
+    AppendReportLine(FString::Printf(TEXT("[RI][TransformPersist] Verify Begin Id=%s"), *Report.CaptureId));
+
+    if (!IsSelfTestPIEAvailable())
+    {
+        return FinalizeReport(false, true, TEXT("TransformSourcePersistenceVerifyRestore=BLOCKED | PIE with local player required"));
+    }
+
+    AActor* CurrentActor = ResolveRuntimeActorTarget(EffectiveActorPath, EffectiveActorClass, EffectiveActorBaseName);
+    if (!CurrentActor)
+    {
+        return FinalizeReport(
+            false,
+            false,
+            FString::Printf(TEXT("TransformSourcePersistenceVerifyRestore=FAIL | Actor not found=%s"), *EffectiveActorPath));
+    }
+
+    USceneComponent* CurrentComponent = Cast<USceneComponent>(ResolveRuntimeComponentTarget(
+        CurrentActor,
+        EffectiveActorPath,
+        EffectiveComponentPath,
+        EffectiveComponentName,
+        EffectiveComponentClass));
+    if (!CurrentComponent)
+    {
+        return FinalizeReport(
+            false,
+            false,
+            FString::Printf(TEXT("TransformSourcePersistenceVerifyRestore=FAIL | Component not found=%s"), *EffectiveComponentName));
+    }
+
+    bool bRuntimeVerifyOk = true;
+    for (FRITransformSourcePersistenceValueState& ValueState : Report.Values)
+    {
+        FString RuntimeText;
+        const bool bReadRuntime = InspectorPropertyUtils::GetValueAsText(CurrentComponent, FName(*ValueState.FieldPath), RuntimeText);
+        ValueState.ObservedRuntimeValue = RuntimeText;
+        ValueState.bRuntimeMatched = bReadRuntime
+            && RI_AreTransformPersistenceValuesEquivalent(FName(*ValueState.FieldPath), RuntimeText, ValueState.PatchedValue);
+        bRuntimeVerifyOk = bRuntimeVerifyOk && ValueState.bRuntimeMatched;
+    }
+
+    FRIPromotePreview SourcePreview;
+    FString SourcePreviewError;
+    const bool bSourcePreviewOk = CreatePromotePreview(Checkpoint.Bundle, SourcePreview, SourcePreviewError);
+    bool bSourceVerifyOk = bSourcePreviewOk;
+    if (bSourcePreviewOk)
+    {
+        for (FRITransformSourcePersistenceValueState& ValueState : Report.Values)
+        {
+            const FRIPromoteOperationPreview* OperationPreview = SourcePreview.Operations.FindByPredicate([&ValueState](const FRIPromoteOperationPreview& Candidate)
+            {
+                return Candidate.Operation.Field.FieldPath == ValueState.FieldPath;
+            });
+
+            if (!OperationPreview)
+            {
+                ValueState.bSourceMatched = false;
+                bSourceVerifyOk = false;
+                continue;
+            }
+
+            ValueState.ObservedSourceValue = OperationPreview->CurrentSourceValue;
+            ValueState.bSourceMatched = RI_AreTransformPersistenceValuesEquivalent(
+                FName(*ValueState.FieldPath),
+                OperationPreview->CurrentSourceValue,
+                ValueState.PatchedValue);
+            bSourceVerifyOk = bSourceVerifyOk && ValueState.bSourceMatched;
+        }
+    }
+
+    const FRIPatchBundle RestoreBundle = RI_BuildTransformPersistenceRestoreBundle(Checkpoint.Bundle);
+    FRIPromoteResult RestorePromoteResult;
+    FString RestorePromoteError;
+    const bool bSourceRestoreApplyOk = PromotePatchToSource(RestoreBundle, RestorePromoteResult, RestorePromoteError);
+
+    CurrentActor = ResolveRuntimeActorTarget(EffectiveActorPath, EffectiveActorClass, EffectiveActorBaseName);
+    CurrentComponent = CurrentActor
+        ? Cast<USceneComponent>(ResolveRuntimeComponentTarget(
+            CurrentActor,
+            EffectiveActorPath,
+            EffectiveComponentPath,
+            EffectiveComponentName,
+            EffectiveComponentClass))
+        : nullptr;
+
+    bool bRuntimeRestoreApplyOk = CurrentComponent != nullptr;
+    for (FRITransformSourcePersistenceValueState& ValueState : Report.Values)
+    {
+        if (!CurrentComponent)
+        {
+            bRuntimeRestoreApplyOk = false;
+            break;
+        }
+
+        FString RuntimeRestoreError;
+        const bool bFieldRestoreOk = ApplyPropertyTextNow(CurrentComponent, FName(*ValueState.FieldPath), ValueState.BaselineValue, RuntimeRestoreError);
+        bRuntimeRestoreApplyOk = bRuntimeRestoreApplyOk && bFieldRestoreOk;
+    }
+
+    bool bSourceRestoreVerifyOk = false;
+    FRIPromotePreview AfterRestorePreview;
+    FString AfterRestorePreviewError;
+    if (bSourceRestoreApplyOk && CreatePromotePreview(RestoreBundle, AfterRestorePreview, AfterRestorePreviewError))
+    {
+        bSourceRestoreVerifyOk = true;
+        for (const FRITransformSourcePersistenceValueState& ValueState : Report.Values)
+        {
+            const FRIPromoteOperationPreview* OperationPreview = AfterRestorePreview.Operations.FindByPredicate([&ValueState](const FRIPromoteOperationPreview& Candidate)
+            {
+                return Candidate.Operation.Field.FieldPath == ValueState.FieldPath;
+            });
+
+            if (!OperationPreview || !RI_AreTransformPersistenceValuesEquivalent(
+                    FName(*ValueState.FieldPath),
+                    OperationPreview->CurrentSourceValue,
+                    ValueState.BaselineValue))
+            {
+                bSourceRestoreVerifyOk = false;
+                break;
+            }
+        }
+    }
+
+    bool bRuntimeRestoreVerifyOk = CurrentComponent != nullptr;
+    if (CurrentComponent)
+    {
+        for (const FRITransformSourcePersistenceValueState& ValueState : Report.Values)
+        {
+            FString RuntimeText;
+            const bool bReadRuntime = InspectorPropertyUtils::GetValueAsText(CurrentComponent, FName(*ValueState.FieldPath), RuntimeText);
+            if (!bReadRuntime || !RI_AreTransformPersistenceValuesEquivalent(FName(*ValueState.FieldPath), RuntimeText, ValueState.BaselineValue))
+            {
+                bRuntimeRestoreVerifyOk = false;
+                break;
+            }
+        }
+    }
+
+    const bool bPendingDeleted = !IFileManager::Get().FileExists(*PendingPath) || IFileManager::Get().Delete(*PendingPath, false, true);
+    if (bPendingDeleted)
+    {
+        Report.PendingStatePath.Reset();
+    }
+
+    AppendReportLine(FString::Printf(
+        TEXT("[RI][TransformPersist] Verify Runtime=%d Source=%d SourceRestore=%d RuntimeRestore=%d PendingDeleted=%d"),
+        bRuntimeVerifyOk ? 1 : 0,
+        bSourceVerifyOk ? 1 : 0,
+        (bSourceRestoreApplyOk && bSourceRestoreVerifyOk) ? 1 : 0,
+        (bRuntimeRestoreApplyOk && bRuntimeRestoreVerifyOk) ? 1 : 0,
+        bPendingDeleted ? 1 : 0));
+
+    const bool bPassed = bRuntimeVerifyOk
+        && bSourceVerifyOk
+        && bSourceRestoreApplyOk
+        && bSourceRestoreVerifyOk
+        && bRuntimeRestoreApplyOk
+        && bRuntimeRestoreVerifyOk
+        && bPendingDeleted;
+
+    const FString Extra = FString::Printf(
+        TEXT("Runtime=%s Source=%s SourceRestore=%s RuntimeRestore=%s Pending=%s"),
+        bRuntimeVerifyOk ? TEXT("ok") : TEXT("bad"),
+        bSourceVerifyOk ? TEXT("ok") : (bSourcePreviewOk ? TEXT("bad") : *SourcePreviewError),
+        (bSourceRestoreApplyOk && bSourceRestoreVerifyOk) ? TEXT("ok") : (RestorePromoteError.IsEmpty() ? TEXT("bad") : *RestorePromoteError),
+        (bRuntimeRestoreApplyOk && bRuntimeRestoreVerifyOk) ? TEXT("ok") : TEXT("bad"),
+        bPendingDeleted ? TEXT("cleared") : TEXT("stale"));
+
+    return FinalizeReport(
+        bPassed,
+        false,
+        RI_MakeTransformPersistenceSummaryLine(
+            TEXT("TransformSourcePersistenceVerifyRestore"),
+            bPassed,
+            false,
+            Report.ActorLabel,
+            Report.ComponentName,
+            Extra));
+#endif
+}
+
+FString UInspectorWorldSubsystem::RunTransformSourcePersistenceVerifyRestoreSelfTestSimple()
+{
+#if !RUNTIME_INSPECTOR_ENABLED
+    return TEXT("RuntimeInspector disabled");
+#else
+    FString Report;
+    RunTransformSourcePersistenceVerifyRestoreSelfTest(Report);
+    return Report;
 #endif
 }
 
@@ -3105,6 +5969,14 @@ void UInspectorWorldSubsystem::EnsurePanelWidget()
     }
     PanelWidgetStrong = W;
     PanelWidget = W;
+    ResetPanelWidgetRuntimeState();
+    return;
+#endif
+}
+
+void UInspectorWorldSubsystem::ResetPanelWidgetRuntimeState()
+{
+#if RUNTIME_INSPECTOR_ENABLED
     ActorTabButton.Reset();
     FileTabButton.Reset();
     SettingsTabButton.Reset();
@@ -3118,10 +5990,31 @@ void UInspectorWorldSubsystem::EnsurePanelWidget()
     SettingsHostPanel.Reset();
     TestHostPanel.Reset();
     SharedContextStripHostPanel.Reset();
+    SharedContextStripBorder.Reset();
+    SharedContextActorCell.Reset();
     SharedContextActorText = nullptr;
     SharedContextClassText = nullptr;
     SharedContextSourceText = nullptr;
     SharedContextStagedText = nullptr;
+    ActorTopContextActorCell.Reset();
+    ActorTopContextStripStrong = nullptr;
+    ActorTopContextActorTextStrong = nullptr;
+    ActorTopContextClassTextStrong = nullptr;
+    ActorTopContextSourceTextStrong = nullptr;
+    ActorTopContextStagedTextStrong = nullptr;
+    ActorGroupsSectionWidgetStrong = nullptr;
+    ActorGroupsSectionHostBoxStrong = nullptr;
+    ActorGroupsScrollBoxStrong = nullptr;
+    ActorGroupsEntriesBoxStrong = nullptr;
+    ActorPinnedScrollBoxStrong = nullptr;
+    ActorPinnedEntriesBoxStrong = nullptr;
+    ActorGroupsHeaderButtonStrong = nullptr;
+    ActorGroupsHeaderBorderStrong = nullptr;
+    ActorGroupsHeaderTextStrong = nullptr;
+    ActorGroupsClickProxies.Reset();
+    ActorPinnedClickProxies.Reset();
+    ActorPropertiesSectionWidgetStrong = nullptr;
+    ActorFunctionsSectionWidgetStrong = nullptr;
     ActorWorkspaceSelectionBandStrong = nullptr;
     ActorWorkspaceSelectionActorTextStrong = nullptr;
     ActorWorkspaceSelectionSourceTextStrong = nullptr;
@@ -3131,25 +6024,58 @@ void UInspectorWorldSubsystem::EnsurePanelWidget()
     ActorWorkbenchPageStackHostStrong = nullptr;
     ActorWorkbenchSidebarHostStrong = nullptr;
     ActorWorkbenchContentHostStrong = nullptr;
+    ActorSplitSidebarSizeBoxStrong = nullptr;
+    ActorSplitSidebarBorderStrong = nullptr;
     ActorWorkspaceSelectionBand.Reset();
     ActorWorkspaceSelectionActorText.Reset();
     ActorWorkspaceSelectionSourceText.Reset();
     ActorWorkspaceSelectionStateText.Reset();
+    ActorTopContextStrip.Reset();
+    ActorTopContextActorText.Reset();
+    ActorTopContextClassText.Reset();
+    ActorTopContextSourceText.Reset();
+    ActorTopContextStagedText.Reset();
     ActorPropertyFunctionHostBox.Reset();
     ActorWorkbenchBodyHost.Reset();
     ActorWorkbenchPageStackHost.Reset();
     ActorWorkbenchSidebarHost.Reset();
     ActorWorkbenchContentHost.Reset();
+    ActorSplitSidebarSizeBox.Reset();
+    ActorSplitSidebarBorder.Reset();
+    ActorSplitSidebarCanvasSlot.Reset();
     FilePageWidgetStrong = nullptr;
     SettingsPageWidgetStrong = nullptr;
     TestPageWidgetStrong = nullptr;
     FilePageWidget.Reset();
     SettingsPageWidget.Reset();
     TestPageWidget.Reset();
+    ActorGroupsSectionWidget.Reset();
+    ActorGroupsSectionHostBox.Reset();
+    ActorGroupsHeaderButton.Reset();
+    ActorGroupsHeaderBorder.Reset();
+    ActorGroupsHeaderText.Reset();
+    ActorPinnedEntriesBox.Reset();
+    ActorPropertiesSectionWidget.Reset();
+    ActorFunctionsSectionWidget.Reset();
     HostPanelMountStates.Reset();
     SettingsPageIndex = INDEX_NONE;
     TestPageIndex = INDEX_NONE;
     bPanelInteractionInitialized = false;
+#endif
+}
+
+void UInspectorWorldSubsystem::ReleasePanelWidgetForRecreate()
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    if (UUserWidget* ExistingPanelWidget = PanelWidget.Get())
+    {
+        ExistingPanelWidget->RemoveFromParent();
+    }
+
+    RestoreMountedHostPanelVisibility();
+    PanelWidgetStrong = nullptr;
+    PanelWidget = nullptr;
+    ResetPanelWidgetRuntimeState();
 #endif
 }
 
@@ -3395,6 +6321,10 @@ void UInspectorWorldSubsystem::ApplyPanelInteractionPresentation()
     float ResolvedWidth = PanelWidth > 1.0f ? PanelWidth : PanelDefaultWidth;
     float ResolvedHeight = PanelHeight > 1.0f ? PanelHeight : PanelDefaultHeight;
     FVector2D BasePosition(8.0f, 8.0f);
+    float SplitLeftWidth = 0.0f;
+    float SplitRightWidth = 0.0f;
+    float SplitCenterClear = 0.0f;
+    bool bUseActorSplit = false;
 
     if (UWorld* World = GetWorld())
     {
@@ -3408,7 +6338,16 @@ void UInspectorWorldSubsystem::ApplyPanelInteractionPresentation()
             ResolvedHeight = FMath::Min(ResolvedHeight, RI_GetViewportAvailableDimension(LogicalViewportSize.Y));
         }
 
-        BasePosition = RI_GetDefaultPanelCanvasPosition(World, FVector2D(ResolvedWidth, ResolvedHeight));
+        bUseActorSplit = ShouldUseActorSplitPresentation(SplitLeftWidth, SplitRightWidth, SplitCenterClear);
+        if (bUseActorSplit)
+        {
+            ResolvedWidth = SplitRightWidth;
+            BasePosition = FVector2D(LogicalViewportSize.X - SplitRightWidth, RI_DefaultPanelViewportInsetY);
+        }
+        else
+        {
+            BasePosition = RI_GetDefaultPanelCanvasPosition(World, FVector2D(ResolvedWidth, ResolvedHeight));
+        }
     }
 
     if (UUserWidget* Panel = PanelWidget.Get())
@@ -3438,6 +6377,32 @@ void UInspectorWorldSubsystem::ApplyPanelInteractionPresentation()
             SizeBox->SetWidthOverride(ResolvedWidth);
             SizeBox->SetHeightOverride(ResolvedHeight);
         }
+    }
+
+    if (bUseActorSplit)
+    {
+        ApplyActorSplitPresentation();
+
+        if (UCanvasPanelSlot* SplitSlot = ActorSplitSidebarCanvasSlot.Get())
+        {
+            const FVector2D LeftPosition = FVector2D(0.0f, BasePosition.Y) + PanelTranslation;
+            SplitSlot->SetAutoSize(false);
+            SplitSlot->SetAnchors(FAnchors(0.0f, 0.0f, 0.0f, 0.0f));
+            SplitSlot->SetAlignment(FVector2D::ZeroVector);
+            SplitSlot->SetPosition(LeftPosition);
+            SplitSlot->SetSize(FVector2D(SplitLeftWidth, ResolvedHeight));
+        }
+
+        if (USizeBox* SplitSizeBox = ActorSplitSidebarSizeBox.Get())
+        {
+            SplitSizeBox->SetWidthOverride(SplitLeftWidth);
+            SplitSizeBox->SetHeightOverride(ResolvedHeight);
+            SplitSizeBox->SetVisibility(ESlateVisibility::Visible);
+        }
+    }
+    else
+    {
+        RestoreActorSinglePanelBodyLayout();
     }
 #endif
 }
@@ -3602,8 +6567,19 @@ bool UInspectorWorldSubsystem::HandlePanelPointerMoveTo(const FVector2D& Cursor)
                 const FVector2D CurrentAbsolute = PanelGeometry.GetAbsolutePosition();
                 const FVector2D DesiredAbsolute = CurrentAbsolute + (NewTranslation - PanelTranslation);
                 const FVector2D PanelSize = PanelGeometry.GetLocalSize();
-                const float ClampedX = FMath::Clamp(DesiredAbsolute.X, WindowRect.Left, WindowRect.Right - PanelSize.X);
+                float ClampedX = FMath::Clamp(DesiredAbsolute.X, WindowRect.Left, WindowRect.Right - PanelSize.X);
                 const float ClampedY = FMath::Clamp(DesiredAbsolute.Y, WindowRect.Top, WindowRect.Bottom - PanelSize.Y);
+
+                float SplitLeftWidth = 0.0f;
+                float SplitRightWidth = 0.0f;
+                float SplitCenterClear = 0.0f;
+                if (ShouldUseActorSplitPresentation(SplitLeftWidth, SplitRightWidth, SplitCenterClear))
+                {
+                    const float MinRightX = WindowRect.Left + SplitLeftWidth;
+                    const float MaxRightX = WindowRect.Right - PanelSize.X;
+                    ClampedX = FMath::Clamp(DesiredAbsolute.X, MinRightX, MaxRightX);
+                }
+
                 NewTranslation += FVector2D(ClampedX - DesiredAbsolute.X, ClampedY - DesiredAbsolute.Y);
             }
         }
@@ -4006,8 +6982,8 @@ static void RI_UpdateActorPropertyHeader(UUserWidget* PanelWidget, UObject* Focu
         }
     };
 
-    ApplyFillRatio(PanelWidget->WidgetTree->FindWidget(TEXT("Left")), 0.68f, FMargin(0.f, 0.f, 6.f, 0.f));
-    ApplyFillRatio(PanelWidget->WidgetTree->FindWidget(TEXT("Right")), 1.32f, FMargin(6.f, 0.f, 0.f, 0.f));
+    ApplyFillRatio(PanelWidget->WidgetTree->FindWidget(TEXT("Left")), 1.0f, FMargin(0.f, 0.f, 6.f, 0.f));
+    ApplyFillRatio(PanelWidget->WidgetTree->FindWidget(TEXT("Right")), 1.0f, FMargin(6.f, 0.f, 0.f, 0.f));
 }
 
 UWidgetSwitcher* UInspectorWorldSubsystem::FindContentSwitcher() const
@@ -4354,6 +7330,7 @@ void UInspectorWorldSubsystem::SetContentSwitcherIndex(int32 InIndex)
     }
 
     UpdatePanelTabButtonStyles();
+    ApplyPanelInteractionPresentation();
 #endif
 }
 
@@ -4464,24 +7441,7 @@ void UInspectorWorldSubsystem::HandleThemePreviewRefreshTimerElapsed()
 
     const ERIVisiblePage RestorePage = PendingThemePreviewPage;
     Close();
-    Open();
-
-    switch (RestorePage)
-    {
-    case ERIVisiblePage::Changes:
-        ShowFilePage();
-        break;
-    case ERIVisiblePage::Settings:
-        ShowSettingsPage();
-        break;
-    case ERIVisiblePage::Tools:
-        ShowTestPage();
-        break;
-    case ERIVisiblePage::Actor:
-    default:
-        HandleActorTabClicked();
-        break;
-    }
+    OpenToPage(RestorePage);
 #endif
 }
 
@@ -4749,8 +7709,6 @@ void UInspectorWorldSubsystem::BindPanelTabButtons()
 
     BindActorSearchBox();
     UpdatePanelTabButtonStyles();
-    EnsureSharedContextStripInjected();
-    UpdateSharedContextStrip();
 #endif
 }
 
@@ -4803,16 +7761,339 @@ void UInspectorWorldSubsystem::UpdatePanelTabButtonStyles()
 #endif
 }
 
+namespace
+{
+    struct FRIContextStripWidgetRefs
+    {
+        UBorder* Border = nullptr;
+        UWidget* ActorCell = nullptr;
+        UTextBlock* ActorText = nullptr;
+        UTextBlock* ClassText = nullptr;
+        UTextBlock* SourceText = nullptr;
+        UTextBlock* StagedText = nullptr;
+    };
+
+    static FMargin RI_ScaleMargin(const FMargin& Margin, float Scale)
+    {
+        return FMargin(Margin.Left * Scale, Margin.Top * Scale, Margin.Right * Scale, Margin.Bottom * Scale);
+    }
+
+    static FRIContextStripWidgetRefs RI_CreateContextStripWidgets(
+        UWidgetTree* WidgetTree,
+        const FName StripName,
+        const FName RowName,
+        const FName ActorCellName,
+        const FName ActorValueName,
+        const FName ClassValueName,
+        const FName SourceValueName,
+        const FName StagedValueName)
+    {
+        FRIContextStripWidgetRefs Result;
+        if (!WidgetTree)
+        {
+            return Result;
+        }
+
+        Result.Border = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), StripName);
+        Result.Border->SetPadding(RICompactUI::GetSurfaceCardPadding());
+        Result.Border->SetBrushColor(RICompactUI::GetContextStripBackgroundColor());
+
+        UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), RowName);
+        Result.Border->SetContent(Row);
+
+        auto AddCell = [WidgetTree, Row](
+            const TCHAR* Label,
+            const FName CellName,
+            const FName ValueName,
+            UWidget*& OutCellWidget,
+            UTextBlock*& OutValueText,
+            float FillWeight,
+            int32 ValueFontSize,
+            bool bBoldValue,
+            const FLinearColor& CellColor)
+        {
+            UBorder* Cell = CellName.IsNone()
+                ? WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass())
+                : WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), CellName);
+            Cell->SetPadding(RICompactUI::GetSurfaceCardPadding(true));
+            Cell->SetBrushColor(CellColor);
+            OutCellWidget = Cell;
+
+            UVerticalBox* Box = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
+            Cell->SetContent(Box);
+
+            Box->AddChildToVerticalBox(RICompactUI::MakeText(WidgetTree, Label, RICompactUI::GetMutedFontSize(), true, RICompactUI::GetMutedTextColor()));
+            OutValueText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), ValueName);
+            OutValueText->SetAutoWrapText(true);
+            OutValueText->SetClipping(EWidgetClipping::ClipToBounds);
+            RICompactUI::ApplyTextStyle(OutValueText, ValueFontSize, bBoldValue, RICompactUI::GetStrongTextColor());
+            Box->AddChildToVerticalBox(OutValueText);
+
+            if (UHorizontalBoxSlot* Slot = Row->AddChildToHorizontalBox(Cell))
+            {
+                FSlateChildSize SizeRule(ESlateSizeRule::Fill);
+                SizeRule.Value = FillWeight;
+                Slot->SetSize(SizeRule);
+                Slot->SetPadding(FMargin(0.f, 0.f, RICompactUI::GetInlineGap(), 0.f));
+                Slot->SetVerticalAlignment(VAlign_Fill);
+            }
+        };
+
+        AddCell(
+            TEXT("Selected Actor"),
+            ActorCellName,
+            ActorValueName,
+            Result.ActorCell,
+            Result.ActorText,
+            1.35f,
+            10,
+            true,
+            RICompactUI::GetContextPrimaryCellBackgroundColor());
+        UWidget* UnusedCellWidget = nullptr;
+        AddCell(
+            TEXT("Actor Class"),
+            NAME_None,
+            ClassValueName,
+            UnusedCellWidget,
+            Result.ClassText,
+            0.96f,
+            8,
+            false,
+            RICompactUI::GetContextSecondaryCellBackgroundColor());
+        AddCell(
+            TEXT("Source Asset"),
+            NAME_None,
+            SourceValueName,
+            UnusedCellWidget,
+            Result.SourceText,
+            1.16f,
+            8,
+            false,
+            RICompactUI::GetContextSecondaryCellBackgroundColor());
+        AddCell(
+            TEXT("Staged State"),
+            NAME_None,
+            StagedValueName,
+            UnusedCellWidget,
+            Result.StagedText,
+            0.92f,
+            9,
+            true,
+            RICompactUI::GetContextStatusCellBackgroundColor());
+
+        return Result;
+    }
+
+    static FRIContextStripWidgetRefs RI_CreateCompactContextStripWidgets(
+        UWidgetTree* WidgetTree,
+        const FName StripName,
+        const FName GridName,
+        const FName ActorCellName,
+        const FName ActorValueName,
+        const FName ClassValueName,
+        const FName SourceValueName,
+        const FName StagedValueName)
+    {
+        FRIContextStripWidgetRefs Result;
+        if (!WidgetTree)
+        {
+            return Result;
+        }
+
+        const FMargin StripPadding = RI_ScaleMargin(RICompactUI::GetSurfaceCardPadding(true), 0.45f);
+        const FMargin CellPadding = RI_ScaleMargin(RICompactUI::GetSurfaceCardPadding(true), 0.45f);
+
+        Result.Border = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), StripName);
+        Result.Border->SetPadding(StripPadding);
+        Result.Border->SetBrushColor(RICompactUI::GetContextStripBackgroundColor());
+
+        UUniformGridPanel* Grid = WidgetTree->ConstructWidget<UUniformGridPanel>(UUniformGridPanel::StaticClass(), GridName);
+        Grid->SetMinDesiredSlotWidth(120.0f);
+        Grid->SetMinDesiredSlotHeight(24.0f);
+        Result.Border->SetContent(Grid);
+
+        auto AddCell = [WidgetTree, Grid, CellPadding](
+            const TCHAR* Label,
+            const FName CellName,
+            const FName ValueName,
+            UWidget*& OutCellWidget,
+            UTextBlock*& OutValueText,
+            int32 Row,
+            int32 Column,
+            int32 ValueFontSize,
+            bool bBoldValue,
+            const FLinearColor& CellColor)
+        {
+            UBorder* Cell = CellName.IsNone()
+                ? WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass())
+                : WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), CellName);
+            Cell->SetPadding(CellPadding);
+            Cell->SetBrushColor(CellColor);
+            OutCellWidget = Cell;
+
+            UVerticalBox* Box = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
+            Cell->SetContent(Box);
+
+            if (UVerticalBoxSlot* LabelSlot = Box->AddChildToVerticalBox(
+                RICompactUI::MakeText(WidgetTree, Label, 4, true, RICompactUI::GetMutedTextColor())))
+            {
+                LabelSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 0.f));
+            }
+
+            OutValueText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), ValueName);
+            OutValueText->SetAutoWrapText(true);
+            OutValueText->SetClipping(EWidgetClipping::ClipToBounds);
+            RICompactUI::ApplyTextStyle(OutValueText, ValueFontSize, bBoldValue, RICompactUI::GetStrongTextColor());
+            Box->AddChildToVerticalBox(OutValueText);
+
+            if (UUniformGridSlot* Slot = Grid->AddChildToUniformGrid(Cell, Row, Column))
+            {
+                Slot->SetHorizontalAlignment(HAlign_Fill);
+                Slot->SetVerticalAlignment(VAlign_Fill);
+            }
+        };
+
+        AddCell(
+            TEXT("Selected Actor"),
+            ActorCellName,
+            ActorValueName,
+            Result.ActorCell,
+            Result.ActorText,
+            0,
+            0,
+            6,
+            true,
+            RICompactUI::GetContextPrimaryCellBackgroundColor());
+        UWidget* UnusedCellWidget = nullptr;
+        AddCell(
+            TEXT("Actor Class"),
+            NAME_None,
+            ClassValueName,
+            UnusedCellWidget,
+            Result.ClassText,
+            0,
+            1,
+            5,
+            false,
+            RICompactUI::GetContextSecondaryCellBackgroundColor());
+        AddCell(
+            TEXT("Source Asset"),
+            NAME_None,
+            SourceValueName,
+            UnusedCellWidget,
+            Result.SourceText,
+            1,
+            0,
+            5,
+            false,
+            RICompactUI::GetContextSecondaryCellBackgroundColor());
+        AddCell(
+            TEXT("Staged State"),
+            NAME_None,
+            StagedValueName,
+            UnusedCellWidget,
+            Result.StagedText,
+            1,
+            1,
+            6,
+            true,
+            RICompactUI::GetContextStatusCellBackgroundColor());
+
+        return Result;
+    }
+
+    static void RI_ApplyContextStripValue(UTextBlock* TextWidget, const FString& InValue, bool bMuted, int32 FontSize, bool bBold, const FLinearColor& StrongColor)
+    {
+        if (!TextWidget)
+        {
+            return;
+        }
+
+        TextWidget->SetText(FText::FromString(InValue));
+        RICompactUI::ApplyTextStyle(
+            TextWidget,
+            FontSize,
+            bBold,
+            bMuted ? RICompactUI::GetMutedTextColor() : StrongColor);
+    }
+
+    static void RI_AttachContextStripToVerticalHost(UVerticalBox* HostPanel, UBorder* StripBorder, int32 DesiredIndex, float BottomPadding, float TopPadding = 10.0f)
+    {
+        if (!HostPanel || !StripBorder)
+        {
+            return;
+        }
+
+        int32 InsertIndex = DesiredIndex == INDEX_NONE ? HostPanel->GetChildrenCount() : DesiredIndex;
+        InsertIndex = FMath::Clamp(InsertIndex, 0, HostPanel->GetChildrenCount());
+
+        const int32 CurrentIndex = HostPanel->GetChildIndex(StripBorder);
+        bool bMovedStrip = false;
+        if (StripBorder->GetParent() != HostPanel || CurrentIndex != InsertIndex)
+        {
+            if (UPanelWidget* ExistingParent = Cast<UPanelWidget>(StripBorder->GetParent()))
+            {
+                ExistingParent->RemoveChild(StripBorder);
+            }
+
+            InsertIndex = FMath::Clamp(InsertIndex, 0, HostPanel->GetChildrenCount());
+            HostPanel->InsertChildAt(InsertIndex, StripBorder);
+            bMovedStrip = true;
+        }
+
+        if (UVerticalBoxSlot* VerticalSlot = Cast<UVerticalBoxSlot>(StripBorder->Slot))
+        {
+            VerticalSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
+            VerticalSlot->SetHorizontalAlignment(HAlign_Fill);
+            VerticalSlot->SetVerticalAlignment(VAlign_Top);
+            VerticalSlot->SetPadding(FMargin(0.f, TopPadding, 0.f, BottomPadding));
+        }
+
+        if (bMovedStrip)
+        {
+            StripBorder->InvalidateLayoutAndVolatility();
+            HostPanel->InvalidateLayoutAndVolatility();
+            if (UWidget* ParentWidget = HostPanel->GetParent())
+            {
+                ParentWidget->InvalidateLayoutAndVolatility();
+            }
+        }
+    }
+
+    static void RI_ForceWidgetTreeLayout(UUserWidget* RootWidget)
+    {
+        if (!RootWidget)
+        {
+            return;
+        }
+
+        RootWidget->TakeWidget();
+        RootWidget->InvalidateLayoutAndVolatility();
+        RootWidget->ForceLayoutPrepass();
+
+        if (FSlateApplication::IsInitialized())
+        {
+            if (TSharedPtr<SWidget> CachedWidget = RootWidget->GetCachedWidget())
+            {
+                CachedWidget->SlatePrepass(FSlateApplication::Get().GetApplicationScale());
+            }
+        }
+
+        RootWidget->ForceLayoutPrepass();
+
+        for (UWidget* Ancestor = RootWidget; Ancestor; Ancestor = Ancestor->GetParent())
+        {
+            Ancestor->InvalidateLayoutAndVolatility();
+            Ancestor->ForceLayoutPrepass();
+        }
+    }
+}
+
 void UInspectorWorldSubsystem::EnsureSharedContextStripInjected()
 {
 #if RUNTIME_INSPECTOR_ENABLED
     UUserWidget* Widget = PanelWidget.Get();
     if (!Widget || !Widget->WidgetTree)
-    {
-        return;
-    }
-
-    if (SharedContextActorText && SharedContextClassText && SharedContextSourceText && SharedContextStagedText)
     {
         return;
     }
@@ -4834,34 +8115,32 @@ void UInspectorWorldSubsystem::EnsureSharedContextStripInjected()
         return;
     }
 
-    UBorder* ExistingBorder = Cast<UBorder>(Widget->WidgetTree->FindWidget(TEXT("RI_SharedContextStrip")));
-    if (ExistingBorder)
+    UBorder* StripBorder = SharedContextStripBorder.Get();
+    if (!StripBorder)
     {
-        if (UHorizontalBox* ExistingRow = Cast<UHorizontalBox>(Widget->WidgetTree->FindWidget(TEXT("RI_SharedContextStripRow"))))
-        {
-            if (!SharedContextActorCell.IsValid())
-            {
-                SharedContextActorCell = Cast<UWidget>(Widget->WidgetTree->FindWidget(TEXT("RI_SharedContextActorCell")));
-            }
-            if (!SharedContextActorText)
-            {
-                SharedContextActorText = Cast<UTextBlock>(Widget->WidgetTree->FindWidget(TEXT("RI_SharedContextActorValue")));
-            }
-            if (!SharedContextClassText)
-            {
-                SharedContextClassText = Cast<UTextBlock>(Widget->WidgetTree->FindWidget(TEXT("RI_SharedContextClassValue")));
-            }
-            if (!SharedContextSourceText)
-            {
-                SharedContextSourceText = Cast<UTextBlock>(Widget->WidgetTree->FindWidget(TEXT("RI_SharedContextSourceValue")));
-            }
-            if (!SharedContextStagedText)
-            {
-                SharedContextStagedText = Cast<UTextBlock>(Widget->WidgetTree->FindWidget(TEXT("RI_SharedContextStagedValue")));
-            }
-        }
-        ExistingBorder->SetVisibility(ESlateVisibility::Collapsed);
-        return;
+        StripBorder = Cast<UBorder>(Widget->WidgetTree->FindWidget(TEXT("RI_SharedContextStrip")));
+        SharedContextStripBorder = StripBorder;
+    }
+
+    if (!SharedContextActorCell.IsValid())
+    {
+        SharedContextActorCell = Cast<UWidget>(Widget->WidgetTree->FindWidget(TEXT("RI_SharedContextActorCell")));
+    }
+    if (!SharedContextActorText)
+    {
+        SharedContextActorText = Cast<UTextBlock>(Widget->WidgetTree->FindWidget(TEXT("RI_SharedContextActorValue")));
+    }
+    if (!SharedContextClassText)
+    {
+        SharedContextClassText = Cast<UTextBlock>(Widget->WidgetTree->FindWidget(TEXT("RI_SharedContextClassValue")));
+    }
+    if (!SharedContextSourceText)
+    {
+        SharedContextSourceText = Cast<UTextBlock>(Widget->WidgetTree->FindWidget(TEXT("RI_SharedContextSourceValue")));
+    }
+    if (!SharedContextStagedText)
+    {
+        SharedContextStagedText = Cast<UTextBlock>(Widget->WidgetTree->FindWidget(TEXT("RI_SharedContextStagedValue")));
     }
 
     UVerticalBox* VerticalHostPanel = Cast<UVerticalBox>(HostPanel);
@@ -4913,155 +8192,191 @@ void UInspectorWorldSubsystem::EnsureSharedContextStripInjected()
     }
 
     SharedContextStripHostPanel = StripHostContainer ? static_cast<UPanelWidget*>(StripHostContainer) : HostPanel;
-
-    UBorder* StripBorder = Widget->WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("RI_SharedContextStrip"));
-    StripBorder->SetPadding(RICompactUI::GetSurfaceCardPadding());
-    StripBorder->SetBrushColor(RICompactUI::GetContextStripBackgroundColor());
-
-    UHorizontalBox* Row = Widget->WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_SharedContextStripRow"));
-    StripBorder->SetContent(Row);
-
-    auto AddCell = [Widget, Row](
-        const TCHAR* Label,
-        const FName CellName,
-        const FName ValueName,
-        TObjectPtr<UTextBlock>& OutValueText,
-        float FillWeight,
-        int32 ValueFontSize,
-        bool bBoldValue,
-        const FLinearColor& CellColor)
+    if (!StripBorder || !SharedContextActorText || !SharedContextClassText || !SharedContextSourceText || !SharedContextStagedText)
     {
-        UBorder* Cell = CellName.IsNone()
-            ? Widget->WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass())
-            : Widget->WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), CellName);
-        Cell->SetPadding(RICompactUI::GetSurfaceCardPadding(true));
-        Cell->SetBrushColor(CellColor);
-
-        UVerticalBox* Box = Widget->WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
-        Cell->SetContent(Box);
-
-        Box->AddChildToVerticalBox(RICompactUI::MakeText(Widget->WidgetTree, Label, RICompactUI::GetMutedFontSize(), true, RICompactUI::GetMutedTextColor()));
-        OutValueText = Widget->WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), ValueName);
-        OutValueText->SetAutoWrapText(true);
-        OutValueText->SetClipping(EWidgetClipping::ClipToBounds);
-        RICompactUI::ApplyTextStyle(OutValueText, ValueFontSize, bBoldValue, RICompactUI::GetStrongTextColor());
-        Box->AddChildToVerticalBox(OutValueText);
-
-        if (UHorizontalBoxSlot* Slot = Row->AddChildToHorizontalBox(Cell))
-        {
-            FSlateChildSize SizeRule(ESlateSizeRule::Fill);
-            SizeRule.Value = FillWeight;
-            Slot->SetSize(SizeRule);
-            Slot->SetPadding(FMargin(0.f, 0.f, RICompactUI::GetInlineGap(), 0.f));
-            Slot->SetVerticalAlignment(VAlign_Fill);
-        }
-    };
-
-    AddCell(
-        TEXT("Selected Actor"),
-        TEXT("RI_SharedContextActorCell"),
-        TEXT("RI_SharedContextActorValue"),
-        SharedContextActorText,
-        1.35f,
-        10,
-        true,
-        RICompactUI::GetContextPrimaryCellBackgroundColor());
-    AddCell(
-        TEXT("Actor Class"),
-        NAME_None,
-        TEXT("RI_SharedContextClassValue"),
-        SharedContextClassText,
-        0.96f,
-        8,
-        false,
-        RICompactUI::GetContextSecondaryCellBackgroundColor());
-    AddCell(
-        TEXT("Source Asset"),
-        NAME_None,
-        TEXT("RI_SharedContextSourceValue"),
-        SharedContextSourceText,
-        1.16f,
-        8,
-        false,
-        RICompactUI::GetContextSecondaryCellBackgroundColor());
-    AddCell(
-        TEXT("Staged State"),
-        NAME_None,
-        TEXT("RI_SharedContextStagedValue"),
-        SharedContextStagedText,
-        0.92f,
-        9,
-        true,
-        RICompactUI::GetContextStatusCellBackgroundColor());
+        const FRIContextStripWidgetRefs Refs = RI_CreateContextStripWidgets(
+            Widget->WidgetTree,
+            TEXT("RI_SharedContextStrip"),
+            TEXT("RI_SharedContextStripRow"),
+            TEXT("RI_SharedContextActorCell"),
+            TEXT("RI_SharedContextActorValue"),
+            TEXT("RI_SharedContextClassValue"),
+            TEXT("RI_SharedContextSourceValue"),
+            TEXT("RI_SharedContextStagedValue"));
+        StripBorder = Refs.Border;
+        SharedContextStripBorder = StripBorder;
+        SharedContextActorCell = Refs.ActorCell;
+        SharedContextActorText = Refs.ActorText;
+        SharedContextClassText = Refs.ClassText;
+        SharedContextSourceText = Refs.SourceText;
+        SharedContextStagedText = Refs.StagedText;
+    }
 
     const int32 SwitcherIndex = StripHostContainer ? StripHostContainer->GetChildIndex(Switcher) : INDEX_NONE;
     const int32 InsertIndex = (StripHostContainer && SwitcherIndex != INDEX_NONE) ? SwitcherIndex : (StripHostContainer ? StripHostContainer->GetChildrenCount() : 0);
     if (StripHostContainer)
     {
-        StripHostContainer->InsertChildAt(InsertIndex, StripBorder);
-    }
-
-    if (UPanelSlot* PanelSlot = StripBorder->Slot)
-    {
-        if (UVerticalBoxSlot* VerticalSlot = Cast<UVerticalBoxSlot>(PanelSlot))
-        {
-            VerticalSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
-            VerticalSlot->SetHorizontalAlignment(HAlign_Fill);
-            VerticalSlot->SetVerticalAlignment(VAlign_Top);
-            VerticalSlot->SetPadding(FMargin(0.f, 0.f, 0.f, RICompactUI::GetSectionGap()));
-        }
+        RI_AttachContextStripToVerticalHost(StripHostContainer, StripBorder, InsertIndex, RICompactUI::GetSectionGap());
     }
 
     StripBorder->SetVisibility(ESlateVisibility::Collapsed);
 #endif
 }
 
+void UInspectorWorldSubsystem::HideSharedContextStripForActorPage()
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    UUserWidget* Widget = PanelWidget.Get();
+    if (!Widget || !Widget->WidgetTree)
+    {
+        return;
+    }
+
+    UBorder* StripBorder = SharedContextStripBorder.Get();
+    if (!StripBorder)
+    {
+        StripBorder = Cast<UBorder>(Widget->WidgetTree->FindWidget(TEXT("RI_SharedContextStrip")));
+        SharedContextStripBorder = StripBorder;
+    }
+    UWidget* ActorCell = SharedContextActorCell.Get();
+    if (!ActorCell)
+    {
+        ActorCell = Widget->WidgetTree->FindWidget(TEXT("RI_SharedContextActorCell"));
+        SharedContextActorCell = ActorCell;
+    }
+
+    if (ActorCell)
+    {
+        ActorCell->SetVisibility(ESlateVisibility::Collapsed);
+    }
+
+    if (!StripBorder)
+    {
+        return;
+    }
+
+    if (StripBorder->GetVisibility() != ESlateVisibility::Collapsed)
+    {
+        StripBorder->SetVisibility(ESlateVisibility::Collapsed);
+    }
+#endif
+}
+
 void UInspectorWorldSubsystem::UpdateSharedContextStrip()
 {
 #if RUNTIME_INSPECTOR_ENABLED
-    EnsureSharedContextStripInjected();
+    const ERIVisiblePage VisiblePage = GetVisiblePage();
 
-    const AActor* Selected = SelectedActor.Get();
-    const FString ActorLabel = Selected ? RI_GetActorDisplayLabel(Selected) : TEXT("No selected actor");
-    const FString ActorClass = (Selected && Selected->GetClass()) ? Selected->GetClass()->GetName() : TEXT("No actor class");
-    const FString SourcePath = (Selected && Selected->GetClass())
-        ? Selected->GetClass()->GetPathName()
-        : TEXT("No source asset");
-    const FString StagedState = HasStagedPatch()
-        ? FString::Printf(TEXT("Staged (%d ops)"), GetStagedPatch().Operations.Num())
-        : TEXT("No staged patch");
-    const bool bHideActorCell = false;
-
-    auto ApplyValue = [](UTextBlock* TextWidget, const FString& InValue, bool bMuted, int32 FontSize, bool bBold, const FLinearColor& StrongColor)
+    UBorder* StripBorder = SharedContextStripBorder.Get();
+    if (!StripBorder)
     {
-        if (!TextWidget)
+        if (UUserWidget* Widget = PanelWidget.Get())
         {
-            return;
+            if (Widget->WidgetTree)
+            {
+                StripBorder = Cast<UBorder>(Widget->WidgetTree->FindWidget(TEXT("RI_SharedContextStrip")));
+                SharedContextStripBorder = StripBorder;
+            }
         }
+    }
 
-        TextWidget->SetText(FText::FromString(InValue));
-        RICompactUI::ApplyTextStyle(
-            TextWidget,
-            FontSize,
-            bBold,
-            bMuted ? RICompactUI::GetMutedTextColor() : StrongColor);
-    };
+    if (VisiblePage == ERIVisiblePage::Actor)
+    {
+        HideSharedContextStripForActorPage();
+        UpdateActorTopContextStrip();
+        return;
+    }
 
-    ApplyValue(SharedContextActorText, ActorLabel, Selected == nullptr, 9, true, RICompactUI::GetStrongTextColor());
-    ApplyValue(SharedContextClassText, ActorClass, Selected == nullptr, 7, false, RICompactUI::GetSecondaryTextColor());
-    ApplyValue(SharedContextSourceText, SourcePath, Selected == nullptr, 7, false, RICompactUI::GetSecondaryTextColor());
-    ApplyValue(
+    EnsureSharedContextStripInjected();
+    if (!StripBorder)
+    {
+        if (UUserWidget* Widget = PanelWidget.Get())
+        {
+            StripBorder = Widget->WidgetTree
+                ? Cast<UBorder>(Widget->WidgetTree->FindWidget(TEXT("RI_SharedContextStrip")))
+                : nullptr;
+            SharedContextStripBorder = StripBorder;
+        }
+    }
+
+    FString ActorLabel;
+    FString ActorClass;
+    FString SourcePath;
+    FString StagedState;
+    bool bActorMissing = false;
+    bool bContextHasStagedPatch = false;
+    BuildContextStripDisplayState(ActorLabel, ActorClass, SourcePath, StagedState, bActorMissing, bContextHasStagedPatch);
+
+    RI_ApplyContextStripValue(SharedContextActorText, ActorLabel, bActorMissing, 9, true, RICompactUI::GetStrongTextColor());
+    RI_ApplyContextStripValue(SharedContextClassText, ActorClass, bActorMissing, 7, false, RICompactUI::GetSecondaryTextColor());
+    RI_ApplyContextStripValue(SharedContextSourceText, SourcePath, bActorMissing, 7, false, RICompactUI::GetSecondaryTextColor());
+    RI_ApplyContextStripValue(
         SharedContextStagedText,
         StagedState,
-        !HasStagedPatch(),
+        !bContextHasStagedPatch,
         8,
         true,
-        HasStagedPatch() ? RICompactUI::GetSuccessTextColor() : RICompactUI::GetStrongTextColor());
+        bContextHasStagedPatch ? RICompactUI::GetSuccessTextColor() : RICompactUI::GetStrongTextColor());
 
     if (SharedContextActorCell.IsValid())
     {
-        SharedContextActorCell->SetVisibility(bHideActorCell ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
+        SharedContextActorCell->SetVisibility(ESlateVisibility::Visible);
     }
+
+    if (StripBorder)
+    {
+        StripBorder->SetVisibility(ESlateVisibility::Visible);
+    }
+
+    UE_CLOG(
+        RI_IsDebugLogEnabled(),
+        LogRuntimeInspector,
+        Log,
+        TEXT("[RI][ContextStrip] Shared Page=%d Parent=%s Host=%s Visible=%d Size=%.1fx%.1f"),
+        static_cast<int32>(VisiblePage),
+        *GetNameSafe(StripBorder ? StripBorder->GetParent() : nullptr),
+        *GetNameSafe(SharedContextStripHostPanel.Get()),
+        StripBorder ? static_cast<int32>(StripBorder->GetVisibility()) : -1,
+        StripBorder ? StripBorder->GetCachedGeometry().GetLocalSize().X : 0.f,
+        StripBorder ? StripBorder->GetCachedGeometry().GetLocalSize().Y : 0.f);
+#endif
+}
+
+void UInspectorWorldSubsystem::BuildContextStripDisplayState(FString& OutActorLabel, FString& OutActorClass, FString& OutSourcePath, FString& OutStagedState, bool& bOutActorMissing, bool& bOutHasStagedPatch) const
+{
+#if !RUNTIME_INSPECTOR_ENABLED
+    OutActorLabel = TEXT("RuntimeInspector disabled");
+    OutActorClass = TEXT("RuntimeInspector disabled");
+    OutSourcePath = TEXT("RuntimeInspector disabled");
+    OutStagedState = TEXT("RuntimeInspector disabled");
+    bOutActorMissing = true;
+    bOutHasStagedPatch = false;
+#else
+    const AActor* Selected = SelectedActor.Get();
+    const bool bUseRecoveryIdentity =
+        !Selected
+        && bSelectedActorRecoveryPending
+        && (!SelectedActorRecoveryDisplayLabel.IsEmpty() || !SelectedActorRecoveryBaseName.IsEmpty());
+    bOutActorMissing = Selected == nullptr && !bUseRecoveryIdentity;
+    bOutHasStagedPatch = HasStagedPatch();
+    OutActorLabel = Selected
+        ? RI_GetActorDisplayLabel(Selected)
+        : (bUseRecoveryIdentity
+            ? (SelectedActorRecoveryDisplayLabel.IsEmpty() ? SelectedActorRecoveryBaseName : SelectedActorRecoveryDisplayLabel)
+            : TEXT("No selected actor"));
+    OutActorClass = (Selected && Selected->GetClass())
+        ? Selected->GetClass()->GetName()
+        : (bUseRecoveryIdentity
+            ? (SelectedActorRecoveryClassDisplayLabel.IsEmpty() ? TEXT("Recovering actor") : SelectedActorRecoveryClassDisplayLabel)
+            : TEXT("No actor class"));
+    OutSourcePath = (Selected && Selected->GetClass())
+        ? Selected->GetClass()->GetPathName()
+        : (bUseRecoveryIdentity
+            ? (SelectedActorRecoveryClassPath.IsEmpty() ? TEXT("Recovering source asset") : SelectedActorRecoveryClassPath)
+            : TEXT("No source asset"));
+    OutStagedState = bOutHasStagedPatch
+        ? FString::Printf(TEXT("Staged (%d ops)"), GetStagedPatch().Operations.Num())
+        : TEXT("No staged patch");
 #endif
 }
 
@@ -5162,13 +8477,29 @@ namespace
             }
         }
 
+        if (UWidget* LeftWidget = PanelWidget->WidgetTree->FindWidget(TEXT("Left")))
+        {
+            if (UHorizontalBoxSlot* LeftSlot = Cast<UHorizontalBoxSlot>(LeftWidget->Slot))
+            {
+                FSlateChildSize SizeRule(ESlateSizeRule::Fill);
+                SizeRule.Value = 1.0f;
+                LeftSlot->SetSize(SizeRule);
+                LeftSlot->SetHorizontalAlignment(HAlign_Fill);
+                LeftSlot->SetVerticalAlignment(VAlign_Fill);
+                LeftSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
+            }
+        }
+
         if (UWidget* RightWidget = PanelWidget->WidgetTree->FindWidget(TEXT("Right")))
         {
             if (UHorizontalBoxSlot* RightSlot = Cast<UHorizontalBoxSlot>(RightWidget->Slot))
             {
-                RightSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+                FSlateChildSize SizeRule(ESlateSizeRule::Fill);
+                SizeRule.Value = 1.0f;
+                RightSlot->SetSize(SizeRule);
                 RightSlot->SetHorizontalAlignment(HAlign_Fill);
                 RightSlot->SetVerticalAlignment(VAlign_Fill);
+                RightSlot->SetPadding(FMargin(8.f, 0.f, 0.f, 0.f));
             }
         }
     }
@@ -5499,10 +8830,53 @@ void UInspectorWorldSubsystem::HandleActorSearchTextChanged(const FText& InText)
 {
 #if RUNTIME_INSPECTOR_ENABLED
     CurrentActorSearchText = InText.ToString();
+    MarkActorPageStructureDirty();
     RefreshPanel(EInspectorRefreshReason::StructureChanged);
 #else
     (void)InText;
 #endif
+}
+
+void UInspectorWorldSubsystem::MarkActorPageStructureDirty()
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    bActorPageStructureDirty = true;
+#endif
+}
+
+FString UInspectorWorldSubsystem::BuildActorPageStructureKey() const
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    const AActor* CurrentActor = SelectedActor.Get();
+    const UObject* FocusObject = SelectedInspectObject.Get();
+    return FString::Printf(
+        TEXT("%s|%s|%s|%d|%s|%d"),
+        CurrentActor ? *CurrentActor->GetPathName() : TEXT("<none>"),
+        FocusObject ? *FocusObject->GetPathName() : TEXT("<none>"),
+        *SelectedGroupKey,
+        static_cast<int32>(PropertyViewMode),
+        *CurrentActorSearchText,
+        IsActorOnlyModifiedFilterEnabled() ? 1 : 0);
+#else
+    return FString();
+#endif
+}
+
+bool UInspectorWorldSubsystem::IsActorOnlyModifiedFilterEnabled() const
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    if (UUserWidget* Panel = PanelWidget.Get())
+    {
+        if (Panel->WidgetTree)
+        {
+            if (const UCheckBox* OnlyModifyToggle = Cast<UCheckBox>(Panel->WidgetTree->FindWidget(TEXT("Toggle_OnModify"))))
+            {
+                return OnlyModifyToggle->IsChecked();
+            }
+        }
+    }
+#endif
+    return false;
 }
 
 UObject* UInspectorWorldSubsystem::GetFocusedInspectObject() const
@@ -5575,7 +8949,7 @@ void UInspectorWorldSubsystem::EnsureActorWorkbenchBodyInjected()
     if (UHorizontalBoxSlot* BodySlot = Cast<UHorizontalBoxSlot>(LegacyLeft->Slot))
     {
         FSlateChildSize SizeRule(ESlateSizeRule::Fill);
-        SizeRule.Value = 0.68f;
+        SizeRule.Value = 1.0f;
         BodySlot->SetSize(SizeRule);
         BodySlot->SetHorizontalAlignment(HAlign_Fill);
         BodySlot->SetVerticalAlignment(VAlign_Fill);
@@ -5584,7 +8958,7 @@ void UInspectorWorldSubsystem::EnsureActorWorkbenchBodyInjected()
     if (UHorizontalBoxSlot* BodySlot = Cast<UHorizontalBoxSlot>(LegacyRight->Slot))
     {
         FSlateChildSize SizeRule(ESlateSizeRule::Fill);
-        SizeRule.Value = 1.32f;
+        SizeRule.Value = 1.0f;
         BodySlot->SetSize(SizeRule);
         BodySlot->SetHorizontalAlignment(HAlign_Fill);
         BodySlot->SetVerticalAlignment(VAlign_Fill);
@@ -5603,158 +8977,630 @@ void UInspectorWorldSubsystem::EnsureActorWorkbenchBodyInjected()
 #endif
 }
 
-void UInspectorWorldSubsystem::EnsureActorWorkspaceSelectionBandInjected()
+void UInspectorWorldSubsystem::EnsureActorSplitSidebarPanelInjected()
 {
 #if RUNTIME_INSPECTOR_ENABLED
-    EnsureActorWorkbenchBodyInjected();
     UUserWidget* Panel = PanelWidget.Get();
-    UVerticalBox* PageStackHost = ActorWorkbenchPageStackHost.Get();
-    UHorizontalBox* BodyHost = ActorWorkbenchBodyHost.Get();
-    if (!Panel || !Panel->WidgetTree || !PageStackHost || !BodyHost)
+    UCanvasPanel* RootCanvas = Panel && Panel->WidgetTree
+        ? Cast<UCanvasPanel>(Panel->WidgetTree->RootWidget)
+        : nullptr;
+    if (!Panel || !Panel->WidgetTree || !RootCanvas)
     {
         return;
     }
 
-    UBorder* SelectionBand = ActorWorkspaceSelectionBand.Get();
-    if (!SelectionBand)
+    USizeBox* SplitSizeBox = ActorSplitSidebarSizeBox.Get();
+    UBorder* SplitBorder = ActorSplitSidebarBorder.Get();
+    if (!SplitSizeBox)
     {
-        SelectionBand = RICompactUI::MakeSurfaceCard(
-            Panel->WidgetTree,
-            TEXT("RI_ActorWorkspaceSelectionBand"),
-            RICompactUI::GetContextStripBackgroundColor(),
-            FMargin(14.f, 6.f));
-
-        UVerticalBox* BandRoot = Panel->WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ActorWorkspaceSelectionBandRoot"));
-        SelectionBand->SetContent(BandRoot);
-
-        if (UVerticalBoxSlot* LabelSlot = BandRoot->AddChildToVerticalBox(
-            RICompactUI::MakeText(Panel->WidgetTree, TEXT("Selection"), RICompactUI::GetMutedFontSize(), true, RICompactUI::GetMutedTextColor())))
-        {
-            LabelSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 1.f));
-        }
-
-        UHorizontalBox* SummaryRow = Panel->WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_ActorWorkspaceSelectionSummary"));
-        BandRoot->AddChildToVerticalBox(SummaryRow);
-
-        auto AddSummaryText = [SummaryRow](UTextBlock* Text, float FillWeight, const FMargin& Padding)
-        {
-            if (!SummaryRow || !Text)
-            {
-                return;
-            }
-
-            if (UHorizontalBoxSlot* Slot = SummaryRow->AddChildToHorizontalBox(Text))
-            {
-                FSlateChildSize SizeRule(ESlateSizeRule::Fill);
-                SizeRule.Value = FillWeight;
-                Slot->SetSize(SizeRule);
-                Slot->SetHorizontalAlignment(HAlign_Fill);
-                Slot->SetVerticalAlignment(VAlign_Center);
-                Slot->SetPadding(Padding);
-            }
-        };
-
-        UTextBlock* ActorText = RICompactUI::MakeText(
-            Panel->WidgetTree,
-            TEXT("No selected actor"),
-            RICompactUI::GetValueFontSize(),
-            true,
-            RICompactUI::GetStrongTextColor(),
-            true);
-        UTextBlock* SourceText = RICompactUI::MakeText(
-            Panel->WidgetTree,
-            TEXT("No source asset"),
-            RICompactUI::GetValueFontSize(),
-            false,
-            RICompactUI::GetSecondaryTextColor(),
-            true);
-        UTextBlock* StateText = RICompactUI::MakeText(
-            Panel->WidgetTree,
-            TEXT("Live only"),
-            RICompactUI::GetValueFontSize(),
-            true,
-            RICompactUI::GetStrongTextColor(),
-            false);
-
-        AddSummaryText(ActorText, 0.90f, FMargin(0.f, 0.f, 14.f, 0.f));
-        AddSummaryText(SourceText, 1.40f, FMargin(0.f, 0.f, 14.f, 0.f));
-        AddSummaryText(StateText, 0.46f, FMargin(0.f));
-
-        ActorWorkspaceSelectionActorTextStrong = ActorText;
-        ActorWorkspaceSelectionActorText = ActorText;
-        ActorWorkspaceSelectionSourceTextStrong = SourceText;
-        ActorWorkspaceSelectionSourceText = ActorWorkspaceSelectionSourceTextStrong;
-        ActorWorkspaceSelectionStateTextStrong = StateText;
-        ActorWorkspaceSelectionStateText = ActorWorkspaceSelectionStateTextStrong;
-
-        ActorWorkspaceSelectionBandStrong = SelectionBand;
-        ActorWorkspaceSelectionBand = SelectionBand;
+        SplitSizeBox = Panel->WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_ActorSplitSidebarSizeBox"));
+        ActorSplitSidebarSizeBoxStrong = SplitSizeBox;
+        ActorSplitSidebarSizeBox = SplitSizeBox;
     }
 
-    if (UPanelWidget* ExistingParent = Cast<UPanelWidget>(SelectionBand->GetParent()))
+    if (!SplitBorder)
     {
-        if (ExistingParent != PageStackHost)
+        SplitBorder = Panel->WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("RI_ActorSplitSidebarBorder"));
+        SplitBorder->SetPadding(RICompactUI::GetPanelPadding());
+        SplitBorder->SetBrushColor(RICompactUI::GetPageBackgroundColor());
+        ActorSplitSidebarBorderStrong = SplitBorder;
+        ActorSplitSidebarBorder = SplitBorder;
+    }
+
+    if (SplitSizeBox && SplitBorder && SplitSizeBox->GetContent() != SplitBorder)
+    {
+        SplitSizeBox->SetContent(SplitBorder);
+    }
+
+    if (SplitSizeBox && SplitSizeBox->GetParent() != RootCanvas)
+    {
+        if (UPanelWidget* ExistingParent = Cast<UPanelWidget>(SplitSizeBox->GetParent()))
         {
-            ExistingParent->RemoveChild(SelectionBand);
+            ExistingParent->RemoveChild(SplitSizeBox);
+        }
+
+        if (UCanvasPanelSlot* CanvasSlot = RootCanvas->AddChildToCanvas(SplitSizeBox))
+        {
+            CanvasSlot->SetAutoSize(false);
+            CanvasSlot->SetAnchors(FAnchors(0.f, 0.f, 0.f, 0.f));
+            CanvasSlot->SetAlignment(FVector2D::ZeroVector);
+            ActorSplitSidebarCanvasSlot = CanvasSlot;
+        }
+    }
+    else if (!ActorSplitSidebarCanvasSlot.IsValid())
+    {
+        ActorSplitSidebarCanvasSlot = Cast<UCanvasPanelSlot>(SplitSizeBox ? SplitSizeBox->Slot : nullptr);
+    }
+
+    if (SplitSizeBox)
+    {
+        SplitSizeBox->SetVisibility(ESlateVisibility::Collapsed);
+    }
+#endif
+}
+
+void UInspectorWorldSubsystem::RestoreActorSinglePanelBodyLayout()
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    EnsureActorWorkbenchBodyInjected();
+
+    UHorizontalBox* BodyHost = ActorWorkbenchBodyHost.Get();
+    UVerticalBox* SidebarHost = ActorWorkbenchSidebarHost.Get();
+    UVerticalBox* ContentHost = ActorWorkbenchContentHost.Get();
+    if (!BodyHost || !SidebarHost || !ContentHost)
+    {
+        return;
+    }
+
+    auto EnsureHorizontalChildAt = [BodyHost](UWidget* Child, int32 DesiredIndex)
+    {
+        if (!BodyHost || !Child)
+        {
+            return;
+        }
+
+        UPanelWidget* ExistingParent = Cast<UPanelWidget>(Child->GetParent());
+        const bool bNeedsReparent = ExistingParent != BodyHost;
+        const int32 CurrentIndex = BodyHost->GetChildIndex(Child);
+        const bool bWrongIndex = !bNeedsReparent && CurrentIndex != DesiredIndex;
+        if (!bNeedsReparent && !bWrongIndex)
+        {
+            return;
+        }
+
+        if (ExistingParent)
+        {
+            ExistingParent->RemoveChild(Child);
+        }
+
+        BodyHost->InsertChildAt(DesiredIndex, Child);
+    };
+
+    EnsureHorizontalChildAt(SidebarHost, 0);
+    EnsureHorizontalChildAt(ContentHost, 1);
+
+    if (UHorizontalBoxSlot* SidebarSlot = Cast<UHorizontalBoxSlot>(SidebarHost->Slot))
+    {
+        FSlateChildSize SizeRule(ESlateSizeRule::Fill);
+        SizeRule.Value = 1.0f;
+        SidebarSlot->SetSize(SizeRule);
+        SidebarSlot->SetHorizontalAlignment(HAlign_Fill);
+        SidebarSlot->SetVerticalAlignment(VAlign_Fill);
+        SidebarSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
+    }
+
+    if (UHorizontalBoxSlot* ContentSlot = Cast<UHorizontalBoxSlot>(ContentHost->Slot))
+    {
+        FSlateChildSize SizeRule(ESlateSizeRule::Fill);
+        SizeRule.Value = 1.0f;
+        ContentSlot->SetSize(SizeRule);
+        ContentSlot->SetHorizontalAlignment(HAlign_Fill);
+        ContentSlot->SetVerticalAlignment(VAlign_Fill);
+        ContentSlot->SetPadding(FMargin(8.f, 0.f, 0.f, 0.f));
+    }
+
+    if (USizeBox* SplitSizeBox = ActorSplitSidebarSizeBox.Get())
+    {
+        SplitSizeBox->SetVisibility(ESlateVisibility::Collapsed);
+    }
+
+    if (UCanvasPanelSlot* SplitSlot = ActorSplitSidebarCanvasSlot.Get())
+    {
+        SplitSlot->SetSize(FVector2D::ZeroVector);
+    }
+
+    BodyHost->InvalidateLayoutAndVolatility();
+    BodyHost->ForceLayoutPrepass();
+#endif
+}
+
+bool UInspectorWorldSubsystem::ShouldUseActorSplitPresentation(float& OutLeftWidth, float& OutRightWidth, float& OutCenterClear) const
+{
+#if !RUNTIME_INSPECTOR_ENABLED
+    OutLeftWidth = 0.0f;
+    OutRightWidth = 0.0f;
+    OutCenterClear = 0.0f;
+    return false;
+#else
+    OutLeftWidth = 0.0f;
+    OutRightWidth = 0.0f;
+    OutCenterClear = 0.0f;
+
+    if (GetVisiblePage() != ERIVisiblePage::Actor)
+    {
+        return false;
+    }
+
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return false;
+    }
+
+    const FVector2D LogicalViewportSize = RI_GetLogicalViewportSize(World);
+    if (LogicalViewportSize.X <= 1.0f || LogicalViewportSize.Y <= 1.0f)
+    {
+        return false;
+    }
+
+    const float LeftWidth = RI_ResolvePanelDefaultDimension(
+        LogicalViewportSize.X,
+        RI_ActorSplitLeftViewportWidthFraction,
+        RI_ActorSplitLeftWidthMin,
+        RI_ActorSplitLeftWidthMax);
+    const float RightWidth = RI_ResolvePanelDefaultDimension(
+        LogicalViewportSize.X,
+        RI_ActorSplitRightViewportWidthFraction,
+        RI_ActorSplitRightWidthMin,
+        RI_ActorSplitRightWidthMax);
+    const float CenterClear = RI_ActorSplitCenterClearMin;
+    const float AvailableWidth = RI_GetViewportAvailableDimension(LogicalViewportSize.X);
+    const float RequiredWidth = LeftWidth + RightWidth + CenterClear;
+
+    if (LeftWidth <= 1.0f || RightWidth <= 1.0f || RequiredWidth > AvailableWidth)
+    {
+        return false;
+    }
+
+    OutLeftWidth = LeftWidth;
+    OutRightWidth = RightWidth;
+    OutCenterClear = CenterClear;
+    return true;
+#endif
+}
+
+void UInspectorWorldSubsystem::ApplyActorSplitPresentation()
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    EnsureActorWorkbenchBodyInjected();
+
+    float LeftWidth = 0.0f;
+    float RightWidth = 0.0f;
+    float CenterClear = 0.0f;
+    const bool bUseSplit = ShouldUseActorSplitPresentation(LeftWidth, RightWidth, CenterClear);
+    if (!bUseSplit)
+    {
+        RestoreActorSinglePanelBodyLayout();
+        return;
+    }
+
+    EnsureActorSplitSidebarPanelInjected();
+
+    UHorizontalBox* BodyHost = ActorWorkbenchBodyHost.Get();
+    UVerticalBox* SidebarHost = ActorWorkbenchSidebarHost.Get();
+    UVerticalBox* ContentHost = ActorWorkbenchContentHost.Get();
+    UBorder* SplitBorder = ActorSplitSidebarBorder.Get();
+    if (!BodyHost || !SidebarHost || !ContentHost || !SplitBorder)
+    {
+        RestoreActorSinglePanelBodyLayout();
+        return;
+    }
+
+    if (BodyHost->GetChildIndex(SidebarHost) != INDEX_NONE)
+    {
+        BodyHost->RemoveChild(SidebarHost);
+    }
+
+    if (SplitBorder->GetContent() != SidebarHost)
+    {
+        if (UPanelWidget* ExistingParent = Cast<UPanelWidget>(SidebarHost->GetParent()))
+        {
+            ExistingParent->RemoveChild(SidebarHost);
+        }
+        SplitBorder->SetContent(SidebarHost);
+    }
+
+    if (BodyHost->GetChildIndex(ContentHost) == INDEX_NONE || ContentHost->GetParent() != BodyHost)
+    {
+        if (UPanelWidget* ExistingParent = Cast<UPanelWidget>(ContentHost->GetParent()))
+        {
+            ExistingParent->RemoveChild(ContentHost);
+        }
+        BodyHost->InsertChildAt(0, ContentHost);
+    }
+    else if (BodyHost->GetChildIndex(ContentHost) != 0)
+    {
+        BodyHost->RemoveChild(ContentHost);
+        BodyHost->InsertChildAt(0, ContentHost);
+    }
+
+    if (UHorizontalBoxSlot* ContentSlot = Cast<UHorizontalBoxSlot>(ContentHost->Slot))
+    {
+        FSlateChildSize SizeRule(ESlateSizeRule::Fill);
+        SizeRule.Value = 1.0f;
+        ContentSlot->SetSize(SizeRule);
+        ContentSlot->SetHorizontalAlignment(HAlign_Fill);
+        ContentSlot->SetVerticalAlignment(VAlign_Fill);
+        ContentSlot->SetPadding(FMargin(0.f));
+    }
+
+    if (USizeBox* SplitSizeBox = ActorSplitSidebarSizeBox.Get())
+    {
+        SplitSizeBox->SetWidthOverride(LeftWidth);
+        SplitSizeBox->SetVisibility(ESlateVisibility::Visible);
+        SplitSizeBox->InvalidateLayoutAndVolatility();
+    }
+
+    SplitBorder->SetPadding(RICompactUI::GetPanelPadding());
+    SplitBorder->SetBrushColor(RICompactUI::GetPageBackgroundColor());
+    SplitBorder->SetVisibility(ESlateVisibility::Visible);
+
+    BodyHost->InvalidateLayoutAndVolatility();
+    BodyHost->ForceLayoutPrepass();
+    SidebarHost->InvalidateLayoutAndVolatility();
+    SidebarHost->ForceLayoutPrepass();
+#endif
+}
+
+void UInspectorWorldSubsystem::PrimeActorPageForInitialOpen()
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    UUserWidget* Panel = PanelWidget.Get();
+    if (!Panel || !Panel->WidgetTree)
+    {
+        return;
+    }
+
+    BindActorSearchBox();
+    CacheActorPageSearchTextFromPanel();
+    EnsureActorWorkbenchBodyInjected();
+    HideSharedContextStripForActorPage();
+    RI_EnsureInspectBodyLayout(Panel);
+    EnsureActorGroupsSectionInjected();
+    EnsureActorPropertiesSectionInjected();
+    EnsureActorFunctionsSectionInjected();
+    RefreshActorGroupsSection();
+    RefreshActorPropertiesSection();
+    RefreshActorFunctionsSection();
+    UpdateActorWorkspaceSelectionBand();
+    RI_ApplyLegacyActorHeaderVisibilityFix(Panel);
+    RI_UpdateActorPropertyHeader(Panel, GetFocusedInspectObject());
+    ApplyActorSplitPresentation();
+    RI_ForceWidgetTreeLayout(Panel);
+#endif
+}
+
+void UInspectorWorldSubsystem::PrepareActorPageForPresentation(bool bForceSlateLayout)
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    const double StartSeconds = FPlatformTime::Seconds();
+    UUserWidget* Panel = PanelWidget.Get();
+    if (!Panel || !Panel->WidgetTree)
+    {
+        return;
+    }
+
+    if (!ContentSwitcher.IsValid())
+    {
+        ContentSwitcher = FindContentSwitcher();
+    }
+
+    if (!ContentSwitcher.IsValid()
+        || !ActorTabButton.IsValid()
+        || !FileTabButton.IsValid()
+        || !SettingsTabButton.IsValid()
+        || !TestTabButton.IsValid())
+    {
+        BindPanelTabButtons();
+        if (!ContentSwitcher.IsValid())
+        {
+            ContentSwitcher = FindContentSwitcher();
         }
     }
 
-    const int32 BodyIndex = PageStackHost->GetChildIndex(BodyHost);
-    const int32 CurrentIndex = PageStackHost->GetChildIndex(SelectionBand);
-    if (SelectionBand->GetParent() != PageStackHost || CurrentIndex == INDEX_NONE || (BodyIndex != INDEX_NONE && CurrentIndex >= BodyIndex))
+    SetContentSwitcherIndex(0);
+    const FString StructureKey = BuildActorPageStructureKey();
+    const bool bNeedsHeavyRefresh = !bHasCompletedInitialActorPanelRefresh
+        || bActorPageStructureDirty
+        || LastActorPageStructureKey != StructureKey;
+
+    if (bNeedsHeavyRefresh)
+    {
+        PrimeActorPageForInitialOpen();
+        LastActorPageStructureKey = StructureKey;
+        bActorPageStructureDirty = false;
+        UE_LOG(
+            LogRuntimeInspector,
+            Log,
+            TEXT("[RI][Perf] PrepareActorPageForPresentation %.2f ms | Path=Heavy Force=%d"),
+            (FPlatformTime::Seconds() - StartSeconds) * 1000.0,
+            bForceSlateLayout ? 1 : 0);
+    }
+    else
+    {
+        BindActorSearchBox();
+        CacheActorPageSearchTextFromPanel();
+        EnsureActorWorkbenchBodyInjected();
+        HideSharedContextStripForActorPage();
+        RI_EnsureInspectBodyLayout(Panel);
+        EnsureActorGroupsSectionInjected();
+        EnsureActorPropertiesSectionInjected();
+        EnsureActorFunctionsSectionInjected();
+        UpdateActorWorkspaceSelectionBand();
+        ApplyActorSplitPresentation();
+        RI_UpdateActorPropertyHeader(Panel, GetFocusedInspectObject());
+        UE_LOG(
+            LogRuntimeInspector,
+            Log,
+            TEXT("[RI][Perf] PrepareActorPageForPresentation %.2f ms | Path=Light Force=%d"),
+            (FPlatformTime::Seconds() - StartSeconds) * 1000.0,
+            bForceSlateLayout ? 1 : 0);
+    }
+
+    RI_ApplyLegacyActorHeaderVisibilityFix(Panel);
+
+    if (bForceSlateLayout)
+    {
+        RI_ForceWidgetTreeLayout(Panel);
+    }
+#endif
+}
+
+void UInspectorWorldSubsystem::EnsureActorTopContextStripInjected()
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    EnsureActorWorkbenchBodyInjected();
+
+    UUserWidget* Panel = PanelWidget.Get();
+    UVerticalBox* SidebarHost = ActorWorkbenchSidebarHost.Get();
+    if (!Panel || !Panel->WidgetTree || !SidebarHost)
+    {
+        return;
+    }
+
+    UBorder* StripBorder = ActorTopContextStrip.Get();
+    if (!StripBorder)
+    {
+        const FRIContextStripWidgetRefs Refs = RI_CreateCompactContextStripWidgets(
+            Panel->WidgetTree,
+            TEXT("RI_ActorTopContextStrip"),
+            TEXT("RI_ActorTopContextStripGrid"),
+            TEXT("RI_ActorTopContextActorCell"),
+            TEXT("RI_ActorTopContextActorValue"),
+            TEXT("RI_ActorTopContextClassValue"),
+            TEXT("RI_ActorTopContextSourceValue"),
+            TEXT("RI_ActorTopContextStagedValue"));
+        StripBorder = Refs.Border;
+        ActorTopContextStripStrong = StripBorder;
+        ActorTopContextStrip = StripBorder;
+        ActorTopContextActorCell = Refs.ActorCell;
+        ActorTopContextActorTextStrong = Refs.ActorText;
+        ActorTopContextActorText = Refs.ActorText;
+        ActorTopContextClassTextStrong = Refs.ClassText;
+        ActorTopContextClassText = Refs.ClassText;
+        ActorTopContextSourceTextStrong = Refs.SourceText;
+        ActorTopContextSourceText = Refs.SourceText;
+        ActorTopContextStagedTextStrong = Refs.StagedText;
+        ActorTopContextStagedText = Refs.StagedText;
+    }
+
+    RI_AttachContextStripToVerticalHost(SidebarHost, StripBorder, 0, RICompactUI::GetInlineGap(), 0.0f);
+
+    if (UWidget* SearchDirectChild = RI_FindDirectChildInPanel(SidebarHost, Panel->WidgetTree->FindWidget(TEXT("ETB_Search"))))
+    {
+        RI_EnsureVerticalChildAt(SidebarHost, SearchDirectChild, 1);
+    }
+
+    if (UWidget* GroupsHost = ActorGroupsSectionHostBox.Get())
+    {
+        RI_EnsureVerticalChildAt(SidebarHost, GroupsHost, 2);
+    }
+
+    SidebarHost->InvalidateLayoutAndVolatility();
+    SidebarHost->ForceLayoutPrepass();
+#endif
+}
+
+void UInspectorWorldSubsystem::UpdateActorTopContextStrip()
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    EnsureActorTopContextStripInjected();
+
+    UBorder* StripBorder = ActorTopContextStrip.Get();
+    if (!StripBorder)
+    {
+        UE_LOG(LogRuntimeInspector, Warning, TEXT("[RI][ContextStrip] Actor strip missing after ensure"));
+        return;
+    }
+
+    const ERIVisiblePage VisiblePage = GetVisiblePage();
+    const bool bActorPageVisible = VisiblePage == ERIVisiblePage::Actor;
+    UVerticalBox* SidebarHost = ActorWorkbenchSidebarHost.Get();
+    UWidget* SearchDirectChild = RI_FindDirectChildInPanel(
+        SidebarHost,
+        PanelWidget.IsValid() && PanelWidget->WidgetTree ? PanelWidget->WidgetTree->FindWidget(TEXT("ETB_Search")) : nullptr);
+    const int32 StripIndex = SidebarHost ? SidebarHost->GetChildIndex(StripBorder) : INDEX_NONE;
+    const int32 SearchIndex = (SidebarHost && SearchDirectChild)
+        ? SidebarHost->GetChildIndex(SearchDirectChild)
+        : INDEX_NONE;
+    if (!bActorPageVisible)
+    {
+        if (ActorTopContextActorCell.IsValid())
+        {
+            ActorTopContextActorCell->SetVisibility(ESlateVisibility::Collapsed);
+        }
+        StripBorder->SetVisibility(ESlateVisibility::Collapsed);
+        UE_CLOG(
+            RI_IsDebugLogEnabled(),
+            LogRuntimeInspector,
+            Log,
+            TEXT("[RI][ContextStrip] Actor Page=%d Parent=%s Host=%s Index=%d SearchIndex=%d Visible=%d Size=%.1fx%.1f"),
+            static_cast<int32>(VisiblePage),
+            *GetNameSafe(StripBorder->GetParent()),
+            *GetNameSafe(SidebarHost),
+            StripIndex,
+            SearchIndex,
+            static_cast<int32>(StripBorder->GetVisibility()),
+            StripBorder->GetCachedGeometry().GetLocalSize().X,
+            StripBorder->GetCachedGeometry().GetLocalSize().Y);
+        return;
+    }
+
+    HideSharedContextStripForActorPage();
+
+    FString ActorLabel;
+    FString ActorClass;
+    FString SourcePath;
+    FString StagedState;
+    bool bActorMissing = false;
+    bool bContextHasStagedPatch = false;
+    BuildContextStripDisplayState(ActorLabel, ActorClass, SourcePath, StagedState, bActorMissing, bContextHasStagedPatch);
+
+    RI_ApplyContextStripValue(ActorTopContextActorText.Get(), ActorLabel, bActorMissing, 9, true, RICompactUI::GetStrongTextColor());
+    RI_ApplyContextStripValue(ActorTopContextClassText.Get(), ActorClass, bActorMissing, 7, false, RICompactUI::GetSecondaryTextColor());
+    RI_ApplyContextStripValue(ActorTopContextSourceText.Get(), SourcePath, bActorMissing, 7, false, RICompactUI::GetSecondaryTextColor());
+    RI_ApplyContextStripValue(
+        ActorTopContextStagedText.Get(),
+        StagedState,
+        !bContextHasStagedPatch,
+        8,
+        true,
+        bContextHasStagedPatch ? RICompactUI::GetSuccessTextColor() : RICompactUI::GetStrongTextColor());
+
+    if (ActorTopContextActorCell.IsValid())
+    {
+        ActorTopContextActorCell->SetVisibility(ESlateVisibility::Visible);
+    }
+
+    StripBorder->SetVisibility(ESlateVisibility::Visible);
+    UE_CLOG(
+        RI_IsDebugLogEnabled(),
+        LogRuntimeInspector,
+        Log,
+        TEXT("[RI][ContextStrip] Actor Page=%d Parent=%s Host=%s Index=%d SearchIndex=%d Visible=%d Size=%.1fx%.1f"),
+        static_cast<int32>(VisiblePage),
+        *GetNameSafe(StripBorder->GetParent()),
+        *GetNameSafe(SidebarHost),
+        StripIndex,
+        SearchIndex,
+        static_cast<int32>(StripBorder->GetVisibility()),
+        StripBorder->GetCachedGeometry().GetLocalSize().X,
+        StripBorder->GetCachedGeometry().GetLocalSize().Y);
+#endif
+}
+
+void UInspectorWorldSubsystem::EnsureActorWorkspaceSelectionBandInjected()
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    EnsureActorTopContextStripInjected();
+    if (UBorder* SelectionBand = ActorWorkspaceSelectionBand.Get())
     {
         if (UPanelWidget* ExistingParent = Cast<UPanelWidget>(SelectionBand->GetParent()))
         {
             ExistingParent->RemoveChild(SelectionBand);
         }
-
-        const int32 DesiredIndex = BodyIndex == INDEX_NONE ? 0 : BodyIndex;
-        PageStackHost->InsertChildAt(DesiredIndex, SelectionBand);
+        SelectionBand->SetVisibility(ESlateVisibility::Collapsed);
     }
-
-    if (UVerticalBoxSlot* BandSlot = Cast<UVerticalBoxSlot>(SelectionBand->Slot))
-    {
-        BandSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
-        BandSlot->SetHorizontalAlignment(HAlign_Fill);
-        BandSlot->SetVerticalAlignment(VAlign_Top);
-        BandSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 8.f));
-    }
-
-    UpdateActorWorkspaceSelectionBand();
 #endif
 }
 
 void UInspectorWorldSubsystem::UpdateActorWorkspaceSelectionBand()
 {
 #if RUNTIME_INSPECTOR_ENABLED
-    const AActor* Selected = SelectedActor.Get();
-    const FString ActorLabel = Selected ? RI_GetActorDisplayLabel(Selected) : TEXT("No selected actor");
-    const FString SourcePath = (Selected && Selected->GetClass())
-        ? Selected->GetClass()->GetPathName()
-        : TEXT("No source asset");
-    const FString StagedState = HasStagedPatch()
-        ? FString::Printf(TEXT("Staged (%d ops)"), GetStagedPatch().Operations.Num())
-        : TEXT("Live only");
+    HideSharedContextStripForActorPage();
+    UpdateActorTopContextStrip();
+    if (UBorder* SelectionBand = ActorWorkspaceSelectionBand.Get())
+    {
+        SelectionBand->SetVisibility(ESlateVisibility::Collapsed);
+    }
+#endif
+}
 
-    if (UTextBlock* Text = ActorWorkspaceSelectionActorText.Get())
+void UInspectorWorldSubsystem::ApplySelectedActorRootState(AActor* ActorPtr)
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    AActor* EffectiveActor = ActorPtr ? ActorPtr : SelectedActor.Get();
+    SelectedInspectObject = EffectiveActor;
+    SelectedGroupKey = TEXT("ROOT_ACTOR");
+    SelectedMaterialSlotIndex = INDEX_NONE;
+    PropertyViewMode = ERIPropertyViewMode::Full;
+    ViewMeshComp = nullptr;
+    ViewMaterialSlot = INDEX_NONE;
+    MarkActorPageStructureDirty();
+#else
+    (void)ActorPtr;
+#endif
+}
+
+void UInspectorWorldSubsystem::FocusSelectedActorRoot(EInspectorRefreshReason Reason)
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    ApplySelectedActorRootState();
+    RefreshPanel(Reason);
+#else
+    (void)Reason;
+#endif
+}
+
+bool UInspectorWorldSubsystem::IsActorRootSelectionActive() const
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    AActor* ActorPtr = SelectedActor.Get();
+    return ActorPtr
+        && SelectedInspectObject.Get() == ActorPtr
+        && SelectedMaterialSlotIndex == INDEX_NONE
+        && PropertyViewMode == ERIPropertyViewMode::Full;
+#else
+    return false;
+#endif
+}
+
+void UInspectorWorldSubsystem::UpdateActorGroupsHeaderState()
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    UBorder* HeaderBorder = ActorGroupsHeaderBorder.Get();
+    UTextBlock* HeaderText = ActorGroupsHeaderText.Get();
+    UButton* HeaderButton = ActorGroupsHeaderButton.Get();
+    if (!HeaderBorder || !HeaderText || !HeaderButton)
     {
-        Text->SetText(FText::FromString(ActorLabel));
-        RICompactUI::ApplyTextStyle(Text, RICompactUI::GetValueFontSize(), true, Selected ? RICompactUI::GetStrongTextColor() : RICompactUI::GetMutedTextColor());
+        return;
     }
-    if (UTextBlock* Text = ActorWorkspaceSelectionSourceText.Get())
-    {
-        Text->SetText(FText::FromString(SourcePath));
-        RICompactUI::ApplyTextStyle(Text, RICompactUI::GetValueFontSize(), false, Selected ? RICompactUI::GetSecondaryTextColor() : RICompactUI::GetMutedTextColor());
-    }
-    if (UTextBlock* Text = ActorWorkspaceSelectionStateText.Get())
-    {
-        Text->SetText(FText::FromString(StagedState));
-        RICompactUI::ApplyTextStyle(
-            Text,
-            RICompactUI::GetValueFontSize(),
-            true,
-            HasStagedPatch() ? RICompactUI::GetSuccessTextColor() : RICompactUI::GetStrongTextColor());
-    }
+
+    const bool bActorRootActive = IsActorRootSelectionActive();
+    const FLinearColor BackgroundColor = bActorRootActive
+        ? RICompactUI::GetSelectedRowSurfaceBackgroundColor()
+        : RICompactUI::GetSectionPalette(RICompactUI::ERISectionVisualStyle::Emphasis).Background;
+    const FLinearColor TextColor = bActorRootActive
+        ? RICompactUI::GetStrongTextColor()
+        : RICompactUI::GetSectionPalette(RICompactUI::ERISectionVisualStyle::Emphasis).Text;
+
+    HeaderBorder->SetBrushColor(BackgroundColor);
+    RICompactUI::ApplyTextStyle(
+        HeaderText,
+        RICompactUI::GetSectionTitleFontSize(),
+        true,
+        TextColor);
+    HeaderButton->SetToolTipText(FText::FromString(
+        bActorRootActive
+            ? TEXT("Actor-level view is active")
+            : TEXT("Click to switch back to actor-level view")));
+#endif
+}
+
+void UInspectorWorldSubsystem::HandleActorComponentsHeaderClicked()
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    FocusSelectedActorRoot(EInspectorRefreshReason::StructureChanged);
 #endif
 }
 
@@ -5785,15 +9631,48 @@ void UInspectorWorldSubsystem::EnsureActorGroupsSectionInjected()
         UVerticalBox* ComponentBox = Panel->WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ActorGroupsComponentBox"));
         ComponentBorder->SetContent(ComponentBox);
 
-        if (UVerticalBoxSlot* HeaderSlot = ComponentBox->AddChildToVerticalBox(
-            RICompactUI::MakeSectionTitle(Panel->WidgetTree, TEXT("Component"), RICompactUI::ERISectionVisualStyle::Emphasis)))
+        UButton* ComponentHeaderButton = Panel->WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("RI_ActorGroupsHeaderButton"));
+        UBorder* ComponentHeaderBorder = RICompactUI::MakeSectionTitle(
+            Panel->WidgetTree,
+            TEXT("Component"),
+            RICompactUI::ERISectionVisualStyle::Emphasis,
+            TEXT("RI_ActorGroupsHeaderBorder"));
+        UTextBlock* ComponentHeaderText = ComponentHeaderBorder
+            ? Cast<UTextBlock>(ComponentHeaderBorder->GetContent())
+            : nullptr;
+        if (ComponentHeaderButton && ComponentHeaderBorder)
+        {
+            ComponentHeaderButton->SetClickMethod(EButtonClickMethod::MouseDown);
+            RICompactUI::ConfigureButton(ComponentHeaderButton, RICompactUI::ERIButtonVisualStyle::Subtle, false);
+            ComponentHeaderButton->SetBackgroundColor(FLinearColor::Transparent);
+            ComponentHeaderButton->SetColorAndOpacity(FLinearColor::White);
+            ComponentHeaderButton->AddChild(ComponentHeaderBorder);
+            ComponentHeaderButton->OnClicked.AddDynamic(this, &UInspectorWorldSubsystem::HandleActorComponentsHeaderClicked);
+
+            if (UButtonSlot* HeaderButtonSlot = Cast<UButtonSlot>(ComponentHeaderBorder->Slot))
+            {
+                HeaderButtonSlot->SetPadding(FMargin(0.f));
+                HeaderButtonSlot->SetHorizontalAlignment(HAlign_Fill);
+                HeaderButtonSlot->SetVerticalAlignment(VAlign_Fill);
+            }
+
+            ActorGroupsHeaderButtonStrong = ComponentHeaderButton;
+            ActorGroupsHeaderButton = ComponentHeaderButton;
+            ActorGroupsHeaderBorderStrong = ComponentHeaderBorder;
+            ActorGroupsHeaderBorder = ComponentHeaderBorder;
+            ActorGroupsHeaderTextStrong = ComponentHeaderText;
+            ActorGroupsHeaderText = ComponentHeaderText;
+        }
+
+        if (UVerticalBoxSlot* HeaderSlot = ComponentBox->AddChildToVerticalBox(ComponentHeaderButton))
         {
             HeaderSlot->SetPadding(FMargin(0.f, 0.f, 0.f, RICompactUI::GetInlineGap()));
         }
 
-        UScrollBox* GroupsScroll = Panel->WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("RI_ActorGroupsScroll"));
+        UInspectorTouchScrollBox* GroupsScroll = Panel->WidgetTree->ConstructWidget<UInspectorTouchScrollBox>(UInspectorTouchScrollBox::StaticClass(), TEXT("RI_ActorGroupsScroll"));
         UVerticalBox* EntriesBox = Panel->WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ActorGroupsEntries"));
         GroupsScroll->AddChild(EntriesBox);
+        RIInspectorTouchScroll::Configure(GroupsScroll);
 
         USizeBox* ComponentBody = Panel->WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_ActorGroupsBody"));
         ComponentBody->SetMinDesiredHeight(220.0f);
@@ -5831,9 +9710,10 @@ void UInspectorWorldSubsystem::EnsureActorGroupsSectionInjected()
             HeaderSlot->SetPadding(FMargin(0.f, 0.f, 0.f, RICompactUI::GetInlineGap()));
         }
 
-        UScrollBox* PinnedScroll = Panel->WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("RI_ActorPinnedScroll"));
+        UInspectorTouchScrollBox* PinnedScroll = Panel->WidgetTree->ConstructWidget<UInspectorTouchScrollBox>(UInspectorTouchScrollBox::StaticClass(), TEXT("RI_ActorPinnedScroll"));
         UVerticalBox* PinnedEntries = Panel->WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ActorPinnedEntries"));
         PinnedScroll->AddChild(PinnedEntries);
+        RIInspectorTouchScroll::Configure(PinnedScroll);
         USizeBox* PinnedBody = Panel->WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_ActorPinnedBody"));
         PinnedBody->SetMinDesiredHeight(132.0f);
         PinnedBody->ClearHeightOverride();
@@ -5860,6 +9740,7 @@ void UInspectorWorldSubsystem::EnsureActorGroupsSectionInjected()
         ActorGroupsSectionHostBox = HostBox;
         ActorGroupsScrollBoxStrong = GroupsScroll;
         ActorGroupsEntriesBoxStrong = EntriesBox;
+        ActorPinnedScrollBoxStrong = PinnedScroll;
         ActorPinnedEntriesBoxStrong = PinnedEntries;
     }
 
@@ -5956,12 +9837,15 @@ void UInspectorWorldSubsystem::EnsureActorGroupsSectionInjected()
     {
         LegacyPinnedBorder->SetVisibility(ESlateVisibility::Collapsed);
     }
+
+    UpdateActorGroupsHeaderState();
 #endif
 }
 
 void UInspectorWorldSubsystem::RefreshActorGroupsSection()
 {
 #if RUNTIME_INSPECTOR_ENABLED
+    const double StartSeconds = FPlatformTime::Seconds();
     UUserWidget* Panel = PanelWidget.Get();
     if (!Panel || !Panel->WidgetTree)
     {
@@ -6192,6 +10076,14 @@ void UInspectorWorldSubsystem::RefreshActorGroupsSection()
         HostBox->InvalidateLayoutAndVolatility();
         HostBox->ForceLayoutPrepass();
     }
+    UpdateActorGroupsHeaderState();
+    UE_LOG(
+        LogRuntimeInspector,
+        Log,
+        TEXT("[RI][Perf] RefreshActorGroupsSection %.2f ms | Entries=%d Pinned=%d"),
+        (FPlatformTime::Seconds() - StartSeconds) * 1000.0,
+        EntriesBox ? EntriesBox->GetChildrenCount() : 0,
+        PinnedEntriesBox ? PinnedEntriesBox->GetChildrenCount() : 0);
 #endif
 }
 
@@ -6384,25 +10276,93 @@ void UInspectorWorldSubsystem::EnsureActorPropertiesSectionInjected()
 #endif
 }
 
-void UInspectorWorldSubsystem::RefreshActorPropertiesSection()
+void UInspectorWorldSubsystem::RefreshActorPropertiesSection(bool bRebuildRows)
 {
 #if RUNTIME_INSPECTOR_ENABLED
+    const double StartSeconds = FPlatformTime::Seconds();
     if (UInspectorPropertiesSectionWidget* SectionWidget = ActorPropertiesSectionWidget.Get())
     {
-        bool bOnlyModified = false;
-        if (UUserWidget* Panel = PanelWidget.Get())
+        const bool bOnlyModified = IsActorOnlyModifiedFilterEnabled();
+        SectionWidget->SetOnlyModified(bOnlyModified);
+        if (bRebuildRows)
         {
-            if (Panel->WidgetTree)
+            SectionWidget->RefreshFromSubsystem();
+        }
+        else
+        {
+            SectionWidget->RefreshValueDisplayFromSubsystem();
+        }
+        UE_LOG(
+            LogRuntimeInspector,
+            Log,
+            TEXT("[RI][Perf] RefreshActorPropertiesSection %.2f ms | Mode=%s Rows=%d"),
+            (FPlatformTime::Seconds() - StartSeconds) * 1000.0,
+            bRebuildRows ? TEXT("Structure") : TEXT("Values"),
+            SectionWidget->GetEntryWidgetCountForAutomation());
+    }
+#endif
+}
+
+void UInspectorWorldSubsystem::RefreshActorPropertyValue(UObject* TargetObject, FName PropertyName, bool bAllowSectionFallback)
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    if (GetVisiblePage() != ERIVisiblePage::Actor)
+    {
+        return;
+    }
+
+    const bool bOnlyModified = IsActorOnlyModifiedFilterEnabled();
+    if (UInspectorPropertiesSectionWidget* SectionWidget = ActorPropertiesSectionWidget.Get())
+    {
+        bool bRefreshed = false;
+        if (TargetObject && !PropertyName.IsNone())
+        {
+            if (UInspectorPropertyItem* PropertyItem = GetOrCreatePropertyItem(TargetObject, PropertyName))
             {
-                if (UCheckBox* OnlyModifyToggle = Cast<UCheckBox>(Panel->WidgetTree->FindWidget(TEXT("Toggle_OnModify"))))
-                {
-                    bOnlyModified = OnlyModifyToggle->IsChecked();
-                }
+                bRefreshed = SectionWidget->RefreshItemDisplay(PropertyItem);
             }
         }
 
-        SectionWidget->SetOnlyModified(bOnlyModified);
-        SectionWidget->RefreshFromSubsystem();
+        if (!bRefreshed && bAllowSectionFallback)
+        {
+            if (bOnlyModified)
+            {
+                MarkActorPageStructureDirty();
+                RefreshActorPropertiesSection(true);
+            }
+            else
+            {
+                RefreshActorPropertiesSection(false);
+            }
+        }
+        else if (bOnlyModified && bAllowSectionFallback)
+        {
+            MarkActorPageStructureDirty();
+            RefreshActorPropertiesSection(true);
+        }
+    }
+
+    RefreshActorValuePresentation();
+#else
+    (void)TargetObject;
+    (void)PropertyName;
+    (void)bAllowSectionFallback;
+#endif
+}
+
+void UInspectorWorldSubsystem::RefreshActorValuePresentation()
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    if (GetVisiblePage() != ERIVisiblePage::Actor)
+    {
+        return;
+    }
+
+    UpdateActorWorkspaceSelectionBand();
+    if (UUserWidget* Panel = PanelWidget.Get())
+    {
+        RI_ApplyLegacyActorHeaderVisibilityFix(Panel);
+        RI_UpdateActorPropertyHeader(Panel, GetFocusedInspectObject());
     }
 #endif
 }
@@ -6410,9 +10370,16 @@ void UInspectorWorldSubsystem::RefreshActorPropertiesSection()
 void UInspectorWorldSubsystem::RefreshActorFunctionsSection()
 {
 #if RUNTIME_INSPECTOR_ENABLED
+    const double StartSeconds = FPlatformTime::Seconds();
     if (UInspectorFunctionsSectionWidget* SectionWidget = ActorFunctionsSectionWidget.Get())
     {
         SectionWidget->RefreshFromSubsystem();
+        UE_LOG(
+            LogRuntimeInspector,
+            Log,
+            TEXT("[RI][Perf] RefreshActorFunctionsSection %.2f ms | Rows=%d"),
+            (FPlatformTime::Seconds() - StartSeconds) * 1000.0,
+            SectionWidget->GetEntryWidgetCountForAutomation());
     }
 #endif
 }
@@ -6631,14 +10598,7 @@ void UInspectorWorldSubsystem::EnsureSettingsPageInjected()
     UInspectorSettingsPageWidget* Page = SettingsPageWidget.Get();
     if (!Page)
     {
-        if (APlayerController* PC = GetLocalPC())
-        {
-            Page = CreateWidget<UInspectorSettingsPageWidget>(PC, UInspectorSettingsPageWidget::StaticClass());
-        }
-        else if (UWorld* World = GetWorld())
-        {
-            Page = CreateWidget<UInspectorSettingsPageWidget>(World, UInspectorSettingsPageWidget::StaticClass());
-        }
+        Page = CreateSettingsPageWidgetInstance();
         if (!Page)
         {
             UE_LOG(LogRuntimeInspector, Warning, TEXT("[RI] Failed to create the settings page widget."));
@@ -6687,14 +10647,7 @@ void UInspectorWorldSubsystem::EnsureFilePageInjected()
     UInspectorFilePageWidget* Page = FilePageWidget.Get();
     if (!Page)
     {
-        if (APlayerController* PC = GetLocalPC())
-        {
-            Page = CreateWidget<UInspectorFilePageWidget>(PC, UInspectorFilePageWidget::StaticClass());
-        }
-        else if (UWorld* World = GetWorld())
-        {
-            Page = CreateWidget<UInspectorFilePageWidget>(World, UInspectorFilePageWidget::StaticClass());
-        }
+        Page = CreateFilePageWidgetInstance();
         if (!Page)
         {
             UE_LOG(LogRuntimeInspector, Warning, TEXT("[RI] Failed to create the file page widget."));
@@ -6722,11 +10675,17 @@ void UInspectorWorldSubsystem::EnsureFilePageInjected()
 void UInspectorWorldSubsystem::ShowSettingsPage()
 {
 #if RUNTIME_INSPECTOR_ENABLED
+    if (!bOpen)
+    {
+        OpenToPage(ERIVisiblePage::Settings);
+        return;
+    }
     const double StartSeconds = FPlatformTime::Seconds();
     EnsureSettingsPageInjected();
     if (UInspectorSettingsPageWidget* Page = SettingsPageWidget.Get())
     {
         Page->TakeWidget();
+        Page->RefreshFromSubsystem();
         Page->SetVisibility(ESlateVisibility::Visible);
         SetContentSwitcherIndex(SettingsPageIndex);
         Page->ScheduleDeferredRefresh();
@@ -6773,14 +10732,7 @@ void UInspectorWorldSubsystem::EnsureTestPageInjected()
     UInspectorTestPageWidget* Page = TestPageWidget.Get();
     if (!Page)
     {
-        if (APlayerController* PC = GetLocalPC())
-        {
-            Page = CreateWidget<UInspectorTestPageWidget>(PC, UInspectorTestPageWidget::StaticClass());
-        }
-        else if (UWorld* World = GetWorld())
-        {
-            Page = CreateWidget<UInspectorTestPageWidget>(World, UInspectorTestPageWidget::StaticClass());
-        }
+        Page = CreateTestPageWidgetInstance();
         if (!Page)
         {
             UE_LOG(LogRuntimeInspector, Warning, TEXT("[RI] Failed to create the test page widget."));
@@ -6808,6 +10760,11 @@ void UInspectorWorldSubsystem::EnsureTestPageInjected()
 void UInspectorWorldSubsystem::ShowFilePage()
 {
 #if RUNTIME_INSPECTOR_ENABLED
+    if (!bOpen)
+    {
+        OpenToPage(ERIVisiblePage::Changes);
+        return;
+    }
     const double StartSeconds = FPlatformTime::Seconds();
     EnsureFilePageInjected();
     SetContentSwitcherIndex(1);
@@ -6819,12 +10776,18 @@ void UInspectorWorldSubsystem::ShowFilePage()
     }
     UpdateSharedContextStrip();
     UE_LOG(LogRuntimeInspector, Log, TEXT("[RI][Perf] ShowFilePage %.2f ms"), (FPlatformTime::Seconds() - StartSeconds) * 1000.0);
+    RecordValidationCaptureMetric(TEXT("ShowFilePage"), (FPlatformTime::Seconds() - StartSeconds) * 1000.0, TEXT("Changes"));
 #endif
 }
 
 void UInspectorWorldSubsystem::ShowTestPage()
 {
 #if RUNTIME_INSPECTOR_ENABLED
+    if (!bOpen)
+    {
+        OpenToPage(ERIVisiblePage::Tools);
+        return;
+    }
     EnsureTestPageInjected();
     if (UInspectorTestPageWidget* Page = TestPageWidget.Get())
     {
@@ -6846,30 +10809,9 @@ void UInspectorWorldSubsystem::HideSettingsPage()
 void UInspectorWorldSubsystem::HandleActorTabClicked()
 {
     RestoreMountedHostPanelVisibility();
-    SetContentSwitcherIndex(0);
 
 #if RUNTIME_INSPECTOR_ENABLED
-    auto HideMountedPage = [](UUserWidget* PageWidget)
-    {
-        if (!PageWidget)
-        {
-            return;
-        }
-
-        PageWidget->SetVisibility(ESlateVisibility::Collapsed);
-        if (PageWidget->GetParent())
-        {
-            PageWidget->RemoveFromParent();
-        }
-    };
-
-    HideMountedPage(FilePageWidget.Get());
-    HideMountedPage(SettingsPageWidget.Get());
-    HideMountedPage(TestPageWidget.Get());
-
-    RefreshActorGroupsSection();
-    RefreshActorPropertiesSection();
-    RefreshActorFunctionsSection();
+    PrepareActorPageForPresentation(true);
 
     if (!bHasCompletedInitialActorPanelRefresh || !SelectedActor.IsValid())
     {
@@ -7311,19 +11253,7 @@ bool UInspectorWorldSubsystem::PreviewApplySettings(const FRIEditableSettings& I
         return false;
     }
 
-    Settings->ToggleKey = InSettings.ToggleKey;
-    Settings->PickKey = InSettings.PickKey;
-    Settings->bPickKeyRequiresCtrl = InSettings.bPickKeyRequiresCtrl;
-    Settings->bPickKeyRequiresShift = InSettings.bPickKeyRequiresShift;
-    Settings->bEnableRightMousePick = InSettings.bEnableRightMousePick;
-    Settings->bRightMousePickRequiresCtrl = InSettings.bRightMousePickRequiresCtrl;
-    Settings->bRightMousePickRequiresShift = InSettings.bRightMousePickRequiresShift;
-    Settings->bEnableOutlinePP = InSettings.bEnableOutlinePP;
-    Settings->OutlinePPWeight = FMath::Max(0.0f, InSettings.OutlinePPWeight);
-    Settings->bEnableApplyDebounce = InSettings.bEnableApplyDebounce;
-    Settings->ApplyDebounceSeconds = FMath::Clamp(InSettings.ApplyDebounceSeconds, 0.0f, 0.20f);
-    Settings->bRequireUnlock = InSettings.bRequireUnlock;
-    Settings->bAutoLockOnClose = InSettings.bAutoLockOnClose;
+    RI_ApplyEditableSettingsToRuntimeInspectorSettings(Settings, InSettings);
 
     RebindInspectorKeys();
     RefreshOutlineRuntimeSettings();
@@ -7375,15 +11305,19 @@ bool UInspectorWorldSubsystem::SaveSettings(FString& OutError)
 
     const FRIEditableSettings PendingSettings = GetEditableSettings();
     const ERuntimeInspectorThemePreset PendingThemePreset = GetThemePreset();
-    const FString ConfigFilename = Settings->GetDefaultConfigFilename();
+    const TArray<FString> AuthorityFiles = RI_CollectSettingsAuthorityFiles(Settings);
 
-    Settings->SaveConfig(CPF_Config, *ConfigFilename);
+    Settings->SaveConfig();
     if (GConfig)
     {
-        GConfig->Flush(false, ConfigFilename);
+        for (const FString& AuthorityFile : AuthorityFiles)
+        {
+            RI_WriteEditableSettingsToConfigFile(PendingSettings, AuthorityFile);
+            GConfig->Flush(false, AuthorityFile);
+        }
     }
 
-    Settings->LoadConfig(nullptr, *ConfigFilename);
+    RI_LoadSettingsFromConfigAuthority(Settings);
     RebindInspectorKeys();
     RefreshOutlineRuntimeSettings();
 
@@ -7406,6 +11340,13 @@ bool UInspectorWorldSubsystem::SaveSettings(FString& OutError)
     LastSavedSettingsSnapshot = ReloadedSettings;
     LastSavedThemePresetSnapshot = ReloadedThemePreset;
     UpdateSettingsDirtyFlag();
+    UE_LOG(
+        LogRuntimeInspector,
+        Log,
+        TEXT("[RI][SettingsAuthority] Save Outline=%.3f Reloaded=%.3f Files=%s"),
+        PendingSettings.OutlinePPWeight,
+        ReloadedSettings.OutlinePPWeight,
+        AuthorityFiles.Num() > 0 ? *FString::Join(AuthorityFiles, TEXT(" | ")) : TEXT("<none>"));
     OutError.Reset();
     return true;
 #else
@@ -7420,7 +11361,7 @@ void UInspectorWorldSubsystem::ReloadSettingsFromConfig()
     if (URuntimeInspectorSettings* Settings = GetMutableDefault<URuntimeInspectorSettings>())
     {
         const ERuntimeInspectorThemePreset PreviousThemePreset = Settings->ThemePreset;
-        Settings->LoadConfig();
+        RI_LoadSettingsFromConfigAuthority(Settings);
         RebindInspectorKeys();
         RefreshOutlineRuntimeSettings();
         LastSavedSettingsSnapshot = GetEditableSettings();
@@ -8510,382 +12451,258 @@ void UInspectorWorldSubsystem::HandleConfirmDialogHexCommitted(const FText& InTe
     HandleConfirmDialogHexTextChanged(InText);
 }
 
+namespace
+{
+    static FString RI_GetToolsConfigFilePath(const TCHAR* FileName)
+    {
+        return FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectPluginsDir(), TEXT("RuntimeInspector"), TEXT("Config"), FileName));
+    }
+
+    static FString RI_MakeToolExecutionKey(const TCHAR* Prefix, FName Id)
+    {
+        return FString::Printf(TEXT("%s:%s"), Prefix, *Id.ToString());
+    }
+
+    static bool RI_IsBlockedReport(const FString& Report)
+    {
+        const FString Trimmed = Report.TrimStartAndEnd();
+        return Trimmed.StartsWith(TEXT("Blocked:"), ESearchCase::IgnoreCase)
+            || Trimmed.Contains(TEXT("=BLOCKED"), ESearchCase::IgnoreCase);
+    }
+
+    static EInspectorRefreshReason RI_ResolveToolRefreshReason(uint8 RawValue)
+    {
+        switch (static_cast<EInspectorRefreshReason>(RawValue))
+        {
+        case EInspectorRefreshReason::ValuesChanged:
+        case EInspectorRefreshReason::UIStateChanged:
+        case EInspectorRefreshReason::UndoRedo:
+        case EInspectorRefreshReason::StructureChanged:
+        case EInspectorRefreshReason::TargetInvalid:
+            return static_cast<EInspectorRefreshReason>(RawValue);
+        default:
+            return EInspectorRefreshReason::ValuesChanged;
+        }
+    }
+
+    template <typename RowType>
+    static bool RI_LoadRowsFromJsonFile(const FString& FilePath, TArray<RowType>& OutRows, FString& OutError)
+    {
+        FString JsonText;
+        if (!FFileHelper::LoadFileToString(JsonText, *FilePath))
+        {
+            OutError = FString::Printf(TEXT("Unable to read tools config file: %s"), *FilePath);
+            return false;
+        }
+
+        FText ImportError;
+        if (!FJsonObjectConverter::JsonArrayStringToUStruct(JsonText, &OutRows, 0, 0, false, &ImportError))
+        {
+            OutError = ImportError.IsEmpty()
+                ? FString::Printf(TEXT("Failed to parse tools config file: %s"), *FilePath)
+                : FString::Printf(TEXT("Failed to parse %s: %s"), *FilePath, *ImportError.ToString());
+            return false;
+        }
+
+        return true;
+    }
+}
+
+void UInspectorWorldSubsystem::LogToolsDefinitionIssue(const FString& Message) const
+{
+    UE_LOG(LogRuntimeInspector, Warning, TEXT("[RI][ToolsConfig] %s"), *Message);
+    const_cast<UInspectorWorldSubsystem*>(this)->AppendActivityLog(ERIToastType::Warning, TEXT("ToolsConfig"), Message);
+}
+
+TArray<FRISelfTestTableRow> UInspectorWorldSubsystem::LoadConfiguredSelfTestRows() const
+{
+    TArray<FRISelfTestTableRow> Rows;
+#if RUNTIME_INSPECTOR_ENABLED
+    const URuntimeInspectorSettings* Settings = GetDefault<URuntimeInspectorSettings>();
+    if (Settings && !Settings->ToolsSelfTestsTable.IsNull())
+    {
+        if (UDataTable* Table = Settings->ToolsSelfTestsTable.LoadSynchronous())
+        {
+            if (Table->GetRowStruct() != FRISelfTestTableRow::StaticStruct())
+            {
+                LogToolsDefinitionIssue(FString::Printf(TEXT("ToolsSelfTestsTable row struct mismatch: %s"), *GetNameSafe(Table->GetRowStruct())));
+            }
+            else
+            {
+                for (const FName& RowName : Table->GetRowNames())
+                {
+                    if (const FRISelfTestTableRow* Row = Table->FindRow<FRISelfTestTableRow>(RowName, TEXT("RuntimeInspector.Tools")))
+                    {
+                        FRISelfTestTableRow Copy = *Row;
+                        if (Copy.Id.IsNone())
+                        {
+                            Copy.Id = RowName;
+                        }
+                        Rows.Add(MoveTemp(Copy));
+                    }
+                }
+            }
+        }
+        else
+        {
+            LogToolsDefinitionIssue(TEXT("ToolsSelfTestsTable is configured but could not be loaded."));
+        }
+    }
+
+    if (Rows.Num() == 0)
+    {
+        FString Error;
+        if (!RI_LoadRowsFromJsonFile(RI_GetToolsConfigFilePath(TEXT("ToolsSelfTestsDefault.json")), Rows, Error))
+        {
+            LogToolsDefinitionIssue(Error);
+        }
+    }
+#endif
+    return Rows;
+}
+
+TArray<FRIWorkflowTableRow> UInspectorWorldSubsystem::LoadConfiguredWorkflowRows() const
+{
+    TArray<FRIWorkflowTableRow> Rows;
+#if RUNTIME_INSPECTOR_ENABLED
+    const URuntimeInspectorSettings* Settings = GetDefault<URuntimeInspectorSettings>();
+    if (Settings && !Settings->ToolsWorkflowsTable.IsNull())
+    {
+        if (UDataTable* Table = Settings->ToolsWorkflowsTable.LoadSynchronous())
+        {
+            if (Table->GetRowStruct() != FRIWorkflowTableRow::StaticStruct())
+            {
+                LogToolsDefinitionIssue(FString::Printf(TEXT("ToolsWorkflowsTable row struct mismatch: %s"), *GetNameSafe(Table->GetRowStruct())));
+            }
+            else
+            {
+                for (const FName& RowName : Table->GetRowNames())
+                {
+                    if (const FRIWorkflowTableRow* Row = Table->FindRow<FRIWorkflowTableRow>(RowName, TEXT("RuntimeInspector.Tools")))
+                    {
+                        FRIWorkflowTableRow Copy = *Row;
+                        if (Copy.WorkflowId.IsNone())
+                        {
+                            Copy.WorkflowId = RowName;
+                        }
+                        Rows.Add(MoveTemp(Copy));
+                    }
+                }
+            }
+        }
+        else
+        {
+            LogToolsDefinitionIssue(TEXT("ToolsWorkflowsTable is configured but could not be loaded."));
+        }
+    }
+
+    if (Rows.Num() == 0)
+    {
+        FString Error;
+        if (!RI_LoadRowsFromJsonFile(RI_GetToolsConfigFilePath(TEXT("ToolsWorkflowsDefault.json")), Rows, Error))
+        {
+            LogToolsDefinitionIssue(Error);
+        }
+    }
+#endif
+    return Rows;
+}
+
+FRISelfTestDefinition UInspectorWorldSubsystem::MakeSelfTestDefinitionFromTableRow(const FRISelfTestTableRow& Row, bool bPIEAvailable) const
+{
+    FRISelfTestDefinition Definition;
+    Definition.Id = Row.Id;
+    Definition.DisplayName = Row.DisplayName;
+    Definition.Category = Row.Category;
+    Definition.Description = Row.Description;
+    Definition.bRequiresPIE = Row.bRequiresPIE;
+    Definition.bMutatesRuntime = Row.bMutatesRuntime;
+    Definition.bEnabled = Row.bEnabled && (!Row.bRequiresPIE || bPIEAvailable);
+    return Definition;
+}
+
+FRIWorkflowDefinition UInspectorWorldSubsystem::MakeWorkflowDefinitionFromTableRow(const FRIWorkflowTableRow& Row) const
+{
+    FRIWorkflowDefinition Definition;
+    Definition.WorkflowId = Row.WorkflowId;
+    Definition.DisplayName = Row.DisplayName;
+    Definition.Description = Row.Description;
+    Definition.Category = Row.Category;
+    Definition.bRequiresPIE = Row.bRequiresPIE;
+    Definition.bRequiresSelectedActor = Row.bRequiresSelectedActor;
+    Definition.bMutatesRuntime = Row.bMutatesRuntime;
+    Definition.bMutatesSource = Row.bMutatesSource;
+    Definition.Tags = Row.Tags;
+
+    for (const FRIToolActionDefinition& Action : Row.ActionSequence)
+    {
+        if (Action.ActionType == ERIToolActionType::RunWorkflow && Action.RefId != NAME_None)
+        {
+            Definition.ChildWorkflowIds.AddUnique(Action.RefId);
+        }
+        else if (Action.ActionType == ERIToolActionType::RunVerificationProfile && Action.RefId != NAME_None)
+        {
+            Definition.VerificationProfileIds.AddUnique(Action.RefId);
+        }
+        else if (Action.ActionType == ERIToolActionType::RunSelfTest && Action.RefId != NAME_None)
+        {
+            Definition.SelfTestIds.AddUnique(Action.RefId);
+        }
+    }
+
+    return Definition;
+}
+
+const FRISelfTestTableRow* UInspectorWorldSubsystem::FindConfiguredSelfTestRow(FName TestId, const TArray<FRISelfTestTableRow>& Rows) const
+{
+    return Rows.FindByPredicate([TestId](const FRISelfTestTableRow& Candidate)
+    {
+        return Candidate.Id == TestId;
+    });
+}
+
+const FRIWorkflowTableRow* UInspectorWorldSubsystem::FindConfiguredWorkflowRow(FName WorkflowId, const TArray<FRIWorkflowTableRow>& Rows) const
+{
+    return Rows.FindByPredicate([WorkflowId](const FRIWorkflowTableRow& Candidate)
+    {
+        return Candidate.WorkflowId == WorkflowId;
+    });
+}
+
 TArray<FRISelfTestDefinition> UInspectorWorldSubsystem::GetAvailableSelfTests() const
 {
     TArray<FRISelfTestDefinition> Results;
 #if RUNTIME_INSPECTOR_ENABLED
     const bool bPIEAvailable = IsSelfTestPIEAvailable();
-
-    auto AddDefinition = [&Results, bPIEAvailable](
-        FName Id,
-        const TCHAR* DisplayName,
-        const TCHAR* Category,
-        const TCHAR* Description,
-        bool bRequiresPIE,
-        bool bMutatesRuntime)
+    TSet<FName> SeenIds;
+    for (const FRISelfTestTableRow& Row : LoadConfiguredSelfTestRows())
     {
-        FRISelfTestDefinition Definition;
-        Definition.Id = Id;
-        Definition.DisplayName = DisplayName;
-        Definition.Category = Category;
-        Definition.Description = Description;
-        Definition.bRequiresPIE = bRequiresPIE;
-        Definition.bMutatesRuntime = bMutatesRuntime;
-        Definition.bEnabled = !bRequiresPIE || bPIEAvailable;
-        Results.Add(Definition);
-    };
+        if (Row.Id.IsNone())
+        {
+            LogToolsDefinitionIssue(TEXT("Skipping self-test row with empty Id."));
+            continue;
+        }
 
-    AddDefinition(
-        RI_SelfTestId_ConfirmDialog,
-        TEXT("Confirm Dialog Color Input"),
-        TEXT("UI"),
-        TEXT("Verifies RGBA and Hex inputs update the runtime color dialog correctly."),
-        true,
-        true);
+        if (!Row.bEnabled)
+        {
+            continue;
+        }
 
-    AddDefinition(
-        RI_SelfTestId_SettingsPreview,
-        TEXT("Settings Preview"),
-        TEXT("Settings"),
-        TEXT("Verifies preview-apply and reload flow for runtime settings."),
-        true,
-        true);
+        if (SeenIds.Contains(Row.Id))
+        {
+            LogToolsDefinitionIssue(FString::Printf(TEXT("Duplicate self-test id skipped: %s"), *Row.Id.ToString()));
+            continue;
+        }
+        SeenIds.Add(Row.Id);
 
-    AddDefinition(
-        RI_SelfTestId_SettingsSavePersistence,
-        TEXT("Settings Save Persistence"),
-        TEXT("Settings"),
-        TEXT("Verifies saving settings survives config reload and keeps the saved outline value."),
-        true,
-        true);
+        if (Row.ActionSequence.Num() == 0 && Row.LegacyNativeBridgeId.IsNone())
+        {
+            LogToolsDefinitionIssue(FString::Printf(TEXT("Self-test has no action sequence or legacy bridge: %s"), *Row.Id.ToString()));
+            continue;
+        }
 
-    AddDefinition(
-        RI_SelfTestId_StarLiveEditAndRun,
-        TEXT("Star Live Edit And Run"),
-        TEXT("Actor"),
-        TEXT("Verifies starred property/material rows stay editable in the Star pane and starred functions can execute from the same pane."),
-        true,
-        true);
-
-    AddDefinition(
-        RI_SelfTestId_StarPreciseNavigation,
-        TEXT("Star Precise Navigation"),
-        TEXT("Actor"),
-        TEXT("Verifies starred property, material, and function rows navigate back to the exact target context."),
-        true,
-        true);
-
-    AddDefinition(
-        RI_SelfTestId_SettingsHotkey,
-        TEXT("Settings Hotkey Rebind"),
-        TEXT("Settings"),
-        TEXT("Verifies toggle-key rebinding swaps input bindings and restores the saved key."),
-        true,
-        true);
-
-    AddDefinition(
-        RI_SelfTestId_SettingsPageLayout,
-        TEXT("Settings Page Layout"),
-        TEXT("Settings"),
-        TEXT("Verifies the Settings tab uses its own page-level scroll root, footer controls, and status rows without showing legacy host content."),
-        true,
-        false);
-
-    AddDefinition(
-        RI_SelfTestId_ThemePresetPreview,
-        TEXT("Theme Preset Preview"),
-        TEXT("Settings"),
-        TEXT("Verifies switching the active theme preset rebuilds the open panel, keeps the Snapshot controls visible, and restores the original preset."),
-        true,
-        false);
-
-    AddDefinition(
-        RI_SelfTestId_PatchPreset,
-        TEXT("Patch Preset Roundtrip"),
-        TEXT("Patch"),
-        TEXT("Captures a staged patch, saves a preset, reloads it, reapplies it, and rolls it back."),
-        true,
-        true);
-
-    AddDefinition(
-        RI_SelfTestId_PromotePreview,
-        TEXT("Promote Preview"),
-        TEXT("Promote"),
-        TEXT("Builds a dry-run Blueprint source promote preview from a staged runtime patch."),
-        true,
-        true);
-
-    AddDefinition(
-        RI_SelfTestId_PromoteConfig,
-        TEXT("Promote Config"),
-        TEXT("Promote"),
-        TEXT("Promotes a config-backed RuntimeInspector setting to source, then restores the original value."),
-        false,
-        true);
-
-    AddDefinition(
-        RI_SelfTestId_PromoteBlueprintApply,
-        TEXT("Promote Blueprint Apply"),
-        TEXT("Promote"),
-        TEXT("Promotes a runtime-edited Blueprint actor property to Blueprint source, verifies the asset default changed, then restores it."),
-        true,
-        true);
-
-    AddDefinition(
-        RI_SelfTestId_PromoteMaterialApply,
-        TEXT("Promote Material Apply"),
-        TEXT("Promote"),
-        TEXT("Promotes a runtime MID vector parameter to its source MIC, verifies the asset changed, then restores it."),
-        true,
-        true);
-
-    AddDefinition(
-        RI_SelfTestId_AuditReport,
-        TEXT("Audit Report"),
-        TEXT("Audit"),
-        TEXT("Builds baseline/current and current/patch audit reports from a staged runtime patch and exports them."),
-        true,
-        true);
-
-    AddDefinition(
-        RI_SelfTestId_FilePage,
-        TEXT("File Page Injection"),
-        TEXT("File"),
-        TEXT("Verifies the File tab injects the managed RuntimeInspector file workflow widget into the existing Data page host."),
-        true,
-        true);
-
-    AddDefinition(
-        RI_SelfTestId_ContextStrip,
-        TEXT("Context Strip"),
-        TEXT("UI"),
-        TEXT("Verifies the shared context strip renders actor, class, source, and staged-state summaries for both empty and selected states."),
-        true,
-        false);
-
-    AddDefinition(
-        RI_SelfTestId_WorkflowPageView,
-        TEXT("Workflow Page View"),
-        TEXT("Workflow"),
-        TEXT("Verifies the Test tab renders workflow rows, selection UI, and the nested actor end-to-end workflow entry inside the existing host."),
-        true,
-        true);
-
-    AddDefinition(
-        RI_SelfTestId_TestPageLayout,
-        TEXT("Test Page Layout"),
-        TEXT("Workflow"),
-        TEXT("Verifies the Test tab uses a page-level scroll root and still renders remote session, workflow, test, and report sections."),
-        true,
-        true);
-
-    AddDefinition(
-        RI_SelfTestId_PanelInteraction,
-        TEXT("Panel Interaction"),
-        TEXT("UI"),
-        TEXT("Verifies the RuntimeInspector panel can be dragged from the title bar and vertically resized from the bottom edge."),
-        true,
-        false);
-
-    AddDefinition(
-        RI_SelfTestId_ActorPageStructure,
-        TEXT("Actor Page Structure"),
-        TEXT("UI"),
-        TEXT("Verifies the Inspect page shows the component tree, starred property list, component-focus property routing, and color swatch rows."),
-        true,
-        false);
-
-    AddDefinition(
-        RI_SelfTestId_FileWorkflow,
-        TEXT("File Workflow"),
-        TEXT("File"),
-        TEXT("Verifies stage/export/preset/audit/clear actions drive the shared File report pipeline correctly."),
-        true,
-        true);
-
-    AddDefinition(
-        RI_SelfTestId_FilePromote,
-        TEXT("File Promote Workflow"),
-        TEXT("File"),
-        TEXT("Verifies File-page promote preview/apply actions drive shared reports and restore config-backed source state."),
-        false,
-        true);
-
-    AddDefinition(
-        RI_SelfTestId_FileCompare,
-        TEXT("File Compare View"),
-        TEXT("File"),
-        TEXT("Verifies the File page renders baseline/current and patch/source compare rows with explicit compare-pair semantics."),
-        true,
-        true);
-
-    AddDefinition(
-        RI_SelfTestId_FileRoleCompare,
-        TEXT("File Role Compare View"),
-        TEXT("File"),
-        TEXT("Verifies the File page renders runtime role compare summary, preview, and role rows from a staged patch."),
-        true,
-        true);
-
-    AddDefinition(
-        RI_SelfTestId_FileRemoteSessionCompare,
-        TEXT("File Remote Session Compare View"),
-        TEXT("File"),
-        TEXT("Verifies the File page renders remote session target-set compare summary, preview, and compare rows from the multi-session API."),
-        true,
-        false);
-
-    AddDefinition(
-        RI_SelfTestId_ActorPromoteFile,
-        TEXT("Actor Promote File Workflow"),
-        TEXT("Actor"),
-        TEXT("Verifies the selected actor can be edited, staged, promoted to source, audited, cleared, and restored through the File workflow."),
-        true,
-        true);
-
-    AddDefinition(
-        RI_SelfTestId_ActorApplyFile,
-        TEXT("Actor Apply File Workflow"),
-        TEXT("Actor"),
-        TEXT("Verifies the selected actor can be edited, staged, audited, exported, cleared, and restored through the File workflow."),
-        true,
-        true);
-
-    AddDefinition(
-        RI_SelfTestId_RuntimeSessionRole,
-        TEXT("Runtime Session Role"),
-        TEXT("Runtime"),
-        TEXT("Verifies PIE session summary and selected-actor role summary resolve into stable runtime diagnostics."),
-        true,
-        true);
-
-    AddDefinition(
-        RI_SelfTestId_RuntimeRoleCompare,
-        TEXT("Runtime Role Compare"),
-        TEXT("Runtime"),
-        TEXT("Verifies staged patch fields produce a role-aware compare report with explicit missing-role and verification states."),
-        true,
-        true);
-
-    AddDefinition(
-        RI_SelfTestId_RemoteRuntimeFoundation,
-        TEXT("Remote Runtime Foundation"),
-        TEXT("Remote"),
-        TEXT("Verifies runtime sessions can be listed, explicitly connected, and enumerated into actor targets through the shared remote-runtime API."),
-        true,
-        false);
-
-    AddDefinition(
-        RI_SelfTestId_RemoteSessionCompare,
-        TEXT("Remote Session Compare"),
-        TEXT("Remote"),
-        TEXT("Verifies editor and PIE runtime sessions can both be discovered and compared against the same actor query."),
-        true,
-        false);
-
-    AddDefinition(
-        RI_SelfTestId_RemoteSessionTargetSetCompare,
-        TEXT("Remote Session Target Set Compare"),
-        TEXT("Remote"),
-        TEXT("Verifies editor and PIE runtime sessions can compare filtered target inventories and report shared, missing, and mismatched targets."),
-        true,
-        false);
-
-    AddDefinition(
-        RI_SelfTestId_RemoteSessionTargetSetCompareMatrix,
-        TEXT("Remote Session Target Set Compare Matrix"),
-        TEXT("Remote"),
-        TEXT("Runs a curated white-listed batch of remote session target-set compare requests and verifies every matrix entry completes with the expected session/filter echo."),
-        true,
-        false);
-
-    AddDefinition(
-        RI_SelfTestId_RemoteSessionContextUI,
-        TEXT("Remote Session Context UI"),
-        TEXT("Remote"),
-        TEXT("Verifies File and Test pages render the same shared remote session, target query, and workflow context from the subsystem authority state."),
-        true,
-        false);
-
-    AddDefinition(
-        RI_SelfTestId_RemotePackagedFoundation,
-        TEXT("Remote Packaged Foundation"),
-        TEXT("Remote"),
-        TEXT("Verifies an external packaged runtime session can be discovered on loopback, connected, and enumerated into actor targets."),
-        false,
-        false);
-
-    AddDefinition(
-        RI_SelfTestId_RemotePackagedPatchPull,
-        TEXT("Remote Packaged Patch Pull"),
-        TEXT("Remote"),
-        TEXT("Applies a runtime property change inside an external packaged session, pulls the patch bundle back into the editor, and restores the runtime value."),
-        false,
-        true);
-
-    AddDefinition(
-        RI_SelfTestId_RemotePackagedToSourceClosure,
-        TEXT("Remote Packaged To Source Closure"),
-        TEXT("Remote"),
-        TEXT("Applies a packaged runtime change, pulls the patch into the editor, stages and audits it, runs promote preview/apply, then restores editor source state."),
-        false,
-        true);
-
-    AddDefinition(
-        RI_SelfTestId_FabScreenshotFoundation,
-        TEXT("Fab Screenshot Foundation"),
-        TEXT("Presentation"),
-        TEXT("Applies the clean RuntimeInspector screenshot state: SoftContrast theme, Snapshot page active, advanced sections collapsed, and BP_TestVarsActor-preferred selection."),
-        true,
-        false);
-
-    AddDefinition(
-        RI_SelfTestId_FabScreenshotActorPage,
-        TEXT("Fab Screenshot Actor Page"),
-        TEXT("Presentation"),
-        TEXT("Applies the clean RuntimeInspector screenshot state and switches the runtime UI to the Inspect page for media capture."),
-        true,
-        false);
-
-    AddDefinition(
-        RI_SelfTestId_FabScreenshotSettingsPage,
-        TEXT("Fab Screenshot Settings Page"),
-        TEXT("Presentation"),
-        TEXT("Applies the clean RuntimeInspector screenshot state and switches the runtime UI to the Snapshot page for media capture."),
-        true,
-        false);
-
-    AddDefinition(
-        RI_SelfTestId_FabScreenshotToolsPage,
-        TEXT("Fab Screenshot Tools Page"),
-        TEXT("Presentation"),
-        TEXT("Applies the clean RuntimeInspector screenshot state and switches the runtime UI to the Diagnostics page for media capture."),
-        true,
-        false);
-
-    AddDefinition(
-        RI_SelfTestId_FabScreenshotRemoteSession,
-        TEXT("Fab Screenshot Remote Session"),
-        TEXT("Presentation"),
-        TEXT("Applies the remote-session compare screenshot state and verifies the runtime UI is ready for media capture."),
-        true,
-        false);
-
-    AddDefinition(
-        RI_SelfTestId_FabScreenshotPromoteOrAudit,
-        TEXT("Fab Screenshot Promote Or Audit"),
-        TEXT("Presentation"),
-        TEXT("Applies the promote-or-audit screenshot state and verifies the runtime UI is ready for media capture."),
-        true,
-        true);
-
-    AddDefinition(
-        RI_SelfTestId_WorkflowMatrix,
-        TEXT("Workflow Matrix"),
-        TEXT("Workflow"),
-        TEXT("Runs a curated white-listed batch of remote workflows and verifies actor-aware and remote-runtime orchestration entries all complete successfully."),
-        true,
-        true);
+        Results.Add(MakeSelfTestDefinitionFromTableRow(Row, bPIEAvailable));
+    }
 #endif
     return Results;
 }
@@ -8924,7 +12741,339 @@ FRISelfTestResult UInspectorWorldSubsystem::MakeSelfTestResult(const FRISelfTest
     return Result;
 }
 
-bool UInspectorWorldSubsystem::ExecuteSelfTestByIdInternal(FName TestId, FString& OutReport, bool& bOutPassed)
+bool UInspectorWorldSubsystem::ExecuteToolAction(
+    const FRIToolActionDefinition& Action,
+    const TArray<FRISelfTestTableRow>& SelfTestRows,
+    const TArray<FRIWorkflowTableRow>& WorkflowRows,
+    bool& bOutPassed,
+    bool& bOutBlocked,
+    FString& OutSummary,
+    FRIWorkflowRunResult* OutWorkflowResult,
+    TArray<FRIVerificationRunResult>* OutVerificationResults,
+    TArray<FRISelfTestResult>* OutSelfTestResults,
+    TArray<FName>* OutExecutedChildWorkflowIds,
+    TArray<FString>* OutExecutedChildWorkflowSummaries)
+{
+    bOutPassed = false;
+    bOutBlocked = false;
+    OutSummary.Reset();
+
+#if !RUNTIME_INSPECTOR_ENABLED
+    OutSummary = TEXT("RuntimeInspector disabled");
+    return false;
+#else
+    switch (Action.ActionType)
+    {
+    case ERIToolActionType::RequirePIE:
+        if (!IsSelfTestPIEAvailable())
+        {
+            bOutBlocked = true;
+            OutSummary = TEXT("Blocked: PIE with a local player controller is required.");
+            return false;
+        }
+        bOutPassed = true;
+        OutSummary = TEXT("PIE requirement satisfied.");
+        return true;
+
+    case ERIToolActionType::RequireSelectedActor:
+        if (!SelectedActor.IsValid())
+        {
+            bOutBlocked = true;
+            OutSummary = TEXT("Blocked: selected actor is required.");
+            return false;
+        }
+        bOutPassed = true;
+        OutSummary = FString::Printf(TEXT("Selected actor ready: %s"), *GetNameSafe(SelectedActor.Get()));
+        return true;
+
+    case ERIToolActionType::SelectActorByQuery:
+    {
+        const FString Query = Action.StringValue.TrimStartAndEnd();
+        if (Query.IsEmpty())
+        {
+            OutSummary = TEXT("SelectActorByQuery failed: query is empty.");
+            return false;
+        }
+
+        if (AActor* RequestedActor = RI_FindActorByRequest(GetWorld(), Query))
+        {
+            SetSelectedActor(RequestedActor);
+            bOutPassed = true;
+            OutSummary = FString::Printf(TEXT("Selected actor: %s"), *RequestedActor->GetPathName());
+            return true;
+        }
+
+        bOutBlocked = true;
+        OutSummary = FString::Printf(TEXT("Blocked: actor not found for query %s"), *Query);
+        return false;
+    }
+
+    case ERIToolActionType::RunSelfTest:
+    {
+        FRISelfTestResult Result;
+        RunSelfTestById(Action.RefId, Result);
+        if (OutSelfTestResults)
+        {
+            OutSelfTestResults->Add(Result);
+        }
+
+        bOutBlocked = RI_IsBlockedReport(Result.FullReport);
+        bOutPassed = Result.bPassed && !bOutBlocked;
+        OutSummary = FString::Printf(TEXT("[SelfTest] %s :: %s"), *Result.DisplayName, *Result.FullReport);
+        return bOutPassed;
+    }
+
+    case ERIToolActionType::RunVerificationProfile:
+    {
+        FRIVerificationRunResult Result;
+        RunVerificationProfile(Action.RefId, Result);
+        if (OutVerificationResults)
+        {
+            OutVerificationResults->Add(Result);
+        }
+
+        bOutBlocked = Result.bBlocked;
+        bOutPassed = Result.bPassed && !bOutBlocked;
+        OutSummary = FString::Printf(TEXT("[Profile] %s :: %s"), *Result.DisplayName, *Result.FullReport);
+        return bOutPassed;
+    }
+
+    case ERIToolActionType::RunWorkflow:
+    {
+        FRIWorkflowRunResult Result;
+        RunWorkflowById(Action.RefId, Result);
+        if (OutExecutedChildWorkflowIds)
+        {
+            OutExecutedChildWorkflowIds->Add(Action.RefId);
+        }
+        if (OutExecutedChildWorkflowSummaries)
+        {
+            OutExecutedChildWorkflowSummaries->Add(Result.Summary);
+        }
+        if (OutWorkflowResult)
+        {
+            *OutWorkflowResult = Result;
+        }
+
+        bOutBlocked = Result.bBlocked;
+        bOutPassed = Result.bPassed && !bOutBlocked;
+        OutSummary = FString::Printf(TEXT("[Workflow] %s :: %s"), *Result.DisplayName, *Result.FullReport);
+        return bOutPassed;
+    }
+
+    case ERIToolActionType::RunWorkflowMatrix:
+    {
+        FRIWorkflowMatrixRunResult Result;
+        RunWorkflowMatrixById(Action.RefId, Result);
+        bOutBlocked = Result.bBlocked;
+        bOutPassed = Result.bPassed && !bOutBlocked;
+        OutSummary = FString::Printf(TEXT("[WorkflowMatrix] %s :: %s"), *Result.DisplayName, *Result.FullReport);
+        return bOutPassed;
+    }
+
+    case ERIToolActionType::ShowPage:
+        if (!bOpen)
+        {
+            OpenToPage(
+                Action.PageTarget == ERIToolPageTarget::Changes ? ERIVisiblePage::Changes :
+                Action.PageTarget == ERIToolPageTarget::Settings ? ERIVisiblePage::Settings :
+                Action.PageTarget == ERIToolPageTarget::Tools ? ERIVisiblePage::Tools :
+                ERIVisiblePage::Actor);
+            bOutPassed = true;
+            OutSummary = FString::Printf(TEXT("Opened requested page: %d"), static_cast<int32>(Action.PageTarget));
+            return true;
+        }
+        switch (Action.PageTarget)
+        {
+        case ERIToolPageTarget::Actor:
+            HandleActorTabClicked();
+            OutSummary = TEXT("Showed Actor page.");
+            break;
+        case ERIToolPageTarget::Changes:
+            HandleFileTabClicked();
+            OutSummary = TEXT("Showed Changes page.");
+            break;
+        case ERIToolPageTarget::Settings:
+            HandleSettingsTabClicked();
+            OutSummary = TEXT("Showed Settings page.");
+            break;
+        case ERIToolPageTarget::Tools:
+            HandleTestTabClicked();
+            OutSummary = TEXT("Showed Tools page.");
+            break;
+        default:
+            OutSummary = TEXT("ShowPage ignored: target page not specified.");
+            return false;
+        }
+        bOutPassed = true;
+        return true;
+
+    case ERIToolActionType::OpenPanel:
+        if (!bOpen)
+        {
+            Open();
+        }
+        bOutPassed = true;
+        OutSummary = TEXT("RuntimeInspector panel open.");
+        return true;
+
+    case ERIToolActionType::RefreshPanel:
+        RefreshPanel(RI_ResolveToolRefreshReason(Action.RefreshReason));
+        bOutPassed = true;
+        OutSummary = TEXT("Panel refreshed.");
+        return true;
+
+    case ERIToolActionType::SetRemoteSessionUIContext:
+        SetRemoteSessionUIContext(Action.StringValue, Action.StringValueB, Action.StringValueC, Action.StringValueD);
+        bOutPassed = true;
+        OutSummary = FString::Printf(TEXT("Remote session UI context set: %s"), *Action.StringValue);
+        return true;
+
+    case ERIToolActionType::SetRemoteSessionCompareOverride:
+        SetActiveRemoteSessionTargetSetCompareRequest(Action.RemoteSessionCompareRequest);
+        bOutPassed = true;
+        OutSummary = TEXT("Remote session compare override set.");
+        return true;
+
+    case ERIToolActionType::ClearRemoteSessionCompareOverride:
+        SetActiveRemoteSessionTargetSetCompareRequest(FRIRuntimeSessionTargetSetCompareRequest());
+        bOutPassed = true;
+        OutSummary = TEXT("Remote session compare override cleared.");
+        return true;
+
+    case ERIToolActionType::EnsurePackagedRuntimeValidationSession:
+    {
+        FRIRuntimeSessionInfo Session;
+        FString Error;
+        if (!EnsurePackagedRuntimeValidationSession(Session, Error))
+        {
+            OutSummary = FString::Printf(TEXT("EnsurePackagedRuntimeValidationSession failed: %s"), *Error);
+            return false;
+        }
+
+        bOutPassed = true;
+        OutSummary = FString::Printf(TEXT("Packaged runtime session ready: %s"), *Session.SessionId);
+        return true;
+    }
+
+    case ERIToolActionType::ConnectRemoteRuntimeSession:
+    {
+        const FString SessionId = Action.StringValue.TrimStartAndEnd().IsEmpty()
+            ? PreferredRemoteSessionId
+            : Action.StringValue.TrimStartAndEnd();
+        if (SessionId.IsEmpty())
+        {
+            OutSummary = TEXT("ConnectRemoteRuntimeSession failed: session id is empty.");
+            return false;
+        }
+
+        FRIRuntimeSessionInfo ConnectedSession;
+        FString Error;
+        if (!ConnectRemoteRuntimeSession(SessionId, ConnectedSession, Error))
+        {
+            OutSummary = FString::Printf(TEXT("ConnectRemoteRuntimeSession failed: %s"), *Error);
+            return false;
+        }
+
+        bOutPassed = true;
+        OutSummary = FString::Printf(TEXT("Connected remote session: %s"), *ConnectedSession.SessionId);
+        return true;
+    }
+
+    case ERIToolActionType::AppendReportMessage:
+        bOutPassed = true;
+        OutSummary = Action.StringValue;
+        return true;
+
+    case ERIToolActionType::NativeBridgeAction:
+    {
+        const FName BridgeId = Action.RefId.IsNone() ? FName(*Action.StringValue) : Action.RefId;
+        FString BridgeReport;
+        bool bBridgePassed = false;
+        ExecuteLegacyToolNativeBridgeAction(BridgeId, BridgeReport, bBridgePassed);
+        bOutBlocked = RI_IsBlockedReport(BridgeReport);
+        bOutPassed = bBridgePassed && !bOutBlocked;
+        OutSummary = FString::Printf(TEXT("[NativeBridge] %s :: %s"), *BridgeId.ToString(), *BridgeReport);
+        return bOutPassed;
+    }
+
+    case ERIToolActionType::None:
+    default:
+        OutSummary = FString::Printf(TEXT("Unknown or unsupported tools action for ref %s"), *Action.RefId.ToString());
+        return false;
+    }
+#endif
+}
+
+bool UInspectorWorldSubsystem::ExecuteToolActionSequence(
+    const TArray<FRIToolActionDefinition>& Actions,
+    const TArray<FRISelfTestTableRow>& SelfTestRows,
+    const TArray<FRIWorkflowTableRow>& WorkflowRows,
+    int32& OutPassedStepCount,
+    int32& OutFailedStepCount,
+    bool& bOutBlocked,
+    TArray<FString>& OutReportSections,
+    FRIWorkflowRunResult* OutWorkflowResult,
+    TArray<FRIVerificationRunResult>* OutVerificationResults,
+    TArray<FRISelfTestResult>* OutSelfTestResults,
+    TArray<FName>* OutExecutedChildWorkflowIds,
+    TArray<FString>* OutExecutedChildWorkflowSummaries)
+{
+    OutPassedStepCount = 0;
+    OutFailedStepCount = 0;
+    bOutBlocked = false;
+    OutReportSections.Reset();
+
+#if !RUNTIME_INSPECTOR_ENABLED
+    return false;
+#else
+    if (Actions.Num() <= 0)
+    {
+        return false;
+    }
+
+    bool bAnyFailed = false;
+    for (const FRIToolActionDefinition& Action : Actions)
+    {
+        bool bStepPassed = false;
+        bool bStepBlocked = false;
+        FString StepSummary;
+        ExecuteToolAction(
+            Action,
+            SelfTestRows,
+            WorkflowRows,
+            bStepPassed,
+            bStepBlocked,
+            StepSummary,
+            OutWorkflowResult,
+            OutVerificationResults,
+            OutSelfTestResults,
+            OutExecutedChildWorkflowIds,
+            OutExecutedChildWorkflowSummaries);
+
+        if (!StepSummary.IsEmpty())
+        {
+            OutReportSections.Add(StepSummary);
+        }
+
+        if (bStepPassed && !bStepBlocked)
+        {
+            ++OutPassedStepCount;
+        }
+        else
+        {
+            ++OutFailedStepCount;
+            bAnyFailed = true;
+        }
+
+        bOutBlocked = bOutBlocked || bStepBlocked;
+    }
+
+    return !bOutBlocked && !bAnyFailed && Actions.Num() > 0;
+#endif
+}
+
+bool UInspectorWorldSubsystem::ExecuteLegacyToolNativeBridgeAction(FName BridgeId, FString& OutReport, bool& bOutPassed)
 {
     OutReport.Reset();
     bOutPassed = false;
@@ -8933,273 +13082,300 @@ bool UInspectorWorldSubsystem::ExecuteSelfTestByIdInternal(FName TestId, FString
     OutReport = TEXT("RuntimeInspector disabled");
     return false;
 #else
-    if (TestId == RI_SelfTestId_ConfirmDialog)
+    if (BridgeId == RI_SelfTestId_ConfirmDialog)
     {
         bOutPassed = RunConfirmDialogColorInputSelfTest(OutReport);
         return true;
     }
 
-    if (TestId == RI_SelfTestId_SettingsPreview)
+    if (BridgeId == RI_SelfTestId_SettingsPreview)
     {
         bOutPassed = RunSettingsPreviewSelfTest(OutReport);
         return true;
     }
 
-    if (TestId == RI_SelfTestId_SettingsSavePersistence)
+    if (BridgeId == RI_SelfTestId_SettingsSavePersistence)
     {
         bOutPassed = RunSettingsSavePersistenceSelfTest(OutReport);
         return true;
     }
 
-    if (TestId == RI_SelfTestId_StarLiveEditAndRun)
+    if (BridgeId == RI_SelfTestId_StarLiveEditAndRun)
     {
         bOutPassed = RunStarLiveEditAndRunSelfTest(OutReport);
         return true;
     }
 
-    if (TestId == RI_SelfTestId_StarPreciseNavigation)
+    if (BridgeId == RI_SelfTestId_StarPreciseNavigation)
     {
         bOutPassed = RunStarPreciseNavigationSelfTest(OutReport);
         return true;
     }
 
-    if (TestId == RI_SelfTestId_SettingsHotkey)
+    if (BridgeId == RI_SelfTestId_SettingsHotkey)
     {
         bOutPassed = RunSettingsHotkeyRebindSelfTest(OutReport);
         return true;
     }
 
-    if (TestId == RI_SelfTestId_SettingsPageLayout)
+    if (BridgeId == RI_SelfTestId_SettingsPageLayout)
     {
         bOutPassed = RunSettingsPageLayoutSelfTest(OutReport);
         return true;
     }
 
-    if (TestId == RI_SelfTestId_ThemePresetPreview)
+    if (BridgeId == RI_SelfTestId_ThemePresetPreview)
     {
         bOutPassed = RunThemePresetPreviewSelfTest(OutReport);
         return true;
     }
 
-    if (TestId == RI_SelfTestId_PatchPreset)
+    if (BridgeId == RI_SelfTestId_PatchPreset)
     {
         bOutPassed = RunPatchPresetRoundtripSelfTest(OutReport);
         return true;
     }
 
-    if (TestId == RI_SelfTestId_PromotePreview)
+    if (BridgeId == RI_SelfTestId_PromotePreview)
     {
         bOutPassed = RunPromotePreviewSelfTest(OutReport);
         return true;
     }
 
-    if (TestId == RI_SelfTestId_PromoteConfig)
+    if (BridgeId == RI_SelfTestId_PromoteConfig)
     {
         bOutPassed = RunPromoteConfigSelfTest(OutReport);
         return true;
     }
 
-    if (TestId == RI_SelfTestId_PromoteBlueprintApply)
+    if (BridgeId == RI_SelfTestId_PromoteBlueprintApply)
     {
         bOutPassed = RunPromoteBlueprintApplySelfTest(OutReport);
         return true;
     }
 
-    if (TestId == RI_SelfTestId_PromoteMaterialApply)
+    if (BridgeId == RI_SelfTestId_PromoteMaterialApply)
     {
         bOutPassed = RunPromoteMaterialApplySelfTest(OutReport);
         return true;
     }
 
-    if (TestId == RI_SelfTestId_AuditReport)
+    if (BridgeId == RI_SelfTestId_AuditReport)
     {
         bOutPassed = RunAuditReportSelfTest(OutReport);
         return true;
     }
 
-    if (TestId == RI_SelfTestId_FilePage)
+    if (BridgeId == RI_SelfTestId_FilePage)
     {
         bOutPassed = RunFilePageInjectionSelfTest(OutReport);
         return true;
     }
 
-    if (TestId == RI_SelfTestId_ContextStrip)
+    if (BridgeId == RI_SelfTestId_ContextStrip)
     {
         bOutPassed = RunContextStripSelfTest(OutReport);
         return true;
     }
 
-    if (TestId == RI_SelfTestId_WorkflowPageView)
+    if (BridgeId == RI_SelfTestId_CaptureChangesFirstOpenPerf)
+    {
+        FRIValidationCaptureReport CaptureReport;
+        bOutPassed = RunValidationCaptureScenario(RI_ValidationScenarioId_ChangesFirstOpenPerfCapture, CaptureReport);
+        OutReport = CaptureReport.Summary.IsEmpty()
+            ? BuildValidationCaptureSummaryText(CaptureReport)
+            : FString::Printf(TEXT("%s\nReport=%s"), *CaptureReport.Summary, *CaptureReport.ReportPath);
+        return true;
+    }
+
+    if (BridgeId == RI_SelfTestId_TransformSourcePersistencePrepare)
+    {
+        bOutPassed = RunTransformSourcePersistencePrepareSelfTest(OutReport);
+        return true;
+    }
+
+    if (BridgeId == RI_SelfTestId_TransformSourcePersistenceVerifyRestore)
+    {
+        bOutPassed = RunTransformSourcePersistenceVerifyRestoreSelfTest(OutReport);
+        return true;
+    }
+
+    if (BridgeId == RI_SelfTestId_WorkflowPageView)
     {
         bOutPassed = RunWorkflowPageViewSelfTest(OutReport);
         return true;
     }
 
-    if (TestId == RI_SelfTestId_TestPageLayout)
+    if (BridgeId == RI_SelfTestId_TestPageLayout)
     {
         bOutPassed = RunTestPageLayoutSelfTest(OutReport);
         return true;
     }
 
-    if (TestId == RI_SelfTestId_PanelInteraction)
+    if (BridgeId == RI_SelfTestId_PanelInteraction)
     {
         bOutPassed = RunPanelInteractionSelfTest(OutReport);
         return true;
     }
 
-    if (TestId == RI_SelfTestId_ActorPageStructure)
+    if (BridgeId == RI_SelfTestId_ActorPageStructure)
     {
         bOutPassed = RunActorPageStructureSelfTest(OutReport);
         return true;
     }
 
-    if (TestId == RI_SelfTestId_FileWorkflow)
+    if (BridgeId == RI_SelfTestId_FileWorkflow)
     {
         bOutPassed = RunFileWorkflowSelfTest(OutReport);
         return true;
     }
 
-    if (TestId == RI_SelfTestId_FilePromote)
+    if (BridgeId == RI_SelfTestId_FilePromote)
     {
         bOutPassed = RunFilePromoteWorkflowSelfTest(OutReport);
         return true;
     }
 
-    if (TestId == RI_SelfTestId_FileCompare)
+    if (BridgeId == RI_SelfTestId_FileCompare)
     {
         bOutPassed = RunFileCompareViewSelfTest(OutReport);
         return true;
     }
 
-    if (TestId == RI_SelfTestId_FileRoleCompare)
+    if (BridgeId == RI_SelfTestId_FileRoleCompare)
     {
         bOutPassed = RunFileRoleCompareViewSelfTest(OutReport);
         return true;
     }
 
-    if (TestId == RI_SelfTestId_FileRemoteSessionCompare)
+    if (BridgeId == RI_SelfTestId_FileRemoteSessionCompare)
     {
         bOutPassed = RunFileRemoteSessionCompareViewSelfTest(OutReport);
         return true;
     }
 
-    if (TestId == RI_SelfTestId_ActorPromoteFile)
+    if (BridgeId == RI_SelfTestId_ActorPromoteFile)
     {
         bOutPassed = RunActorPromoteFileWorkflowSelfTest(OutReport);
         return true;
     }
 
-    if (TestId == RI_SelfTestId_ActorApplyFile)
+    if (BridgeId == RI_SelfTestId_ActorApplyFile)
     {
         bOutPassed = RunActorApplyFileWorkflowSelfTest(OutReport);
         return true;
     }
 
-    if (TestId == RI_SelfTestId_RuntimeSessionRole)
+    if (BridgeId == RI_SelfTestId_RuntimeSessionRole)
     {
         bOutPassed = RunRuntimeSessionRoleSelfTest(OutReport);
         return true;
     }
 
-    if (TestId == RI_SelfTestId_RuntimeRoleCompare)
+    if (BridgeId == RI_SelfTestId_RuntimeRoleCompare)
     {
         bOutPassed = RunRuntimeRoleCompareSelfTest(OutReport);
         return true;
     }
 
-    if (TestId == RI_SelfTestId_RemoteRuntimeFoundation)
+    if (BridgeId == RI_SelfTestId_RemoteRuntimeFoundation)
     {
         bOutPassed = RunRemoteRuntimeFoundationSelfTest(OutReport);
         return true;
     }
 
-    if (TestId == RI_SelfTestId_RemoteSessionCompare)
+    if (BridgeId == RI_SelfTestId_RemoteSessionCompare)
     {
         bOutPassed = RunRemoteSessionCompareSelfTest(OutReport);
         return true;
     }
 
-    if (TestId == RI_SelfTestId_RemoteSessionTargetSetCompare)
+    if (BridgeId == RI_SelfTestId_RemoteSessionTargetSetCompare)
     {
         bOutPassed = RunRemoteSessionTargetSetCompareSelfTest(OutReport);
         return true;
     }
 
-    if (TestId == RI_SelfTestId_RemoteSessionTargetSetCompareMatrix)
+    if (BridgeId == RI_SelfTestId_RemoteSessionTargetSetCompareMatrix)
     {
         bOutPassed = RunRemoteSessionTargetSetCompareMatrixSelfTest(OutReport);
         return true;
     }
 
-    if (TestId == RI_SelfTestId_RemoteSessionContextUI)
+    if (BridgeId == RI_SelfTestId_RemoteSessionContextUI)
     {
         bOutPassed = RunRemoteSessionContextUISelfTest(OutReport);
         return true;
     }
 
-    if (TestId == RI_SelfTestId_RemotePackagedFoundation)
+    if (BridgeId == RI_SelfTestId_RemotePackagedFoundation)
     {
         bOutPassed = RunRemotePackagedFoundationSelfTest(OutReport);
         return true;
     }
 
-    if (TestId == RI_SelfTestId_RemotePackagedPatchPull)
+    if (BridgeId == RI_SelfTestId_RemotePackagedPatchPull)
     {
         bOutPassed = RunRemotePackagedPatchPullSelfTest(OutReport);
         return true;
     }
 
-    if (TestId == RI_SelfTestId_RemotePackagedToSourceClosure)
+    if (BridgeId == RI_SelfTestId_RemotePackagedToSourceClosure)
     {
         bOutPassed = RunRemotePackagedToSourceClosureSelfTest(OutReport);
         return true;
     }
 
-    if (TestId == RI_SelfTestId_FabScreenshotFoundation)
+    if (BridgeId == RI_SelfTestId_FabScreenshotFoundation)
     {
         bOutPassed = RunFabScreenshotFoundationSelfTest(OutReport);
         return true;
     }
 
-    if (TestId == RI_SelfTestId_FabScreenshotActorPage)
+    if (BridgeId == RI_SelfTestId_FabScreenshotActorPage)
     {
         bOutPassed = RunFabScreenshotActorPageSelfTest(OutReport);
         return true;
     }
 
-    if (TestId == RI_SelfTestId_FabScreenshotSettingsPage)
+    if (BridgeId == RI_SelfTestId_FabScreenshotSettingsPage)
     {
         bOutPassed = RunFabScreenshotSettingsPageSelfTest(OutReport);
         return true;
     }
 
-    if (TestId == RI_SelfTestId_FabScreenshotToolsPage)
+    if (BridgeId == RI_SelfTestId_FabScreenshotToolsPage)
     {
         bOutPassed = RunFabScreenshotToolsPageSelfTest(OutReport);
         return true;
     }
 
-    if (TestId == RI_SelfTestId_FabScreenshotRemoteSession)
+    if (BridgeId == RI_SelfTestId_FabScreenshotRemoteSession)
     {
         bOutPassed = RunFabScreenshotRemoteSessionSelfTest(OutReport);
         return true;
     }
 
-    if (TestId == RI_SelfTestId_FabScreenshotPromoteOrAudit)
+    if (BridgeId == RI_SelfTestId_FabScreenshotPromoteOrAudit)
     {
         bOutPassed = RunFabScreenshotPromoteOrAuditSelfTest(OutReport);
         return true;
     }
 
-    if (TestId == RI_SelfTestId_WorkflowMatrix)
+    if (BridgeId == RI_SelfTestId_WorkflowMatrix)
     {
         bOutPassed = RunWorkflowMatrixSelfTest(OutReport);
         return true;
     }
 
-    OutReport = FString::Printf(TEXT("Unknown self test id: %s"), *TestId.ToString());
+    OutReport = FString::Printf(TEXT("Unknown native bridge action: %s"), *BridgeId.ToString());
     return false;
 #endif
+}
+
+bool UInspectorWorldSubsystem::ExecuteSelfTestByIdInternal(FName TestId, FString& OutReport, bool& bOutPassed)
+{
+    return ExecuteLegacyToolNativeBridgeAction(TestId, OutReport, bOutPassed);
 }
 
 bool UInspectorWorldSubsystem::RunSelfTestById(FName TestId, FRISelfTestResult& OutResult)
@@ -9213,13 +13389,12 @@ bool UInspectorWorldSubsystem::RunSelfTestById(FName TestId, FRISelfTestResult& 
     OutResult.Summary = OutResult.FullReport;
     return false;
 #else
+    const TArray<FRISelfTestTableRow> SelfTestRows = LoadConfiguredSelfTestRows();
+    const FRISelfTestTableRow* Row = FindConfiguredSelfTestRow(TestId, SelfTestRows);
     const TArray<FRISelfTestDefinition> Definitions = GetAvailableSelfTests();
-    const FRISelfTestDefinition* Definition = Definitions.FindByPredicate([TestId](const FRISelfTestDefinition& Candidate)
-    {
-        return Candidate.Id == TestId;
-    });
+    const FRISelfTestDefinition* Definition = Definitions.FindByPredicate([TestId](const FRISelfTestDefinition& Candidate) { return Candidate.Id == TestId; });
 
-    if (!Definition)
+    if (!Definition || !Row)
     {
         OutResult.Id = TestId;
         OutResult.DisplayName = TestId.ToString();
@@ -9230,25 +13405,89 @@ bool UInspectorWorldSubsystem::RunSelfTestById(FName TestId, FRISelfTestResult& 
         return false;
     }
 
-    if (Definition->bRequiresPIE && !IsSelfTestPIEAvailable())
+    const FString ExecutionKey = RI_MakeToolExecutionKey(TEXT("test"), TestId);
+    const bool bTopLevelExecution = ActiveToolExecutionDepth == 0;
+    ++ActiveToolExecutionDepth;
+    auto FinishExecution = [this, bTopLevelExecution, &ExecutionKey]()
     {
-        OutResult = MakeSelfTestResult(*Definition, false, TEXT("Blocked: PIE with a local player controller is required."), 0);
+        ActiveToolExecutionKeys.Remove(ExecutionKey);
+        ActiveToolExecutionDepth = FMath::Max(0, ActiveToolExecutionDepth - 1);
+        if (bTopLevelExecution)
+        {
+            ActiveToolExecutionKeys.Reset();
+        }
+    };
+
+    if (ActiveToolExecutionKeys.Contains(ExecutionKey))
+    {
+        OutResult = MakeSelfTestResult(*Definition, false, FString::Printf(TEXT("Blocked: recursive self-test dependency detected for %s"), *TestId.ToString()), 0);
         OutResult.StartedAt = FDateTime::UtcNow().ToIso8601();
+        FinishExecution();
         LastSelfTestResults.RemoveAll([TestId](const FRISelfTestResult& Existing) { return Existing.Id == TestId; });
         LastSelfTestResults.Add(OutResult);
         return false;
     }
 
+    if (Definition->bRequiresPIE && !IsSelfTestPIEAvailable())
+    {
+        OutResult = MakeSelfTestResult(*Definition, false, TEXT("Blocked: PIE with a local player controller is required."), 0);
+        OutResult.StartedAt = FDateTime::UtcNow().ToIso8601();
+        FinishExecution();
+        LastSelfTestResults.RemoveAll([TestId](const FRISelfTestResult& Existing) { return Existing.Id == TestId; });
+        LastSelfTestResults.Add(OutResult);
+        return false;
+    }
+
+    ActiveToolExecutionKeys.Add(ExecutionKey);
+
     const FDateTime StartedAt = FDateTime::UtcNow();
     const double StartSeconds = FPlatformTime::Seconds();
+    const TArray<FRIWorkflowTableRow> WorkflowRows = LoadConfiguredWorkflowRows();
+    const TWeakObjectPtr<AActor> PreviousSelectedActor = SelectedActor;
+    const FRIRuntimeSessionTargetSetCompareRequest PreviousRemoteCompareRequest = ActiveRemoteSessionTargetSetCompareRequest;
 
-    FString Report;
+    int32 PassedStepCount = 0;
+    int32 FailedStepCount = 0;
+    bool bBlocked = false;
+    TArray<FString> ReportSections;
     bool bPassed = false;
-    ExecuteSelfTestByIdInternal(TestId, Report, bPassed);
+    FString Report;
+    if (Row->ActionSequence.Num() > 0)
+    {
+        bPassed = ExecuteToolActionSequence(
+            Row->ActionSequence,
+            SelfTestRows,
+            WorkflowRows,
+            PassedStepCount,
+            FailedStepCount,
+            bBlocked,
+            ReportSections);
+
+        const FString SummaryLine = FString::Printf(
+            TEXT("%s=%s | Passed=%d Failed=%d"),
+            *Definition->Id.ToString(),
+            bBlocked ? TEXT("BLOCKED") : (bPassed ? TEXT("PASS") : TEXT("FAIL")),
+            PassedStepCount,
+            FailedStepCount);
+        Report = ReportSections.Num() > 0
+            ? FString::Printf(TEXT("%s\n%s"), *SummaryLine, *FString::Join(ReportSections, TEXT("\n")))
+            : SummaryLine;
+    }
+    else
+    {
+        ExecuteLegacyToolNativeBridgeAction(Row->LegacyNativeBridgeId, Report, bPassed);
+    }
+
+    if (SelectedActor.Get() != PreviousSelectedActor.Get())
+    {
+        SetSelectedActor(PreviousSelectedActor.Get());
+    }
+    SetActiveRemoteSessionTargetSetCompareRequest(PreviousRemoteCompareRequest);
 
     const int32 DurationMs = FMath::Max(0, FMath::RoundToInt(static_cast<float>((FPlatformTime::Seconds() - StartSeconds) * 1000.0)));
     OutResult = MakeSelfTestResult(*Definition, bPassed, Report, DurationMs);
     OutResult.StartedAt = StartedAt.ToIso8601();
+    FinishExecution();
 
     LastSelfTestResults.RemoveAll([TestId](const FRISelfTestResult& Existing) { return Existing.Id == TestId; });
     LastSelfTestResults.Add(OutResult);
@@ -9561,327 +13800,35 @@ TArray<FRIWorkflowDefinition> UInspectorWorldSubsystem::GetAvailableWorkflows() 
 {
     TArray<FRIWorkflowDefinition> Results;
 #if RUNTIME_INSPECTOR_ENABLED
-    auto AddWorkflow = [&Results](
-        FName WorkflowId,
-        const TCHAR* DisplayName,
-        const TCHAR* Description,
-        std::initializer_list<FName> VerificationProfileIds,
-        std::initializer_list<FName> SelfTestIds,
-        const TCHAR* Category,
-        bool bRequiresPIE = true,
-        bool bRequiresSelectedActor = false,
-        bool bMutatesRuntime = false,
-        bool bMutatesSource = false,
-        std::initializer_list<const TCHAR*> Tags = {},
-        std::initializer_list<FName> ChildWorkflowIds = {})
+    TSet<FName> SeenIds;
+    for (const FRIWorkflowTableRow& Row : LoadConfiguredWorkflowRows())
     {
-        FRIWorkflowDefinition Workflow;
-        Workflow.WorkflowId = WorkflowId;
-        Workflow.DisplayName = DisplayName;
-        Workflow.Description = Description;
-        Workflow.Category = Category;
-        Workflow.bRequiresPIE = bRequiresPIE;
-        Workflow.bRequiresSelectedActor = bRequiresSelectedActor;
-        Workflow.bMutatesRuntime = bMutatesRuntime;
-        Workflow.bMutatesSource = bMutatesSource;
-        for (const TCHAR* Tag : Tags)
+        if (Row.WorkflowId.IsNone())
         {
-            Workflow.Tags.Add(Tag);
+            LogToolsDefinitionIssue(TEXT("Skipping workflow row with empty WorkflowId."));
+            continue;
         }
-        Workflow.ChildWorkflowIds.Append(ChildWorkflowIds.begin(), static_cast<int32>(ChildWorkflowIds.size()));
-        Workflow.VerificationProfileIds.Append(VerificationProfileIds.begin(), static_cast<int32>(VerificationProfileIds.size()));
-        Workflow.SelfTestIds.Append(SelfTestIds.begin(), static_cast<int32>(SelfTestIds.size()));
-        Results.Add(MoveTemp(Workflow));
-    };
 
-    AddWorkflow(
-        RI_WorkflowId_MainlineSafePatchCore,
-        TEXT("Mainline Safe Patch Core"),
-        TEXT("Runs the stable patch, settings, and file compare workflow inside PIE."),
-        { RI_VerificationProfileId_RuntimeSessionRole, RI_VerificationProfileId_SettingsPreview, RI_VerificationProfileId_SettingsHotkey, RI_VerificationProfileId_FileCompare },
-        { RI_SelfTestId_FilePage, RI_SelfTestId_FileWorkflow },
-        TEXT("Mainline"),
-        true,
-        false,
-        true,
-        false,
-        { TEXT("safe-patch"), TEXT("settings"), TEXT("file") });
+        if (!Row.bEnabled)
+        {
+            continue;
+        }
 
-    AddWorkflow(
-        RI_WorkflowId_MainlinePromoteSourceAssets,
-        TEXT("Mainline Promote Source Assets"),
-        TEXT("Runs config, Blueprint, material, and File-page promote workflows with automatic restore."),
-        { RI_VerificationProfileId_PromoteConfig, RI_VerificationProfileId_PromoteBlueprintApply, RI_VerificationProfileId_PromoteMaterialApply, RI_VerificationProfileId_FilePromote },
-        {},
-        TEXT("Mainline"),
-        true,
-        false,
-        true,
-        true,
-        { TEXT("promote"), TEXT("source"), TEXT("assets") });
+        if (SeenIds.Contains(Row.WorkflowId))
+        {
+            LogToolsDefinitionIssue(FString::Printf(TEXT("Duplicate workflow id skipped: %s"), *Row.WorkflowId.ToString()));
+            continue;
+        }
+        SeenIds.Add(Row.WorkflowId);
 
-    AddWorkflow(
-        RI_WorkflowId_MainlineActorPatchRoundtrip,
-        TEXT("Mainline Actor Patch Roundtrip"),
-        TEXT("Runs selected-actor patch preset, audit, and promote preview steps on a stable target actor."),
-        { RI_VerificationProfileId_AuditReport, RI_VerificationProfileId_PromotePreview },
-        { RI_SelfTestId_PatchPreset },
-        TEXT("Actor"),
-        true,
-        true,
-        true,
-        false,
-        { TEXT("actor"), TEXT("patch"), TEXT("roundtrip") });
+        if (Row.ActionSequence.Num() == 0)
+        {
+            LogToolsDefinitionIssue(FString::Printf(TEXT("Workflow has no action sequence: %s"), *Row.WorkflowId.ToString()));
+            continue;
+        }
 
-    AddWorkflow(
-        RI_WorkflowId_MainlineActorPromoteFileClosure,
-        TEXT("Mainline Actor Promote File Closure"),
-        TEXT("Runs selected-actor apply, stage, promote preview/apply, applied audit, clear, and restore steps through the File workflow."),
-        { RI_VerificationProfileId_RuntimeSessionRole, RI_VerificationProfileId_ActorPromoteFile },
-        { RI_SelfTestId_FilePage },
-        TEXT("Actor"),
-        true,
-        true,
-        true,
-        true,
-        { TEXT("actor"), TEXT("promote"), TEXT("file") });
-
-    AddWorkflow(
-        RI_WorkflowId_MainlineActorApplyFileClosure,
-        TEXT("Mainline Actor Apply File Closure"),
-        TEXT("Runs selected-actor apply, stage, compare, export, clear, and restore steps through the File workflow."),
-        { RI_VerificationProfileId_RuntimeSessionRole, RI_VerificationProfileId_ActorApplyFile },
-        { RI_SelfTestId_FilePage },
-        TEXT("Actor"),
-        true,
-        true,
-        true,
-        false,
-        { TEXT("actor"), TEXT("apply"), TEXT("file") });
-
-    AddWorkflow(
-        RI_WorkflowId_MainlineActorEndToEndClosure,
-        TEXT("Mainline Actor End-To-End"),
-        TEXT("Runs selected-actor patch roundtrip, file apply/compare, and file promote/apply/restore as one curated actor-aware closure."),
-        {},
-        {},
-        TEXT("Mainline"),
-        true,
-        true,
-        true,
-        true,
-        { TEXT("actor"), TEXT("end-to-end"), TEXT("promote"), TEXT("file") },
-        { RI_WorkflowId_MainlineActorPatchRoundtrip, RI_WorkflowId_MainlineActorApplyFileClosure, RI_WorkflowId_MainlineActorPromoteFileClosure });
-
-    AddWorkflow(
-        RI_WorkflowId_MainlineRemoteActorEndToEndClosure,
-        TEXT("Mainline Remote Actor End-To-End"),
-        TEXT("Runs the remote-runtime foundation, remote compare matrix, role compare, and selected-actor end-to-end closure as one white-listed remote automation batch."),
-        {},
-        {},
-        TEXT("Mainline"),
-        true,
-        true,
-        true,
-        true,
-        { TEXT("remote"), TEXT("actor"), TEXT("end-to-end"), TEXT("batch"), TEXT("white-listed"), TEXT("orchestration") },
-        { RI_WorkflowId_MainlineRemoteRuntimeFoundation, RI_WorkflowId_MainlineRemoteSessionCompareMatrixFoundation, RI_WorkflowId_MainlineRoleCompareFoundation, RI_WorkflowId_MainlineActorEndToEndClosure });
-
-    AddWorkflow(
-        RI_WorkflowId_MainlineRoleCompareFoundation,
-        TEXT("Mainline Role Compare Foundation"),
-        TEXT("Stages a runtime patch and proves role-aware compare output, missing-role reporting, verification states, and File-page role compare rendering."),
-        { RI_VerificationProfileId_RuntimeRoleCompare, RI_VerificationProfileId_FileRoleCompare },
-        {},
-        TEXT("Phase3"),
-        true,
-        false,
-        true,
-        false,
-        { TEXT("runtime"), TEXT("role-aware"), TEXT("compare") });
-
-    AddWorkflow(
-        RI_WorkflowId_MainlineRemoteRuntimeFoundation,
-        TEXT("Mainline Remote Runtime Foundation"),
-        TEXT("Verifies the local PIE runtime can be discovered as an explicit runtime session, connected, and enumerated into remote-runtime targets."),
-        { RI_VerificationProfileId_RemoteRuntimeFoundation },
-        {},
-        TEXT("Phase3"),
-        true,
-        false,
-        false,
-        false,
-        { TEXT("remote"), TEXT("runtime"), TEXT("session"), TEXT("target") });
-
-    AddWorkflow(
-        RI_WorkflowId_MainlineRemotePackagedFoundation,
-        TEXT("Mainline Remote Packaged Foundation"),
-        TEXT("Verifies an external packaged runtime can be discovered on loopback, connected, and enumerated into actor targets from the editor authority side."),
-        { RI_VerificationProfileId_RemotePackagedFoundation },
-        {},
-        TEXT("Phase3"),
-        false,
-        false,
-        false,
-        false,
-        { TEXT("remote"), TEXT("packaged"), TEXT("loopback"), TEXT("foundation") });
-
-    AddWorkflow(
-        RI_WorkflowId_MainlineRemotePackagedPatchPull,
-        TEXT("Mainline Remote Packaged Patch Pull"),
-        TEXT("Applies a property mutation in an external packaged runtime, pulls the patch bundle into the editor, stages it, and restores the packaged runtime value."),
-        { RI_VerificationProfileId_RemotePackagedPatchPull },
-        {},
-        TEXT("Phase3"),
-        false,
-        false,
-        true,
-        false,
-        { TEXT("remote"), TEXT("packaged"), TEXT("patch"), TEXT("pull"), TEXT("loopback") });
-
-    AddWorkflow(
-        RI_WorkflowId_MainlineRemotePackagedToSourceClosure,
-        TEXT("Mainline Remote Packaged To Source Closure"),
-        TEXT("Runs the packaged runtime apply, patch pull, local stage, patch-vs-source audit, promote preview/apply, and source restore closure without requiring PIE."),
-        { RI_VerificationProfileId_RemotePackagedToSourceClosure },
-        {},
-        TEXT("Phase3"),
-        false,
-        false,
-        true,
-        true,
-        { TEXT("remote"), TEXT("packaged"), TEXT("source"), TEXT("closure"), TEXT("loopback") });
-
-    AddWorkflow(
-        RI_WorkflowId_FabScreenshotFoundation,
-        TEXT("Fab Screenshot Foundation"),
-        TEXT("Applies the clean RuntimeInspector presentation state used for Fab screenshots and first-screen capture."),
-        { RI_VerificationProfileId_FabScreenshotFoundation },
-        {},
-        TEXT("Presentation"),
-        true,
-        false,
-        false,
-        false,
-        { TEXT("fab"), TEXT("presentation"), TEXT("screenshot"), TEXT("changes"), TEXT("softcontrast") });
-
-    AddWorkflow(
-        RI_WorkflowId_MainlineRemoteSessionCompareFoundation,
-        TEXT("Mainline Remote Session Compare"),
-        TEXT("Verifies editor and PIE sessions can both be discovered and compared against the same actor query through the remote-runtime API."),
-        { RI_VerificationProfileId_RemoteSessionCompare },
-        {},
-        TEXT("Phase3"),
-        true,
-        false,
-        false,
-        false,
-        { TEXT("remote"), TEXT("session"), TEXT("compare"), TEXT("target") });
-
-    AddWorkflow(
-        RI_WorkflowId_MainlineRemoteSessionTargetSetCompareFoundation,
-        TEXT("Mainline Remote Session Target Set Compare"),
-        TEXT("Verifies editor and PIE sessions can compare filtered target inventories and report shared, missing, and mismatched targets through the remote-runtime API."),
-        { RI_VerificationProfileId_RemoteSessionTargetSetCompare },
-        {},
-        TEXT("Phase3"),
-        true,
-        false,
-        false,
-        false,
-        { TEXT("remote"), TEXT("session"), TEXT("target-set"), TEXT("compare"), TEXT("supports-session-override"), TEXT("supports-name-filter"), TEXT("supports-class-filter") });
-
-    AddWorkflow(
-        RI_WorkflowId_MainlineRemoteSessionCompareUIFoundation,
-        TEXT("Mainline Remote Session Compare UI"),
-        TEXT("Builds remote session target-set compare output and proves the File page renders session summary, preview, and compare rows from the shared cache."),
-        { RI_VerificationProfileId_FileRemoteSessionCompare },
-        {},
-        TEXT("Phase3"),
-        true,
-        false,
-        false,
-        false,
-        { TEXT("remote"), TEXT("session"), TEXT("target-set"), TEXT("file"), TEXT("supports-session-override"), TEXT("supports-name-filter"), TEXT("supports-class-filter") });
-
-    AddWorkflow(
-        RI_WorkflowId_MainlineRemoteSessionContextUIFoundation,
-        TEXT("Mainline Remote Session Context UI"),
-        TEXT("Verifies File and Test pages consume the same shared remote session, target query, and workflow context from the subsystem authority state."),
-        { RI_VerificationProfileId_RemoteSessionContextUI },
-        {},
-        TEXT("Phase3"),
-        true,
-        false,
-        false,
-        false,
-        { TEXT("remote"), TEXT("session"), TEXT("context"), TEXT("ui"), TEXT("file"), TEXT("test"), TEXT("packaged") });
-
-    AddWorkflow(
-        RI_WorkflowId_MainlineRemoteSessionCompareScopedUIFoundation,
-        TEXT("Mainline Remote Session Compare Scoped UI"),
-        TEXT("Runs the File-page remote session compare closure with explicit session pair and BP_TestVarsActor filters so orchestration can prove scoped compare output."),
-        { RI_VerificationProfileId_FileRemoteSessionCompare, RI_VerificationProfileId_RemoteSessionTargetSetCompare },
-        {},
-        TEXT("Phase3"),
-        true,
-        false,
-        false,
-        false,
-        { TEXT("remote"), TEXT("session"), TEXT("target-set"), TEXT("file"), TEXT("scoped"), TEXT("filter"), TEXT("bp-testvarsactor"), TEXT("supports-session-override"), TEXT("supports-name-filter"), TEXT("supports-class-filter") });
-
-    AddWorkflow(
-        RI_WorkflowId_MainlineRemoteSessionCompareMatrixFoundation,
-        TEXT("Mainline Remote Session Compare Matrix"),
-        TEXT("Runs a curated white-listed matrix of remote session target-set compare requests so automation can validate full-inventory and BP_TestVarsActor-scoped session pairs as one remote closure."),
-        { RI_VerificationProfileId_RemoteSessionTargetSetCompareMatrix },
-        {},
-        TEXT("Phase3"),
-        true,
-        false,
-        false,
-        false,
-        { TEXT("remote"), TEXT("session"), TEXT("target-set"), TEXT("matrix"), TEXT("white-listed"), TEXT("supports-batch-orchestration") });
-
-    AddWorkflow(
-        RI_WorkflowId_MainlineRemoteWorkflowMatrixFoundation,
-        TEXT("Mainline Remote Workflow Matrix"),
-        TEXT("Runs a curated white-listed matrix of remote workflows so automation can validate remote foundations, compare matrices, and actor-aware apply/file closure as one stable batch."),
-        { RI_VerificationProfileId_WorkflowMatrix },
-        {},
-        TEXT("Phase3"),
-        true,
-        false,
-        true,
-        false,
-        { TEXT("remote"), TEXT("workflow"), TEXT("matrix"), TEXT("batch"), TEXT("white-listed"), TEXT("supports-batch-orchestration") });
-
-    AddWorkflow(
-        RI_WorkflowMatrixId_RemotePackagedDefault,
-        TEXT("Mainline Remote Packaged Matrix"),
-        TEXT("Runs the curated white-listed packaged runtime batch: session foundation, patch pull, and editor-side promote closure."),
-        {},
-        {},
-        TEXT("Phase3"),
-        false,
-        false,
-        true,
-        true,
-        { TEXT("remote"), TEXT("packaged"), TEXT("matrix"), TEXT("batch"), TEXT("white-listed"), TEXT("loopback") },
-        { RI_WorkflowId_MainlineRemotePackagedFoundation, RI_WorkflowId_MainlineRemotePackagedPatchPull, RI_WorkflowId_MainlineRemotePackagedToSourceClosure });
-
-    AddWorkflow(
-        RI_WorkflowId_MainlineFullClosure,
-        TEXT("Mainline Full Closure"),
-        TEXT("Runs the curated RuntimeInspector closure suite: UI, settings, patch, compare, and promote."),
-        { RI_VerificationProfileId_ColorRuntime, RI_VerificationProfileId_RuntimeSessionRole, RI_VerificationProfileId_RuntimeRoleCompare, RI_VerificationProfileId_RemoteRuntimeFoundation, RI_VerificationProfileId_RemoteSessionCompare, RI_VerificationProfileId_RemoteSessionTargetSetCompare, RI_VerificationProfileId_RemoteSessionContextUI, RI_VerificationProfileId_SettingsPreview, RI_VerificationProfileId_SettingsHotkey, RI_VerificationProfileId_SettingsPageLayout, RI_VerificationProfileId_ThemePresetPreview, RI_VerificationProfileId_ContextStrip, RI_VerificationProfileId_PromoteConfig, RI_VerificationProfileId_PromoteBlueprintApply, RI_VerificationProfileId_PromoteMaterialApply, RI_VerificationProfileId_FileCompare, RI_VerificationProfileId_FileRoleCompare, RI_VerificationProfileId_FileRemoteSessionCompare, RI_VerificationProfileId_FilePromote, RI_VerificationProfileId_WorkflowPageView, RI_VerificationProfileId_TestPageLayout },
-        { RI_SelfTestId_FilePage, RI_SelfTestId_FileWorkflow },
-        TEXT("Mainline"),
-        true,
-        false,
-        true,
-        true,
-        { TEXT("full"), TEXT("closure"), TEXT("file"), TEXT("promote") });
+        Results.Add(MakeWorkflowDefinitionFromTableRow(Row));
+    }
 #endif
     return Results;
 }
@@ -9900,152 +13847,122 @@ bool UInspectorWorldSubsystem::RunWorkflowById(FName WorkflowId, FRIWorkflowRunR
     LastWorkflowRunResult = OutResult;
     return false;
 #else
+    const TArray<FRIWorkflowTableRow> WorkflowRows = LoadConfiguredWorkflowRows();
+    const FRIWorkflowTableRow* Row = FindConfiguredWorkflowRow(WorkflowId, WorkflowRows);
     const TArray<FRIWorkflowDefinition> Workflows = GetAvailableWorkflows();
-    TSet<FName> ActiveWorkflowIds;
-    TFunction<bool(FName, FRIWorkflowRunResult&)> ExecuteWorkflow = [&](FName InWorkflowId, FRIWorkflowRunResult& LocalResult) -> bool
+    const FRIWorkflowDefinition* Workflow = Workflows.FindByPredicate([WorkflowId](const FRIWorkflowDefinition& Candidate)
     {
-        LocalResult = FRIWorkflowRunResult();
+        return Candidate.WorkflowId == WorkflowId;
+    });
 
-        const FRIWorkflowDefinition* Workflow = Workflows.FindByPredicate([InWorkflowId](const FRIWorkflowDefinition& Candidate)
-        {
-            return Candidate.WorkflowId == InWorkflowId;
-        });
+    if (!Workflow || !Row)
+    {
+        OutResult.WorkflowId = WorkflowId;
+        OutResult.DisplayName = WorkflowId.ToString();
+        OutResult.Summary = FString::Printf(TEXT("Unknown workflow: %s"), *WorkflowId.ToString());
+        OutResult.FullReport = OutResult.Summary;
+        OutResult.bPassed = false;
+        OutResult.bBlocked = false;
+        LastWorkflowRunResult = OutResult;
+        return false;
+    }
 
-        if (!Workflow)
+    OutResult.WorkflowId = Workflow->WorkflowId;
+    OutResult.DisplayName = Workflow->DisplayName;
+    OutResult.Description = Workflow->Description;
+    OutResult.Category = Workflow->Category;
+    OutResult.Tags = Workflow->Tags;
+    OutResult.bMutatedRuntime = Workflow->bMutatesRuntime;
+    OutResult.bMutatedSource = Workflow->bMutatesSource;
+    OutResult.SelectedActorPath = SelectedActor.IsValid() ? SelectedActor->GetPathName() : FString();
+
+    const FString ExecutionKey = RI_MakeToolExecutionKey(TEXT("workflow"), WorkflowId);
+    const bool bTopLevelExecution = ActiveToolExecutionDepth == 0;
+    ++ActiveToolExecutionDepth;
+    auto FinishExecution = [this, bTopLevelExecution, &ExecutionKey]()
+    {
+        ActiveToolExecutionKeys.Remove(ExecutionKey);
+        ActiveToolExecutionDepth = FMath::Max(0, ActiveToolExecutionDepth - 1);
+        if (bTopLevelExecution)
         {
-            LocalResult.WorkflowId = InWorkflowId;
-            LocalResult.DisplayName = InWorkflowId.ToString();
-            LocalResult.Summary = FString::Printf(TEXT("Unknown workflow: %s"), *InWorkflowId.ToString());
-            LocalResult.FullReport = LocalResult.Summary;
-            return false;
+            ActiveToolExecutionKeys.Reset();
         }
-
-        LocalResult.WorkflowId = Workflow->WorkflowId;
-        LocalResult.DisplayName = Workflow->DisplayName;
-        LocalResult.Description = Workflow->Description;
-        LocalResult.Category = Workflow->Category;
-        LocalResult.Tags = Workflow->Tags;
-        LocalResult.bMutatedRuntime = Workflow->bMutatesRuntime;
-        LocalResult.bMutatedSource = Workflow->bMutatesSource;
-        LocalResult.SelectedActorPath = SelectedActor.IsValid() ? SelectedActor->GetPathName() : FString();
-
-        if (ActiveWorkflowIds.Contains(InWorkflowId))
-        {
-            LocalResult.bPassed = false;
-            LocalResult.bBlocked = true;
-            LocalResult.Summary = FString::Printf(TEXT("Blocked: recursive workflow dependency detected for %s"), *InWorkflowId.ToString());
-            LocalResult.FullReport = LocalResult.Summary;
-            return false;
-        }
-
-        if (Workflow->bRequiresPIE && !IsSelfTestPIEAvailable())
-        {
-            LocalResult.bPassed = false;
-            LocalResult.bBlocked = true;
-            LocalResult.Summary = TEXT("Blocked: PIE with a local player controller is required.");
-            LocalResult.FullReport = LocalResult.Summary;
-            return false;
-        }
-
-        if (Workflow->bRequiresSelectedActor && !SelectedActor.IsValid())
-        {
-            LocalResult.bPassed = false;
-            LocalResult.bBlocked = true;
-            LocalResult.Summary = TEXT("Blocked: selected actor is required.");
-            LocalResult.FullReport = LocalResult.Summary;
-            return false;
-        }
-
-        const FRIRuntimeSessionTargetSetCompareRequest PreviousRemoteSessionCompareRequest = ActiveRemoteSessionTargetSetCompareRequest;
-        if (InWorkflowId == RI_WorkflowId_MainlineRemoteSessionCompareScopedUIFoundation)
-        {
-            const bool bHasExplicitOverride =
-                !PreviousRemoteSessionCompareRequest.LeftSessionId.TrimStartAndEnd().IsEmpty()
-                || !PreviousRemoteSessionCompareRequest.RightSessionId.TrimStartAndEnd().IsEmpty()
-                || !PreviousRemoteSessionCompareRequest.NameFilter.TrimStartAndEnd().IsEmpty()
-                || !PreviousRemoteSessionCompareRequest.ClassFilter.TrimStartAndEnd().IsEmpty();
-            if (!bHasExplicitOverride)
-            {
-                FRIRuntimeSessionTargetSetCompareRequest ScopedRequest;
-                ScopedRequest.LeftSessionId = TEXT("local_editor_current");
-                ScopedRequest.RightSessionId = TEXT("local_pie_current");
-                ScopedRequest.NameFilter = TEXT("BP_TestVarsActor");
-                ScopedRequest.ClassFilter = TEXT("BP_TestVarsActor");
-                ActiveRemoteSessionTargetSetCompareRequest = ScopedRequest;
-            }
-        }
-
-        ActiveWorkflowIds.Add(InWorkflowId);
-
-        TArray<FString> ReportSections;
-        bool bAnyFailed = false;
-        bool bAnyBlocked = false;
-
-        for (const FName& ChildWorkflowId : Workflow->ChildWorkflowIds)
-        {
-            FRIWorkflowRunResult ChildResult;
-            ExecuteWorkflow(ChildWorkflowId, ChildResult);
-
-            LocalResult.ExecutedChildWorkflowIds.Add(ChildWorkflowId);
-            LocalResult.ExecutedChildWorkflowSummaries.Add(ChildResult.Summary);
-            LocalResult.bMutatedRuntime = LocalResult.bMutatedRuntime || ChildResult.bMutatedRuntime;
-            LocalResult.bMutatedSource = LocalResult.bMutatedSource || ChildResult.bMutatedSource;
-
-            const bool bStepPassed = ChildResult.bPassed && !ChildResult.bBlocked;
-            LocalResult.PassedStepCount += bStepPassed ? 1 : 0;
-            LocalResult.FailedStepCount += bStepPassed ? 0 : 1;
-            bAnyBlocked = bAnyBlocked || ChildResult.bBlocked;
-            bAnyFailed = bAnyFailed || !bStepPassed;
-            ReportSections.Add(FString::Printf(TEXT("[Workflow] %s :: %s"), *ChildResult.DisplayName, *ChildResult.FullReport));
-        }
-
-        for (const FName& ProfileId : Workflow->VerificationProfileIds)
-        {
-            FRIVerificationRunResult VerificationResult;
-            RunVerificationProfile(ProfileId, VerificationResult);
-            LocalResult.VerificationResults.Add(VerificationResult);
-
-            const bool bStepPassed = VerificationResult.bPassed && !VerificationResult.bBlocked;
-            LocalResult.PassedStepCount += bStepPassed ? 1 : 0;
-            LocalResult.FailedStepCount += bStepPassed ? 0 : 1;
-            bAnyBlocked = bAnyBlocked || VerificationResult.bBlocked;
-            bAnyFailed = bAnyFailed || !bStepPassed;
-            ReportSections.Add(FString::Printf(TEXT("[Profile] %s :: %s"), *VerificationResult.DisplayName, *VerificationResult.FullReport));
-        }
-
-        for (const FName& TestId : Workflow->SelfTestIds)
-        {
-            FRISelfTestResult TestResult;
-            RunSelfTestById(TestId, TestResult);
-            LocalResult.SelfTestResults.Add(TestResult);
-
-            const bool bBlocked = TestResult.FullReport.StartsWith(TEXT("Blocked:"), ESearchCase::CaseSensitive)
-                || TestResult.Summary.StartsWith(TEXT("Blocked:"), ESearchCase::CaseSensitive);
-            const bool bStepPassed = TestResult.bPassed && !bBlocked;
-            LocalResult.PassedStepCount += bStepPassed ? 1 : 0;
-            LocalResult.FailedStepCount += bStepPassed ? 0 : 1;
-            bAnyBlocked = bAnyBlocked || bBlocked;
-            bAnyFailed = bAnyFailed || !bStepPassed;
-            ReportSections.Add(FString::Printf(TEXT("[SelfTest] %s :: %s"), *TestResult.DisplayName, *TestResult.FullReport));
-        }
-
-        ActiveWorkflowIds.Remove(InWorkflowId);
-        ActiveRemoteSessionTargetSetCompareRequest = PreviousRemoteSessionCompareRequest;
-
-        const int32 TotalStepCount = LocalResult.ExecutedChildWorkflowIds.Num() + LocalResult.VerificationResults.Num() + LocalResult.SelfTestResults.Num();
-        LocalResult.bBlocked = bAnyBlocked;
-        LocalResult.bPassed = !bAnyBlocked && !bAnyFailed && TotalStepCount > 0;
-        LocalResult.Summary = FString::Printf(
-            TEXT("%s=%s | Passed=%d Failed=%d"),
-            *LocalResult.WorkflowId.ToString(),
-            LocalResult.bBlocked ? TEXT("BLOCKED") : (LocalResult.bPassed ? TEXT("PASS") : TEXT("FAIL")),
-            LocalResult.PassedStepCount,
-            LocalResult.FailedStepCount);
-        LocalResult.FullReport = FString::Join(ReportSections, TEXT("\n"));
-        return LocalResult.bPassed;
     };
 
-    ExecuteWorkflow(WorkflowId, OutResult);
+    if (ActiveToolExecutionKeys.Contains(ExecutionKey))
+    {
+        OutResult.bPassed = false;
+        OutResult.bBlocked = true;
+        OutResult.Summary = FString::Printf(TEXT("Blocked: recursive workflow dependency detected for %s"), *WorkflowId.ToString());
+        OutResult.FullReport = OutResult.Summary;
+        LastWorkflowRunResult = OutResult;
+        FinishExecution();
+        return false;
+    }
+
+    if (Workflow->bRequiresPIE && !IsSelfTestPIEAvailable())
+    {
+        OutResult.bPassed = false;
+        OutResult.bBlocked = true;
+        OutResult.Summary = TEXT("Blocked: PIE with a local player controller is required.");
+        OutResult.FullReport = OutResult.Summary;
+        LastWorkflowRunResult = OutResult;
+        FinishExecution();
+        return false;
+    }
+
+    if (Workflow->bRequiresSelectedActor && !SelectedActor.IsValid())
+    {
+        OutResult.bPassed = false;
+        OutResult.bBlocked = true;
+        OutResult.Summary = TEXT("Blocked: selected actor is required.");
+        OutResult.FullReport = OutResult.Summary;
+        LastWorkflowRunResult = OutResult;
+        FinishExecution();
+        return false;
+    }
+
+    ActiveToolExecutionKeys.Add(ExecutionKey);
+
+    const TArray<FRISelfTestTableRow> SelfTestRows = LoadConfiguredSelfTestRows();
+    const TWeakObjectPtr<AActor> PreviousSelectedActor = SelectedActor;
+    const FRIRuntimeSessionTargetSetCompareRequest PreviousRemoteCompareRequest = ActiveRemoteSessionTargetSetCompareRequest;
+
+    TArray<FString> ReportSections;
+    bool bBlocked = false;
+    OutResult.bPassed = ExecuteToolActionSequence(
+        Row->ActionSequence,
+        SelfTestRows,
+        WorkflowRows,
+        OutResult.PassedStepCount,
+        OutResult.FailedStepCount,
+        bBlocked,
+        ReportSections,
+        nullptr,
+        &OutResult.VerificationResults,
+        &OutResult.SelfTestResults,
+        &OutResult.ExecutedChildWorkflowIds,
+        &OutResult.ExecutedChildWorkflowSummaries);
+
+    if (SelectedActor.Get() != PreviousSelectedActor.Get())
+    {
+        SetSelectedActor(PreviousSelectedActor.Get());
+    }
+    SetActiveRemoteSessionTargetSetCompareRequest(PreviousRemoteCompareRequest);
+
+    OutResult.bBlocked = bBlocked;
+    OutResult.bPassed = !OutResult.bBlocked && OutResult.bPassed;
+    OutResult.Summary = FString::Printf(
+        TEXT("%s=%s | Passed=%d Failed=%d"),
+        *OutResult.WorkflowId.ToString(),
+        OutResult.bBlocked ? TEXT("BLOCKED") : (OutResult.bPassed ? TEXT("PASS") : TEXT("FAIL")),
+        OutResult.PassedStepCount,
+        OutResult.FailedStepCount);
+    OutResult.FullReport = ReportSections.Num() > 0
+        ? FString::Join(ReportSections, TEXT("\n"))
+        : OutResult.Summary;
+
+    FinishExecution();
     LastWorkflowRunResult = OutResult;
     return OutResult.bPassed;
 #endif
@@ -11675,9 +15592,11 @@ bool UInspectorWorldSubsystem::RunSettingsPageLayoutSelfTest(FString& OutReport)
         return false;
     }
 
+    const FRIEditableSettings OriginalSettings = GetEditableSettings();
+    const ERuntimeInspectorThemePreset OriginalThemePreset = GetThemePreset();
+
     Close();
-    Open();
-    ShowSettingsPage();
+    OpenToPage(ERIVisiblePage::Settings);
 
     UPanelWidget* HostPanel = FindSettingsHostPanel();
     UInspectorSettingsPageWidget* Page = SettingsPageWidget.Get();
@@ -11717,27 +15636,51 @@ bool UInspectorWorldSubsystem::RunSettingsPageLayoutSelfTest(FString& OutReport)
     }
 
     const bool bScrollOk = Page && Page->HasPageScrollRoot();
+    const bool bTouchScrollOk = Page && Page->HasTouchScrollSupportForAutomation();
     const bool bFooterOk = Page && Page->HasFooterControls();
     const bool bStatusOk = Page && Page->HasStatusSection();
     const bool bInteractionOk = Page && Page->HasInteractionSection();
     const FString SessionText = Page ? Page->GetSessionValueText() : FString();
     const FString ActorText = Page ? Page->GetSelectedActorValueText() : FString();
     const int32 ActiveIndex = Switcher ? Switcher->GetActiveWidgetIndex() : INDEX_NONE;
+    const FRIEditableSettings AfterPageSettings = GetEditableSettings();
+    const ERuntimeInspectorThemePreset AfterPageThemePreset = GetThemePreset();
+    const bool bSettingsUnchanged = RI_AreEditableSettingsEqual(OriginalSettings, AfterPageSettings);
+    const bool bThemeUnchanged = OriginalThemePreset == AfterPageThemePreset;
+    const bool bDirtyClear = !HasUnsavedSettingsChanges();
     const bool bPassed = HostPanel && Page && bHostContainsPage && Switcher && ActiveIndex == SettingsPageIndex
         && VisibleLegacySiblingCount == 0
-        && bScrollOk && bFooterOk && bStatusOk && bInteractionOk;
+        && bScrollOk && bTouchScrollOk && bFooterOk && bStatusOk && bInteractionOk
+        && bSettingsUnchanged && bThemeUnchanged && bDirtyClear;
+
+    if (!bSettingsUnchanged || !bThemeUnchanged || !bDirtyClear)
+    {
+        ReloadSettingsFromConfig();
+        if (Page)
+        {
+            Page->RefreshFromSubsystem();
+        }
+    }
 
     OutReport = FString::Printf(
-        TEXT("SettingsPageLayoutSelfTest=%s | ActiveIndex=%d Host=%s HostHasPage=%d VisibleLegacy=%d Scroll=%d Footer=%d Status=%d Interaction=%d Session=%s Actor=%s LegacyNames=%s"),
+        TEXT("SettingsPageLayoutSelfTest=%s | ActiveIndex=%d Host=%s HostHasPage=%d VisibleLegacy=%d Scroll=%d Touch=%d Footer=%d Status=%d Interaction=%d SettingsUnchanged=%d ThemeUnchanged=%d DirtyClear=%d OutlineBefore=%.3f OutlineAfter=%.3f ThemeBefore=%d ThemeAfter=%d Session=%s Actor=%s LegacyNames=%s"),
         bPassed ? TEXT("PASS") : TEXT("FAIL"),
         ActiveIndex,
         HostPanel ? *HostPanel->GetName() : TEXT("None"),
         bHostContainsPage ? 1 : 0,
         VisibleLegacySiblingCount,
         bScrollOk ? 1 : 0,
+        bTouchScrollOk ? 1 : 0,
         bFooterOk ? 1 : 0,
         bStatusOk ? 1 : 0,
         bInteractionOk ? 1 : 0,
+        bSettingsUnchanged ? 1 : 0,
+        bThemeUnchanged ? 1 : 0,
+        bDirtyClear ? 1 : 0,
+        OriginalSettings.OutlinePPWeight,
+        AfterPageSettings.OutlinePPWeight,
+        static_cast<int32>(OriginalThemePreset),
+        static_cast<int32>(AfterPageThemePreset),
         SessionText.IsEmpty() ? TEXT("None") : *SessionText,
         ActorText.IsEmpty() ? TEXT("None") : *ActorText,
         VisibleLegacySiblingNames.IsEmpty() ? TEXT("None") : *VisibleLegacySiblingNames);
@@ -11799,8 +15742,7 @@ bool UInspectorWorldSubsystem::RunThemePresetPreviewSelfTest(FString& OutReport)
     };
 
     Close();
-    Open();
-    ShowSettingsPage();
+    OpenToPage(ERIVisiblePage::Settings);
 
     FString PreviewError;
     if (!PreviewApplyThemePreset(AlternatePreset, PreviewError))
@@ -12381,9 +16323,26 @@ bool UInspectorWorldSubsystem::SetVisiblePageByName(const FString& InPageName, F
     OutError = TEXT("RuntimeInspector disabled");
     return false;
 #else
+    const FString PageName = InPageName.TrimStartAndEnd().ToLower();
     if (!bOpen)
     {
-        Open();
+        if (PageName.IsEmpty() || PageName == TEXT("changes") || PageName == TEXT("file") || PageName == TEXT("snapshot"))
+        {
+            OpenToPage(ERIVisiblePage::Changes);
+        }
+        else if (PageName == TEXT("settings"))
+        {
+            OpenToPage(ERIVisiblePage::Settings);
+        }
+        else if (PageName == TEXT("tools") || PageName == TEXT("diagnostics") || PageName == TEXT("test"))
+        {
+            OpenToPage(ERIVisiblePage::Tools);
+        }
+        else
+        {
+            OpenToPage(ERIVisiblePage::Actor);
+        }
+
         if (!bOpen)
         {
             OutError = TEXT("RuntimeInspector failed to open");
@@ -12391,7 +16350,6 @@ bool UInspectorWorldSubsystem::SetVisiblePageByName(const FString& InPageName, F
         }
     }
 
-    const FString PageName = InPageName.TrimStartAndEnd().ToLower();
     if (PageName.IsEmpty() || PageName == TEXT("changes") || PageName == TEXT("file") || PageName == TEXT("snapshot"))
     {
         ShowFilePage();
@@ -12531,9 +16489,15 @@ bool UInspectorWorldSubsystem::RunFabScreenshotPageSelfTest(const FString& InPag
     const bool bPageOk = bSwitcherOk && ActiveIndex == ExpectedIndex;
     const bool bVisiblePageOk = GetVisiblePage() == ExpectedPage;
     const bool bStagedClean = !HasStagedPatch();
-    const bool bActorCellHiddenOk = ExpectedPage != ERIVisiblePage::Actor
-        || !SharedContextActorCell.IsValid()
-        || SharedContextActorCell->GetVisibility() != ESlateVisibility::Visible;
+    UBorder* ActorStripBorder = PanelWidget.IsValid() && PanelWidget->WidgetTree
+        ? Cast<UBorder>(PanelWidget->WidgetTree->FindWidget(TEXT("RI_ActorTopContextStrip")))
+        : nullptr;
+    const bool bContextStripVisibleOk = ExpectedPage != ERIVisiblePage::Actor
+        ? (!ActorStripBorder || ActorStripBorder->GetVisibility() != ESlateVisibility::Visible)
+        : (ActorStripBorder && ActorStripBorder->GetVisibility() == ESlateVisibility::Visible);
+    const bool bActorCellVisibilityOk = ExpectedPage != ERIVisiblePage::Actor
+        ? (!ActorTopContextActorCell.IsValid() || ActorTopContextActorCell->GetVisibility() != ESlateVisibility::Visible)
+        : (ActorTopContextActorCell.IsValid() && ActorTopContextActorCell->GetVisibility() == ESlateVisibility::Visible);
     const TCHAR* VisiblePageLabel = RI_GetVisiblePageDisplayLabel(bSwitcherOk ? GetVisiblePage() : ERIVisiblePage::Actor);
     int32 ActiveTabCount = 0;
     bool bTabWidthOk = true;
@@ -12700,10 +16664,10 @@ bool UInspectorWorldSubsystem::RunFabScreenshotPageSelfTest(const FString& InPag
         }
     }
 
-    const bool bPassed = bThemeOk && bSwitcherOk && bPageOk && bVisiblePageOk && bStagedClean && bActorCellHiddenOk
+    const bool bPassed = bThemeOk && bSwitcherOk && bPageOk && bVisiblePageOk && bStagedClean && bContextStripVisibleOk && bActorCellVisibilityOk
         && ActiveTabCount == 1 && bTabWidthOk;
     OutReport = FString::Printf(
-        TEXT("%s=%s | Requested=%s | Visible=%s | Switcher=%d | ActiveIndex=%d | ExpectedIndex=%d | Theme=%s | StagedClean=%d | ActorCellHidden=%d | ActiveTabs=%d | TabWidths=%s WidthsOk=%d | GroupHost=%s | Sidebar=%d/%d | CustomGroups=%s/%d@%s | GroupList=%s/%d/%d@%s | TreeList=%s/%d/%d@%s | PinList=%s/%d/%d@%s | Summary=%s"),
+        TEXT("%s=%s | Requested=%s | Visible=%s | Switcher=%d | ActiveIndex=%d | ExpectedIndex=%d | Theme=%s | StagedClean=%d | ContextStrip=%d ActorCell=%d | ActiveTabs=%d | TabWidths=%s WidthsOk=%d | GroupHost=%s | Sidebar=%d/%d | CustomGroups=%s/%d@%s | GroupList=%s/%d/%d@%s | TreeList=%s/%d/%d@%s | PinList=%s/%d/%d@%s | Summary=%s"),
         *InTestLabel,
         bPassed ? TEXT("PASS") : TEXT("FAIL"),
         *InPageName,
@@ -12713,7 +16677,8 @@ bool UInspectorWorldSubsystem::RunFabScreenshotPageSelfTest(const FString& InPag
         ExpectedIndex,
         bThemeOk ? TEXT("SoftContrast") : TEXT("mismatch"),
         bStagedClean ? 1 : 0,
-        bActorCellHiddenOk ? 1 : 0,
+        bContextStripVisibleOk ? 1 : 0,
+        bActorCellVisibilityOk ? 1 : 0,
         ActiveTabCount,
         TabWidthSummary.IsEmpty() ? TEXT("None") : *TabWidthSummary,
         bTabWidthOk ? 1 : 0,
@@ -13588,6 +17553,10 @@ bool UInspectorWorldSubsystem::RunPromoteMaterialApplySelfTest(FString& OutRepor
     OutReport = TEXT("RuntimeInspector disabled");
     return false;
 #else
+#if !WITH_EDITOR
+    OutReport = TEXT("PromoteMaterialApplySelfTest=BLOCKED | WITH_EDITOR is required");
+    return false;
+#else
     OutReport.Reset();
 
     UWorld* World = GetWorld();
@@ -13598,70 +17567,11 @@ bool UInspectorWorldSubsystem::RunPromoteMaterialApplySelfTest(FString& OutRepor
     }
 
     UMaterialInstanceConstant* MIC = RI_LoadPreferredSelfTestMIC();
+    UMaterial* BaseMaterial = RI_LoadPreferredSelfTestMaterial();
     UStaticMesh* MeshAsset = RI_LoadPreferredSelfTestMesh();
-    if (!MIC || !MeshAsset)
+    if (!MIC || !BaseMaterial || !MeshAsset)
     {
-        OutReport = TEXT("PromoteMaterialApplySelfTest=FAIL | Test MIC or mesh asset unavailable");
-        return false;
-    }
-
-    TArray<FMaterialParameterInfo> VectorInfos;
-    TArray<FGuid> VectorIds;
-    MIC->GetAllVectorParameterInfo(VectorInfos, VectorIds);
-    if (VectorInfos.Num() <= 0)
-    {
-        OutReport = TEXT("PromoteMaterialApplySelfTest=FAIL | No writable vector parameter found on test MIC");
-        return false;
-    }
-
-    const FName PreferredNames[] = { TEXT("Color"), TEXT("EmissiveColor"), TEXT("BaseColor") };
-    FName ParamName = VectorInfos[0].Name;
-    for (const FName PreferredName : PreferredNames)
-    {
-        const bool bFound = VectorInfos.ContainsByPredicate([PreferredName](const FMaterialParameterInfo& Info)
-        {
-            return Info.Name == PreferredName;
-        });
-        if (bFound)
-        {
-            ParamName = PreferredName;
-            break;
-        }
-    }
-
-    const FMaterialParameterInfo ParamInfo(ParamName);
-    FLinearColor OriginalSourceColor = FLinearColor::Black;
-    if (!MIC->GetVectorParameterValue(ParamInfo, OriginalSourceColor))
-    {
-        OutReport = TEXT("PromoteMaterialApplySelfTest=FAIL | Failed to read source MIC vector parameter");
-        return false;
-    }
-
-    const FLinearColor TargetColor = RI_MakeDistinctSelfTestColor(OriginalSourceColor);
-    const FString OriginalSourceText = RI_FormatLinearColorText(OriginalSourceColor);
-    const FString TargetText = RI_FormatLinearColorText(TargetColor);
-
-    FActorSpawnParameters SpawnParams;
-    SpawnParams.Name = MakeUniqueObjectName(World, AStaticMeshActor::StaticClass(), TEXT("RI_PromoteMaterialSelfTest"));
-    SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-    AStaticMeshActor* TestActor = World->SpawnActor<AStaticMeshActor>(AStaticMeshActor::StaticClass(), FTransform::Identity, SpawnParams);
-    if (!TestActor || !TestActor->GetStaticMeshComponent())
-    {
-        if (TestActor)
-        {
-            TestActor->Destroy();
-        }
-        OutReport = TEXT("PromoteMaterialApplySelfTest=FAIL | Failed to spawn static mesh actor");
-        return false;
-    }
-
-    UStaticMeshComponent* MeshComp = TestActor->GetStaticMeshComponent();
-    MeshComp->SetStaticMesh(MeshAsset);
-    UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(MIC, MeshComp);
-    if (!MID)
-    {
-        TestActor->Destroy();
-        OutReport = TEXT("PromoteMaterialApplySelfTest=FAIL | Failed to create runtime MID");
+        OutReport = TEXT("PromoteMaterialApplySelfTest=FAIL | Test MIC, Material, or mesh asset unavailable");
         return false;
     }
 
@@ -13669,88 +17579,179 @@ bool UInspectorWorldSubsystem::RunPromoteMaterialApplySelfTest(FString& OutRepor
     auto Cleanup = [&]()
     {
         LastPromoteResult = PreviousPromoteResult;
-        if (IsValid(TestActor))
-        {
-            TestActor->Destroy();
-        }
     };
 
-    MeshComp->SetMaterial(0, MID);
-    MID->SetVectorParameterValue(ParamName, TargetColor);
-
-    FRIPatchOperation Operation;
-    Operation.Target.TargetKind = ERIPatchTargetKind::MaterialSlot;
-    Operation.Target.ActorPath = TestActor->GetPathName();
-    Operation.Target.ActorClass = TestActor->GetClass()->GetPathName();
-    Operation.Target.ActorBaseName = RI_ExtractActorBaseName(TestActor->GetName());
-    Operation.Target.ComponentPath = MeshComp->GetPathName();
-    Operation.Target.ComponentName = MeshComp->GetName();
-    Operation.Target.ComponentClass = MeshComp->GetClass()->GetPathName();
-    Operation.Target.MaterialSlotIndex = 0;
-    Operation.Target.MaterialSlotName = RI_GetMeshMaterialSlotName(MeshComp, 0);
-    Operation.Field.FieldKind = ERIPatchFieldKind::MaterialVector;
-    Operation.Field.FieldPath = ParamName.ToString();
-    Operation.Field.DisplayName = ParamName.ToString();
-    Operation.BaselineValue = OriginalSourceText;
-    Operation.PatchedValue = RI_GetMaterialParamValueText(MeshComp, 0, EInspectorChangeType::MaterialVector, ParamName);
-    Operation.SourceTag = FString::Printf(TEXT("Material:%s"), *MIC->GetPathName());
-
-    FRIPatchBundle PromoteBundle;
-    PromoteBundle.BundleId = TEXT("SelfTest_PromoteMaterialApply");
-    PromoteBundle.DisplayName = TEXT("SelfTest Promote Material Apply");
-    PromoteBundle.Operations.Add(Operation);
-
-    FRIPromotePreview Preview;
-    FString PreviewError;
-    if (!CreatePromotePreview(PromoteBundle, Preview, PreviewError))
+    auto GetPreviewCurrentSourceValue = [](const FRIPromotePreview& Preview) -> FString
     {
-        Cleanup();
-        OutReport = FString::Printf(TEXT("PromoteMaterialApplySelfTest=FAIL | Preview=%s"), *PreviewError);
-        return false;
-    }
+        return Preview.Operations.Num() > 0 ? Preview.Operations[0].CurrentSourceValue : FString();
+    };
 
-    FRIPromoteResult PromoteResult;
-    FString PromoteError;
-    const bool bPromoteOk = PromotePatchToSource(PromoteBundle, PromoteResult, PromoteError);
+    auto RunCase = [this, World, MeshAsset, &GetPreviewCurrentSourceValue](UMaterialInterface* SourceAsset, const FString& CaseLabel, FString& OutCaseReport) -> bool
+    {
+        OutCaseReport.Reset();
 
-    FLinearColor AfterPromoteColor = FLinearColor::Black;
-    const bool bReadAfterPromote = MIC->GetVectorParameterValue(ParamInfo, AfterPromoteColor);
+        FRIMaterialPromoteSelfTestParam TestParam;
+        if (!RI_SelectWritableMaterialPromoteSelfTestParam(SourceAsset, TestParam))
+        {
+            OutCaseReport = FString::Printf(TEXT("%s=no writable scalar/vector param"), *CaseLabel);
+            return false;
+        }
 
-    FRIPatchOperation RestoreOperation = Operation;
-    RestoreOperation.PatchedValue = OriginalSourceText;
-    FRIPatchBundle RestoreBundle;
-    RestoreBundle.BundleId = TEXT("SelfTest_PromoteMaterialRestore");
-    RestoreBundle.DisplayName = TEXT("SelfTest Promote Material Restore");
-    RestoreBundle.Operations.Add(RestoreOperation);
+        const FString SourceAssetPath = RI_ResolveMaterialPromoteSourceAssetPath(SourceAsset);
+        if (SourceAssetPath.IsEmpty())
+        {
+            OutCaseReport = FString::Printf(TEXT("%s=source asset path unresolved"), *CaseLabel);
+            return false;
+        }
 
-    FRIPromoteResult RestoreResult;
-    FString RestoreError;
-    const bool bRestoreOk = PromotePatchToSource(RestoreBundle, RestoreResult, RestoreError);
+        FActorSpawnParameters SpawnParams;
+        SpawnParams.Name = MakeUniqueObjectName(World, AStaticMeshActor::StaticClass(), TEXT("RI_PromoteMaterialSelfTest"));
+        SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+        AStaticMeshActor* SpawnedActor = World->SpawnActor<AStaticMeshActor>(AStaticMeshActor::StaticClass(), FTransform::Identity, SpawnParams);
+        if (!SpawnedActor || !SpawnedActor->GetStaticMeshComponent())
+        {
+            if (SpawnedActor)
+            {
+                SpawnedActor->Destroy();
+            }
 
-    FLinearColor AfterRestoreColor = FLinearColor::Black;
-    const bool bReadAfterRestore = MIC->GetVectorParameterValue(ParamInfo, AfterRestoreColor);
+            OutCaseReport = FString::Printf(TEXT("%s=spawn failed"), *CaseLabel);
+            return false;
+        }
 
-    const bool bPassed = Preview.SupportedOperationCount == 1
-        && bPromoteOk
-        && bReadAfterPromote
-        && AfterPromoteColor.Equals(TargetColor, 0.0005f)
-        && bRestoreOk
-        && bReadAfterRestore
-        && AfterRestoreColor.Equals(OriginalSourceColor, 0.0005f);
+        TWeakObjectPtr<AStaticMeshActor> TestActor = SpawnedActor;
+        auto CleanupActor = [&]()
+        {
+            if (TestActor.IsValid())
+            {
+                TestActor->Destroy();
+            }
+        };
+
+        UStaticMeshComponent* MeshComp = SpawnedActor->GetStaticMeshComponent();
+        MeshComp->SetStaticMesh(MeshAsset);
+        UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(SourceAsset, MeshComp);
+        if (!MID)
+        {
+            CleanupActor();
+            OutCaseReport = FString::Printf(TEXT("%s=runtime MID create failed"), *CaseLabel);
+            return false;
+        }
+
+        MeshComp->SetMaterial(0, MID);
+        if (TestParam.FieldKind == ERIPatchFieldKind::MaterialVector)
+        {
+            MID->SetVectorParameterValue(TestParam.ParamName, TestParam.TargetVector);
+        }
+        else
+        {
+            MID->SetScalarParameterValue(TestParam.ParamName, TestParam.TargetScalar);
+        }
+
+        FRIPatchOperation Operation;
+        Operation.Target.TargetKind = ERIPatchTargetKind::MaterialSlot;
+        Operation.Target.ActorPath = SpawnedActor->GetPathName();
+        Operation.Target.ActorClass = SpawnedActor->GetClass()->GetPathName();
+        Operation.Target.ActorBaseName = RI_ExtractActorBaseName(SpawnedActor->GetName());
+        Operation.Target.ComponentPath = MeshComp->GetPathName();
+        Operation.Target.ComponentName = MeshComp->GetName();
+        Operation.Target.ComponentClass = MeshComp->GetClass()->GetPathName();
+        Operation.Target.MaterialSlotIndex = 0;
+        Operation.Target.MaterialSlotName = RI_GetMeshMaterialSlotName(MeshComp, 0);
+        Operation.Field.FieldKind = TestParam.FieldKind;
+        Operation.Field.FieldPath = TestParam.ParamName.ToString();
+        Operation.Field.DisplayName = TestParam.ParamName.ToString();
+        Operation.BaselineValue = TestParam.OriginalSourceText;
+        Operation.PatchedValue = RI_GetMaterialParamValueText(
+            MeshComp,
+            0,
+            TestParam.FieldKind == ERIPatchFieldKind::MaterialVector ? EInspectorChangeType::MaterialVector : EInspectorChangeType::MaterialScalar,
+            TestParam.ParamName);
+        Operation.SourceTag = FString::Printf(TEXT("Material:%s"), *SourceAssetPath);
+
+        FRIPatchBundle PromoteBundle;
+        PromoteBundle.BundleId = FString::Printf(TEXT("SelfTest_PromoteMaterialApply_%s"), *CaseLabel);
+        PromoteBundle.DisplayName = FString::Printf(TEXT("SelfTest Promote Material Apply %s"), *CaseLabel);
+        PromoteBundle.Operations.Add(Operation);
+
+        FRIPromotePreview Preview;
+        FString PreviewError;
+        if (!CreatePromotePreview(PromoteBundle, Preview, PreviewError))
+        {
+            CleanupActor();
+            OutCaseReport = FString::Printf(TEXT("%s=preview failed:%s"), *CaseLabel, *PreviewError);
+            return false;
+        }
+
+        FRIPromoteResult PromoteResult;
+        FString PromoteError;
+        const bool bPromoteOk = PromotePatchToSource(PromoteBundle, PromoteResult, PromoteError);
+
+        FRIPromotePreview AfterPromotePreview;
+        FString AfterPromotePreviewError;
+        const bool bAfterPromotePreviewOk = CreatePromotePreview(PromoteBundle, AfterPromotePreview, AfterPromotePreviewError);
+        const FString AfterPromoteText = bAfterPromotePreviewOk ? GetPreviewCurrentSourceValue(AfterPromotePreview) : FString();
+
+        FRIPatchOperation RestoreOperation = Operation;
+        RestoreOperation.PatchedValue = TestParam.OriginalSourceText;
+
+        FRIPatchBundle RestoreBundle;
+        RestoreBundle.BundleId = FString::Printf(TEXT("SelfTest_PromoteMaterialRestore_%s"), *CaseLabel);
+        RestoreBundle.DisplayName = FString::Printf(TEXT("SelfTest Promote Material Restore %s"), *CaseLabel);
+        RestoreBundle.Operations.Add(RestoreOperation);
+
+        FRIPromoteResult RestoreResult;
+        FString RestoreError;
+        const bool bRestoreOk = PromotePatchToSource(RestoreBundle, RestoreResult, RestoreError);
+
+        FRIPromotePreview AfterRestorePreview;
+        FString AfterRestorePreviewError;
+        const bool bAfterRestorePreviewOk = CreatePromotePreview(RestoreBundle, AfterRestorePreview, AfterRestorePreviewError);
+        const FString AfterRestoreText = bAfterRestorePreviewOk ? GetPreviewCurrentSourceValue(AfterRestorePreview) : FString();
+
+        const FString CompareKind = TestParam.FieldKind == ERIPatchFieldKind::MaterialScalar ? TEXT("float") : TEXT("vector");
+        const bool bPassed = Preview.SupportedOperationCount == 1
+            && bPromoteOk
+            && bAfterPromotePreviewOk
+            && RI_AreSelfTestPrimitiveValuesEquivalent(AfterPromoteText, TestParam.TargetText, CompareKind)
+            && bRestoreOk
+            && bAfterRestorePreviewOk
+            && RI_AreSelfTestPrimitiveValuesEquivalent(AfterRestoreText, TestParam.OriginalSourceText, CompareKind);
+
+        OutCaseReport = FString::Printf(
+            TEXT("%s=%s Param=%s Kind=%s Preview=%s Apply=%s Restore=%s Source=%s Original=%s Runtime=%s AfterPromote=%s AfterRestore=%s"),
+            *CaseLabel,
+            bPassed ? TEXT("PASS") : TEXT("FAIL"),
+            *TestParam.ParamName.ToString(),
+            TestParam.FieldKind == ERIPatchFieldKind::MaterialVector ? TEXT("Vector") : TEXT("Scalar"),
+            Preview.SupportedOperationCount == 1 ? TEXT("ok") : (PreviewError.IsEmpty() ? TEXT("bad") : *PreviewError),
+            bPromoteOk ? TEXT("ok") : (PromoteError.IsEmpty() ? TEXT("fail") : *PromoteError),
+            bRestoreOk ? TEXT("ok") : (RestoreError.IsEmpty() ? TEXT("fail") : *RestoreError),
+            *SourceAssetPath,
+            *TestParam.OriginalSourceText,
+            *Operation.PatchedValue,
+            bAfterPromotePreviewOk ? *AfterPromoteText : (AfterPromotePreviewError.IsEmpty() ? TEXT("<preview failed>") : *AfterPromotePreviewError),
+            bAfterRestorePreviewOk ? *AfterRestoreText : (AfterRestorePreviewError.IsEmpty() ? TEXT("<preview failed>") : *AfterRestorePreviewError));
+
+        CleanupActor();
+        return bPassed;
+    };
+
+    FString MICReport;
+    FString MaterialReport;
+    const bool bMICPassed = RunCase(MIC, TEXT("MIC"), MICReport);
+    const bool bMaterialPassed = RunCase(BaseMaterial, TEXT("Material"), MaterialReport);
+    const bool bPassed = bMICPassed && bMaterialPassed;
 
     OutReport = FString::Printf(
-        TEXT("PromoteMaterialApplySelfTest=%s | Param=%s Preview=%s Apply=%s Restore=%s SourceOriginal=%s AfterPromote=%s AfterRestore=%s"),
+        TEXT("PromoteMaterialApplySelfTest=%s | %s | %s"),
         bPassed ? TEXT("PASS") : TEXT("FAIL"),
-        *ParamName.ToString(),
-        Preview.SupportedOperationCount == 1 ? TEXT("ok") : TEXT("bad"),
-        bPromoteOk ? TEXT("ok") : (PromoteError.IsEmpty() ? TEXT("fail") : *PromoteError),
-        bRestoreOk ? TEXT("ok") : (RestoreError.IsEmpty() ? TEXT("fail") : *RestoreError),
-        *OriginalSourceText,
-        bReadAfterPromote ? *RI_FormatLinearColorText(AfterPromoteColor) : TEXT("<unreadable>"),
-        bReadAfterRestore ? *RI_FormatLinearColorText(AfterRestoreColor) : TEXT("<unreadable>"));
+        *MICReport,
+        *MaterialReport);
 
     Cleanup();
     return bPassed;
+#endif
 #endif
 }
 
@@ -14000,7 +18001,7 @@ bool UInspectorWorldSubsystem::RunContextStripSelfTest(FString& OutReport)
     };
 
     Close();
-    Open();
+    OpenToPage(ERIVisiblePage::Changes);
     EnsureSharedContextStripInjected();
 
     UUserWidget* Widget = PanelWidget.Get();
@@ -14023,7 +18024,11 @@ bool UInspectorWorldSubsystem::RunContextStripSelfTest(FString& OutReport)
     const bool bStripBeforeSwitcherOk = StripIndex != INDEX_NONE && SwitcherIndex != INDEX_NONE && StripIndex < SwitcherIndex;
     const bool bStripAutomaticOk = RI_IsVerticalSlotRule(StripBorder, ESlateSizeRule::Automatic);
     const bool bSwitcherFillOk = RI_IsVerticalSlotRule(Switcher, ESlateSizeRule::Fill);
-    const bool bDefaultActorPageOk = DefaultActiveIndex == 0;
+    const bool bChangesPageOk = DefaultActiveIndex == 1 && GetVisiblePage() == ERIVisiblePage::Changes;
+    UBorder* ActorStripBorder = Widget && Widget->WidgetTree
+        ? Cast<UBorder>(Widget->WidgetTree->FindWidget(TEXT("RI_ActorTopContextStrip")))
+        : nullptr;
+    const bool bActorStripHiddenOk = !ActorStripBorder || ActorStripBorder->GetVisibility() != ESlateVisibility::Visible;
 
     SetSelectedActor(nullptr);
     StagedPatchBundle = FRIPatchBundle();
@@ -14094,7 +18099,8 @@ bool UInspectorWorldSubsystem::RunContextStripSelfTest(FString& OutReport)
         && bStripBeforeSwitcherOk
         && bStripAutomaticOk
         && bSwitcherFillOk
-        && bDefaultActorPageOk
+        && bChangesPageOk
+        && bActorStripHiddenOk
         && bEmptyActorOk
         && bEmptyClassOk
         && bEmptySourceOk
@@ -14105,7 +18111,7 @@ bool UInspectorWorldSubsystem::RunContextStripSelfTest(FString& OutReport)
         && bSelectedStagedOk;
 
     OutReport = FString::Printf(
-        TEXT("ContextStripSelfTest=%s | Host=%s Widgets=%d HostName=%d ParentVertical=%d NotOverlay=%d SharedParent=%d Order=%d StripAuto=%d SwitcherFill=%d DefaultActor=%d Empty=%d/%d/%d/%d Selected=%d/%d/%d/%d Actor=%s Class=%s Source=%s Staged=%s"),
+        TEXT("ContextStripSelfTest=%s | Host=%s Widgets=%d HostName=%d ParentVertical=%d NotOverlay=%d SharedParent=%d Order=%d StripAuto=%d SwitcherFill=%d ChangesPage=%d ActorStripHidden=%d Empty=%d/%d/%d/%d Selected=%d/%d/%d/%d Actor=%s Class=%s Source=%s Staged=%s"),
         bPassed ? TEXT("PASS") : TEXT("FAIL"),
         SharedContextStripHostPanel.IsValid() ? *SharedContextStripHostPanel->GetName() : TEXT("None"),
         bWidgetsOk ? 1 : 0,
@@ -14116,7 +18122,8 @@ bool UInspectorWorldSubsystem::RunContextStripSelfTest(FString& OutReport)
         bStripBeforeSwitcherOk ? 1 : 0,
         bStripAutomaticOk ? 1 : 0,
         bSwitcherFillOk ? 1 : 0,
-        bDefaultActorPageOk ? 1 : 0,
+        bChangesPageOk ? 1 : 0,
+        bActorStripHiddenOk ? 1 : 0,
         bEmptyActorOk ? 1 : 0,
         bEmptyClassOk ? 1 : 0,
         bEmptySourceOk ? 1 : 0,
@@ -14252,6 +18259,7 @@ bool UInspectorWorldSubsystem::RunFilePageInjectionSelfTest(FString& OutReport)
     const bool bHasSelectedActor = GetSelectedActor() != nullptr;
     const bool bHasPromoteResult = Summary.bHasLastPromoteResult || !Summary.LastPromoteSummary.TrimStartAndEnd().IsEmpty();
     const bool bScrollRootOk = Page && Page->HasPageScrollRoot();
+    const bool bTouchScrollOk = Page && Page->HasTouchScrollSupportForAutomation();
     const bool bSelectedActorOk = Page && !Page->GetSelectedActorSummaryLabel().IsEmpty() && !Page->GetSelectedActorSummaryLabel().Equals(TEXT("-"), ESearchCase::CaseSensitive);
     const bool bSelectedClassOk = Page && !Page->GetSelectedActorClassLabel().IsEmpty() && !Page->GetSelectedActorClassLabel().Equals(TEXT("-"), ESearchCase::CaseSensitive);
     const bool bSelectedSourceOk = Page && !Page->GetSelectedActorSourceLabel().IsEmpty() && !Page->GetSelectedActorSourceLabel().Equals(TEXT("-"), ESearchCase::CaseSensitive);
@@ -14311,19 +18319,22 @@ bool UInspectorWorldSubsystem::RunFilePageInjectionSelfTest(FString& OutReport)
     const int32 ActorActiveIndex = Switcher ? Switcher->GetActiveWidgetIndex() : INDEX_NONE;
     UUserWidget* Widget = PanelWidget.Get();
     UBorder* StripBorder = Widget && Widget->WidgetTree
-        ? Cast<UBorder>(Widget->WidgetTree->FindWidget(TEXT("RI_SharedContextStrip")))
+        ? Cast<UBorder>(Widget->WidgetTree->FindWidget(TEXT("RI_ActorTopContextStrip")))
         : nullptr;
-    UVerticalBox* StripHost = Widget && Widget->WidgetTree
-        ? Cast<UVerticalBox>(Widget->WidgetTree->FindWidget(TEXT("RI_SharedContextStripHost")))
-        : nullptr;
-    const bool bActorHostOk = StripHost && StripHost->GetName() == TEXT("RI_SharedContextStripHost");
+    UVerticalBox* StripHost = ActorWorkbenchSidebarHost.Get();
+    UWidget* SearchDirectChild = RI_FindDirectChildInPanel(
+        StripHost,
+        Widget && Widget->WidgetTree ? Widget->WidgetTree->FindWidget(TEXT("ETB_Search")) : nullptr);
+    const bool bActorHostOk = StripHost != nullptr;
     const bool bActorStripNotOverlay = StripBorder && StripBorder->GetParent() == StripHost && !StripHost->IsA<UOverlay>();
     const int32 StripIndex = RI_GetPanelChildIndex(StripHost, StripBorder);
-    const int32 SwitcherIndex = RI_GetPanelChildIndex(StripHost, Switcher);
-    const bool bActorOrderOk = StripIndex != INDEX_NONE && SwitcherIndex != INDEX_NONE && StripIndex < SwitcherIndex;
+    const int32 SearchIndex = (StripHost && SearchDirectChild)
+        ? RI_GetPanelChildIndex(StripHost, SearchDirectChild)
+        : INDEX_NONE;
+    const bool bActorOrderOk = StripIndex == 0 && SearchIndex != INDEX_NONE && StripIndex < SearchIndex;
     const bool bActorStripAutomaticOk = RI_IsVerticalSlotRule(StripBorder, ESlateSizeRule::Automatic);
-    const bool bActorSwitcherFillOk = RI_IsVerticalSlotRule(Switcher, ESlateSizeRule::Fill);
-    const bool bActorLayoutOk = ActorActiveIndex == 0 && bActorHostOk && bActorStripNotOverlay && bActorOrderOk && bActorStripAutomaticOk && bActorSwitcherFillOk;
+    const bool bActorBodyFillOk = ActorWorkbenchBodyHost.IsValid() && RI_IsVerticalSlotRule(ActorWorkbenchBodyHost.Get(), ESlateSizeRule::Fill);
+    const bool bActorLayoutOk = ActorActiveIndex == 0 && bActorHostOk && bActorStripNotOverlay && bActorOrderOk && bActorStripAutomaticOk && bActorBodyFillOk;
 
     const bool bInitialStageButtonsOk = CheckButtonState(Page ? Page->GetNamedButton(TEXT("BTN_FileStagePatch")) : nullptr, bHasSelectedActor, TEXT("Stage the current runtime edits as a patch."), TEXT("Select an actor first."))
         && CheckButtonState(Page ? Page->GetNamedButton(TEXT("BTN_FilePreviewPromote")) : nullptr, Summary.bHasStagedPatch, TEXT("Preview the staged patch on the source side."), TEXT("Stage runtime changes first."))
@@ -14362,7 +18373,7 @@ bool UInspectorWorldSubsystem::RunFilePageInjectionSelfTest(FString& OutReport)
         && CheckOptionalButtonState(Page ? Page->GetNamedButton(TEXT("BTN_FileBuildRemoteSessionCompare")) : nullptr, true, TEXT("Build a remote session compare report."), TEXT(""));
 
     const bool bPassed = HostPanel && Page && bHostContainsPage && VisibleLegacySiblingCount == 0
-        && bScrollRootOk && Switcher && ActiveIndex == 1 && bSummaryOk
+        && bScrollRootOk && bTouchScrollOk && Switcher && ActiveIndex == 1 && bSummaryOk
         && bSelectedActorOk && bSelectedClassOk && bSelectedSourceOk
         && bNextStepOk && bActionGuideOk
         && bRemoteSectionHidden
@@ -14374,7 +18385,7 @@ bool UInspectorWorldSubsystem::RunFilePageInjectionSelfTest(FString& OutReport)
     const bool bFinalPassed = bPassed && bInitialStageButtonsOk && bStagedButtonsOk && bFinalSummaryOk;
 
     OutReport = FString::Printf(
-        TEXT("FilePageInjectionSelfTest=%s | ActiveIndex=%d DefaultActor=%d Host=%s HostHasPage=%d VisibleLegacy=%d ScrollRoot=%d SwitcherFill=%d Summary=%s Actor=%s Class=%s Source=%s Next=%s Guide=%s Remote=%s Diagnostics=%s EmbeddedSettings=%s ActorLayout=%d ActorHost=%d ActorOrder=%d ActorStripAuto=%d ActorSwitcherFill=%d Buttons=%d/%d StageBtn=%s PreviewBtn=%s ApplyBtn=%s ClearBtn=%s ExportBtn=%s SaveBtn=%s LatestPresetBtn=%s BaselineAuditBtn=%s AuditBtn=%s PatchVsSourceBtn=%s AppliedAuditBtn=%s RoleCompareBtn=%s RemoteSessionCompareBtn=%s Snapshots=%d Patches=%d Presets=%d Audits=%d Staged=%s Promote=%s LegacyNames=%s"),
+        TEXT("FilePageInjectionSelfTest=%s | ActiveIndex=%d DefaultActor=%d Host=%s HostHasPage=%d VisibleLegacy=%d ScrollRoot=%d Touch=%d SwitcherFill=%d Summary=%s Actor=%s Class=%s Source=%s Next=%s Guide=%s Remote=%s Diagnostics=%s EmbeddedSettings=%s ActorLayout=%d ActorHost=%d ActorOrder=%d ActorStripAuto=%d ActorBodyFill=%d Buttons=%d/%d StageBtn=%s PreviewBtn=%s ApplyBtn=%s ClearBtn=%s ExportBtn=%s SaveBtn=%s LatestPresetBtn=%s BaselineAuditBtn=%s AuditBtn=%s PatchVsSourceBtn=%s AppliedAuditBtn=%s RoleCompareBtn=%s RemoteSessionCompareBtn=%s Snapshots=%d Patches=%d Presets=%d Audits=%d Staged=%s Promote=%s LegacyNames=%s"),
         bFinalPassed ? TEXT("PASS") : TEXT("FAIL"),
         ActiveIndex,
         bDefaultActorPageOk ? 1 : 0,
@@ -14382,6 +18393,7 @@ bool UInspectorWorldSubsystem::RunFilePageInjectionSelfTest(FString& OutReport)
         bHostContainsPage ? 1 : 0,
         VisibleLegacySiblingCount,
         bScrollRootOk ? 1 : 0,
+        bTouchScrollOk ? 1 : 0,
         bFileSwitcherFillOk ? 1 : 0,
         bSummaryOk ? TEXT("ok") : *SummaryError,
         bSelectedActorOk ? TEXT("ok") : *(Page ? Page->GetSelectedActorSummaryLabel() : FString(TEXT("None"))),
@@ -14396,7 +18408,7 @@ bool UInspectorWorldSubsystem::RunFilePageInjectionSelfTest(FString& OutReport)
         bActorHostOk ? 1 : 0,
         bActorOrderOk ? 1 : 0,
         bActorStripAutomaticOk ? 1 : 0,
-        bActorSwitcherFillOk ? 1 : 0,
+        bActorBodyFillOk ? 1 : 0,
         bInitialStageButtonsOk ? 1 : 0,
         bStagedButtonsOk ? 1 : 0,
         Page ? *DescribeButtonState(Page->GetNamedButton(TEXT("BTN_FileStagePatch"))) : TEXT("null"),
@@ -14450,8 +18462,7 @@ bool UInspectorWorldSubsystem::RunWorkflowPageViewSelfTest(FString& OutReport)
     }
 
     Close();
-    Open();
-    ShowTestPage();
+    OpenToPage(ERIVisiblePage::Tools);
 
     UPanelWidget* HostPanel = FindTestHostPanel();
     UInspectorTestPageWidget* Page = TestPageWidget.Get();
@@ -14489,6 +18500,7 @@ bool UInspectorWorldSubsystem::RunWorkflowPageViewSelfTest(FString& OutReport)
     const int32 RenderedCount = Page ? Page->GetRenderedWorkflowRowCount() : 0;
     const FString SelectedWorkflowLabel = Page ? Page->GetSelectedWorkflowLabel() : FString();
     const bool bPageScrollOk = Page && Page->HasPageScrollRoot();
+    const bool bTouchScrollOk = Page && Page->HasTouchScrollSupportForAutomation();
     const bool bSelectionRowOk = Page && Page->HasWorkflowSelectionRow();
     const bool bRemoteSectionOk = Page && Page->HasRemoteSessionSection();
     const bool bWorkflowSectionOk = Page && Page->HasAvailableWorkflowSection();
@@ -14506,19 +18518,20 @@ bool UInspectorWorldSubsystem::RunWorkflowPageViewSelfTest(FString& OutReport)
     const int32 ActiveIndex = Switcher ? Switcher->GetActiveWidgetIndex() : INDEX_NONE;
     const bool bPassed = HostPanel && Page && bHostContainsPage && Switcher && ActiveIndex == TestPageIndex
         && VisibleLegacySiblingCount == 0
-        && bPageScrollOk && bSelectionRowOk && bRemoteSectionOk && bWorkflowSectionOk
+        && bPageScrollOk && bTouchScrollOk && bSelectionRowOk && bRemoteSectionOk && bWorkflowSectionOk
         && bTestsSectionOk && bReportSectionOk && bDiagnosticsSectionOk && bActivityLogSectionOk
         && bTestsCollapsedOk && bRemoteCollapsedOk && bDiagnosticsCollapsedOk && bActivityLogCollapsedOk
         && bNestedWorkflowRowOk && bRenderedCountOk && bSelectedWorkflowOk;
 
     OutReport = FString::Printf(
-        TEXT("WorkflowPageViewSelfTest=%s | ActiveIndex=%d Host=%s HostHasPage=%d VisibleLegacy=%d Scroll=%d SelectionRow=%d Remote=%d Diagnostics=%d Activity=%d Workflows=%d Tests=%d Report=%d Collapsed=%d/%d/%d/%d Rendered=%d Expected=%d EndToEndRow=%d Selected=%s LegacyNames=%s"),
+        TEXT("WorkflowPageViewSelfTest=%s | ActiveIndex=%d Host=%s HostHasPage=%d VisibleLegacy=%d Scroll=%d Touch=%d SelectionRow=%d Remote=%d Diagnostics=%d Activity=%d Workflows=%d Tests=%d Report=%d Collapsed=%d/%d/%d/%d Rendered=%d Expected=%d EndToEndRow=%d Selected=%s LegacyNames=%s"),
         bPassed ? TEXT("PASS") : TEXT("FAIL"),
         ActiveIndex,
         HostPanel ? *HostPanel->GetName() : TEXT("None"),
         bHostContainsPage ? 1 : 0,
         VisibleLegacySiblingCount,
         bPageScrollOk ? 1 : 0,
+        bTouchScrollOk ? 1 : 0,
         bSelectionRowOk ? 1 : 0,
         bRemoteSectionOk ? 1 : 0,
         bDiagnosticsSectionOk ? 1 : 0,
@@ -14565,8 +18578,7 @@ bool UInspectorWorldSubsystem::RunTestPageLayoutSelfTest(FString& OutReport)
     }
 
     Close();
-    Open();
-    ShowTestPage();
+    OpenToPage(ERIVisiblePage::Tools);
 
     UPanelWidget* HostPanel = FindTestHostPanel();
     UInspectorTestPageWidget* Page = TestPageWidget.Get();
@@ -14600,6 +18612,7 @@ bool UInspectorWorldSubsystem::RunTestPageLayoutSelfTest(FString& OutReport)
     }
 
     const bool bPageScrollOk = Page && Page->HasPageScrollRoot();
+    const bool bTouchScrollOk = Page && Page->HasTouchScrollSupportForAutomation();
     const bool bRemoteSectionOk = Page && Page->HasRemoteSessionSection();
     const bool bWorkflowSectionOk = Page && Page->HasAvailableWorkflowSection();
     const bool bTestsSectionOk = Page && Page->HasAvailableTestsSection();
@@ -14615,18 +18628,19 @@ bool UInspectorWorldSubsystem::RunTestPageLayoutSelfTest(FString& OutReport)
     const int32 ActiveIndex = Switcher ? Switcher->GetActiveWidgetIndex() : INDEX_NONE;
     const bool bPassed = HostPanel && Page && bHostContainsPage && Switcher && ActiveIndex == TestPageIndex
         && VisibleLegacySiblingCount == 0
-        && bPageScrollOk && bRemoteSectionOk && bWorkflowSectionOk && bTestsSectionOk && bReportSectionOk
+        && bPageScrollOk && bTouchScrollOk && bRemoteSectionOk && bWorkflowSectionOk && bTestsSectionOk && bReportSectionOk
         && bDiagnosticsSectionOk && bActivityLogSectionOk && bRemoteOverrideOk
         && bTestsCollapsedOk && bRemoteCollapsedOk && bDiagnosticsCollapsedOk && bActivityLogCollapsedOk && bOverrideCollapsedOk;
 
     OutReport = FString::Printf(
-        TEXT("TestPageLayoutSelfTest=%s | ActiveIndex=%d Host=%s HostHasPage=%d VisibleLegacy=%d Scroll=%d Remote=%d Diagnostics=%d Activity=%d Override=%d Workflows=%d Tests=%d Report=%d Collapsed=%d/%d/%d/%d/%d LegacyNames=%s"),
+        TEXT("TestPageLayoutSelfTest=%s | ActiveIndex=%d Host=%s HostHasPage=%d VisibleLegacy=%d Scroll=%d Touch=%d Remote=%d Diagnostics=%d Activity=%d Override=%d Workflows=%d Tests=%d Report=%d Collapsed=%d/%d/%d/%d/%d LegacyNames=%s"),
         bPassed ? TEXT("PASS") : TEXT("FAIL"),
         ActiveIndex,
         HostPanel ? *HostPanel->GetName() : TEXT("None"),
         bHostContainsPage ? 1 : 0,
         VisibleLegacySiblingCount,
         bPageScrollOk ? 1 : 0,
+        bTouchScrollOk ? 1 : 0,
         bRemoteSectionOk ? 1 : 0,
         bDiagnosticsSectionOk ? 1 : 0,
         bActivityLogSectionOk ? 1 : 0,
@@ -14717,11 +18731,17 @@ bool UInspectorWorldSubsystem::RunPanelInteractionSelfTest(FString& OutReport)
     const bool bHasGeometry = PanelSize.X > 1.0f && PanelSize.Y > 1.0f;
     const TCHAR* InteractionMode = bHasGeometry ? TEXT("Geometry") : TEXT("Fallback");
     const FVector2D LogicalViewportSize = RI_GetLogicalViewportSize(GetWorld());
-    const float ExpectedDefaultWidth = RI_ResolvePanelDefaultDimension(
-        LogicalViewportSize.X,
-        RI_DefaultPanelViewportWidthFraction,
-        RI_MinUsablePanelWidth,
-        RI_DefaultPanelWidthMax);
+    float SplitLeftWidth = 0.0f;
+    float SplitRightWidth = 0.0f;
+    float SplitCenterClear = 0.0f;
+    const bool bSplitActiveForInteraction = ShouldUseActorSplitPresentation(SplitLeftWidth, SplitRightWidth, SplitCenterClear);
+    const float ExpectedDefaultWidth = bSplitActiveForInteraction
+        ? SplitRightWidth
+        : RI_ResolvePanelDefaultDimension(
+            LogicalViewportSize.X,
+            RI_DefaultPanelViewportWidthFraction,
+            RI_MinUsablePanelWidth,
+            RI_DefaultPanelWidthMax);
     const float ExpectedDefaultHeight = RI_ResolvePanelDefaultDimension(
         LogicalViewportSize.Y,
         RI_DefaultPanelViewportHeightFraction,
@@ -14862,19 +18882,66 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
         return false;
     }
 
-    FString Summary;
     FString Error;
-    if (!ApplyFabScreenshotFoundationState(Summary, Error))
+    AActor* PreferredActor = ResolvePreferredFabScreenshotActor();
+    if (!PreferredActor)
     {
-        OutReport = FString::Printf(TEXT("ActorPageStructureSelfTest=FAIL | Apply=%s"), *Error);
-        return false;
+        if (UWorld* World = GetWorld())
+        {
+            for (TActorIterator<AActor> It(World); It; ++It)
+            {
+                if (*It && !RI_IsUndesirableDefaultSelectionActor(*It))
+                {
+                    PreferredActor = *It;
+                    break;
+                }
+            }
+        }
     }
 
-    if (!SetVisiblePageByName(TEXT("Actor"), Error))
+    if (PreferredActor)
     {
-        OutReport = FString::Printf(TEXT("ActorPageStructureSelfTest=FAIL | ShowPage=%s"), *Error);
+        SetSelectedActor(PreferredActor);
+    }
+
+    Close();
+    ReleasePanelWidgetForRecreate();
+    Toggle();
+    if (!bOpen)
+    {
+        OutReport = TEXT("ActorPageStructureSelfTest=FAIL | Toggle did not open inspector");
         return false;
     }
+    const FString Summary = PreferredActor
+        ? FString::Printf(TEXT("ToggleFirstOpen Actor=%s"), *PreferredActor->GetName())
+        : TEXT("ToggleFirstOpen Actor=None");
+
+    UUserWidget* FreshOpenPanel = PanelWidget.Get();
+    RI_ForceWidgetTreeLayout(FreshOpenPanel);
+    UVerticalBox* FreshOpenSidebarHost = ActorWorkbenchSidebarHost.Get();
+    UBorder* FreshOpenActorStrip = FreshOpenPanel && FreshOpenPanel->WidgetTree
+        ? Cast<UBorder>(FreshOpenPanel->WidgetTree->FindWidget(TEXT("RI_ActorTopContextStrip")))
+        : nullptr;
+    UWidget* FreshOpenSearchDirectChild = RI_FindDirectChildInPanel(
+        FreshOpenSidebarHost,
+        FreshOpenPanel && FreshOpenPanel->WidgetTree ? FreshOpenPanel->WidgetTree->FindWidget(TEXT("ETB_Search")) : nullptr);
+    UPanelWidget* FreshOpenActorStripParent = FreshOpenActorStrip ? Cast<UPanelWidget>(FreshOpenActorStrip->GetParent()) : nullptr;
+    const int32 FreshOpenStripIndex = FreshOpenActorStripParent
+        ? RI_GetPanelChildIndex(FreshOpenActorStripParent, FreshOpenActorStrip)
+        : INDEX_NONE;
+    const int32 FreshOpenSearchIndex = (FreshOpenSidebarHost && FreshOpenSearchDirectChild)
+        ? RI_GetPanelChildIndex(FreshOpenSidebarHost, FreshOpenSearchDirectChild)
+        : INDEX_NONE;
+    UBorder* FreshOpenSharedStrip = FreshOpenPanel && FreshOpenPanel->WidgetTree
+        ? Cast<UBorder>(FreshOpenPanel->WidgetTree->FindWidget(TEXT("RI_SharedContextStrip")))
+        : nullptr;
+    const bool bFreshOpenActorStripOk = FreshOpenActorStrip
+        && FreshOpenActorStrip->GetVisibility() == ESlateVisibility::Visible
+        && FreshOpenActorStripParent == FreshOpenSidebarHost
+        && FreshOpenStripIndex == 0
+        && FreshOpenSearchIndex != INDEX_NONE
+        && FreshOpenStripIndex < FreshOpenSearchIndex;
+    const bool bFreshOpenSharedStripHidden = !FreshOpenSharedStrip || FreshOpenSharedStrip->GetVisibility() != ESlateVisibility::Visible;
 
     if (bDeferredOpenActorRefreshScheduled)
     {
@@ -14903,22 +18970,97 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
     }
 
     const int32 GroupCount = ActorGroupsEntriesBoxStrong ? ActorGroupsEntriesBoxStrong->GetChildrenCount() : 0;
+    TArray<UObject*> VisibleRootObjects;
+    GetGroupTreeRootsForSelected(TEXT(""), VisibleRootObjects);
+    bool bRootsContainComponents = false;
+    bool bRootsContainPinned = false;
+    bool bRootsContainActor = false;
+    for (UObject* RootObject : VisibleRootObjects)
+    {
+        if (UInspectorGroupItem* RootItem = Cast<UInspectorGroupItem>(RootObject))
+        {
+            bRootsContainComponents |= RootItem->StableKey == TEXT("ROOT_COMPONENTS");
+            bRootsContainPinned |= RootItem->StableKey == TEXT("PINNED_ROOT");
+            bRootsContainActor |= RootItem->StableKey == TEXT("ROOT_ACTOR");
+        }
+    }
+    const bool bRootContractOk = VisibleRootObjects.Num() == 2
+        && bRootsContainComponents
+        && bRootsContainPinned
+        && !bRootsContainActor;
+
+    bool bVisibleActorRootRow = false;
+    bool bVisibleComponentsRootRow = false;
+    for (UInspectorGroupButtonProxy* Proxy : ActorGroupsClickProxies)
+    {
+        const FString StableKey = Proxy ? Proxy->GetStableKey() : FString();
+        bVisibleActorRootRow |= StableKey == TEXT("ROOT_ACTOR");
+        bVisibleComponentsRootRow |= StableKey == TEXT("ROOT_COMPONENTS");
+    }
+
+    UButton* ComponentsHeaderButton = ActorGroupsHeaderButton.Get();
+    UBorder* ComponentsHeaderBorder = ActorGroupsHeaderBorder.Get();
+    const bool bComponentsHeaderOk = ComponentsHeaderButton
+        && ComponentsHeaderBorder
+        && ComponentsHeaderButton->GetVisibility() == ESlateVisibility::Visible;
+    const bool bActorHeaderSelectedOk = bComponentsHeaderOk
+        && IsActorRootSelectionActive()
+        && ComponentsHeaderButton->GetToolTipText().ToString().Contains(TEXT("actor-level"), ESearchCase::IgnoreCase);
+
+    UVerticalBox* SidebarHost = ActorWorkbenchSidebarHost.Get();
     UVerticalBox* PageStackHost = ActorWorkbenchPageStackHost.Get();
     UVerticalBox* ContentHost = ActorWorkbenchContentHost.Get();
     const bool bSidebarHostOk = ActorWorkbenchSidebarHost.IsValid() && ActorGroupsSectionHostBox.IsValid();
-    const bool bWorkspaceHostOk = ContentHost && ActorPropertyFunctionHostBox.IsValid() && ActorWorkspaceSelectionBand.IsValid() && PageStackHost;
+    USizeBox* SplitSidebarBox = ActorSplitSidebarSizeBox.Get();
+    float ExpectedSplitLeftWidth = 0.0f;
+    float ExpectedSplitRightWidth = 0.0f;
+    float ExpectedSplitCenterClear = 0.0f;
+    const bool bSplitExpected = ShouldUseActorSplitPresentation(ExpectedSplitLeftWidth, ExpectedSplitRightWidth, ExpectedSplitCenterClear);
+    UBorder* ActorStripBorder = PanelWidget.IsValid() && PanelWidget->WidgetTree
+        ? Cast<UBorder>(PanelWidget->WidgetTree->FindWidget(TEXT("RI_ActorTopContextStrip")))
+        : nullptr;
+    UWidget* SearchDirectChild = RI_FindDirectChildInPanel(
+        SidebarHost,
+        PanelWidget.IsValid() && PanelWidget->WidgetTree ? PanelWidget->WidgetTree->FindWidget(TEXT("ETB_Search")) : nullptr);
+    UBorder* SharedStripBorder = PanelWidget.IsValid() && PanelWidget->WidgetTree
+        ? Cast<UBorder>(PanelWidget->WidgetTree->FindWidget(TEXT("RI_SharedContextStrip")))
+        : nullptr;
+    UPanelWidget* ActorStripParent = ActorStripBorder ? Cast<UPanelWidget>(ActorStripBorder->GetParent()) : nullptr;
+    const bool bWorkspaceHostOk = ContentHost && ActorPropertyFunctionHostBox.IsValid();
     const bool bSidebarFillOk = ActorGroupsSectionHostBox.IsValid() && RI_IsVerticalSlotRule(ActorGroupsSectionHostBox.Get(), ESlateSizeRule::Fill);
     const bool bWorkspaceFillOk = ActorPropertyFunctionHostBox.IsValid() && RI_IsVerticalSlotRule(ActorPropertyFunctionHostBox.Get(), ESlateSizeRule::Fill);
-    const bool bSelectionBandOk = ActorWorkspaceSelectionBand.IsValid() && RI_IsVerticalSlotRule(ActorWorkspaceSelectionBand.Get(), ESlateSizeRule::Automatic);
-    const int32 SelectionBandIndex = PageStackHost ? RI_GetPanelChildIndex(PageStackHost, ActorWorkspaceSelectionBand.Get()) : INDEX_NONE;
-    const int32 WorkspaceHostIndex = PageStackHost ? RI_GetPanelChildIndex(PageStackHost, ActorWorkbenchBodyHost.Get()) : INDEX_NONE;
-    const bool bSelectionBandOrderOk = SelectionBandIndex != INDEX_NONE && WorkspaceHostIndex != INDEX_NONE && SelectionBandIndex < WorkspaceHostIndex;
+    const bool bActorStripOk = ActorStripBorder
+        && ActorStripBorder->GetVisibility() == ESlateVisibility::Visible
+        && RI_IsVerticalSlotRule(ActorStripBorder, ESlateSizeRule::Automatic)
+        && ActorStripParent == SidebarHost;
+    const int32 ActorStripIndex = ActorStripParent ? RI_GetPanelChildIndex(ActorStripParent, ActorStripBorder) : INDEX_NONE;
+    const int32 ActorSearchIndex = (SidebarHost && SearchDirectChild)
+        ? RI_GetPanelChildIndex(SidebarHost, SearchDirectChild)
+        : INDEX_NONE;
+    const bool bActorStripOrderOk = ActorStripIndex == 0
+        && ActorSearchIndex != INDEX_NONE
+        && ActorStripIndex < ActorSearchIndex;
+    const bool bSharedStripHidden = !SharedStripBorder || SharedStripBorder->GetVisibility() != ESlateVisibility::Visible;
+    const bool bSelectionBandHidden = !ActorWorkspaceSelectionBand.IsValid()
+        || ActorWorkspaceSelectionBand->GetVisibility() == ESlateVisibility::Collapsed
+        || ActorWorkspaceSelectionBand->GetParent() == nullptr;
     const bool bPropertyBoxVisible = ActorPropertiesSectionWidget.IsValid()
         && ActorPropertiesSectionWidget->GetVisibility() == ESlateVisibility::Visible;
     const bool bFunctionBoxVisible = ActorFunctionsSectionWidget.IsValid()
         && ActorFunctionsSectionWidget->GetVisibility() == ESlateVisibility::Visible;
     const bool bPropertyScrollOk = ActorPropertiesSectionWidget.IsValid() && ActorPropertiesSectionWidget->HasPropertyScrollRoot();
+    const bool bPropertyTouchOk = ActorPropertiesSectionWidget.IsValid() && ActorPropertiesSectionWidget->HasTouchScrollSupportForAutomation();
+    const int32 CategorySectionCount = ActorPropertiesSectionWidget.IsValid()
+        ? ActorPropertiesSectionWidget->GetCategorySectionCountForAutomation()
+        : INDEX_NONE;
+    const FString CategorySummary = ActorPropertiesSectionWidget.IsValid()
+        ? ActorPropertiesSectionWidget->GetCategoryDebugSummaryForAutomation()
+        : FString(TEXT("None"));
     const bool bFunctionScrollOk = ActorFunctionsSectionWidget.IsValid() && ActorFunctionsSectionWidget->HasFunctionScrollRoot();
+    const bool bFunctionTouchOk = ActorFunctionsSectionWidget.IsValid() && ActorFunctionsSectionWidget->HasTouchScrollSupportForAutomation();
+    const bool bGroupTouchOk = HasActorGroupsTouchScrollSupportForAutomation();
+    const bool bPinnedTouchOk = ActorPinnedScrollBoxStrong == nullptr
+        || RIInspectorTouchScroll::HasTouchSupport(ActorPinnedScrollBoxStrong);
     const bool bFunctionSummaryOk = ActorFunctionsSectionWidget.IsValid() && !ActorFunctionsSectionWidget->HasFocusSummary();
     UWidget* FooterWidget = PanelWidget.IsValid() && PanelWidget->WidgetTree
         ? PanelWidget->WidgetTree->FindWidget(TEXT("Modified"))
@@ -14934,12 +19076,28 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
         }(PanelWidget->WidgetTree->FindWidget(TEXT("HorizontalBox_379"))))
         : true;
     int32 VisibleLegacySiblingCount = 0;
+    if (SidebarHost)
+    {
+        for (int32 ChildIndex = 0; ChildIndex < SidebarHost->GetChildrenCount(); ++ChildIndex)
+        {
+            UWidget* Child = SidebarHost->GetChildAt(ChildIndex);
+            if (!Child || Child == ActorStripBorder || Child == SearchDirectChild || Child == ActorGroupsSectionHostBox.Get())
+            {
+                continue;
+            }
+
+            if (Child->GetVisibility() != ESlateVisibility::Collapsed && Child->GetVisibility() != ESlateVisibility::Hidden)
+            {
+                ++VisibleLegacySiblingCount;
+            }
+        }
+    }
     if (PageStackHost)
     {
         for (int32 ChildIndex = 0; ChildIndex < PageStackHost->GetChildrenCount(); ++ChildIndex)
         {
             UWidget* Child = PageStackHost->GetChildAt(ChildIndex);
-            if (!Child || Child == ActorWorkspaceSelectionBand.Get() || Child == ActorWorkbenchBodyHost.Get() || Child == FooterWidget)
+            if (!Child || Child == ActorWorkbenchBodyHost.Get() || Child == FooterWidget)
             {
                 continue;
             }
@@ -14972,9 +19130,51 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
     const float TotalWidth = LeftColumnWidth + RightColumnWidth;
     const float LeftRatio = TotalWidth > 1.0f ? LeftColumnWidth / TotalWidth : 0.0f;
     const float RightRatio = TotalWidth > 1.0f ? RightColumnWidth / TotalWidth : 0.0f;
-    const bool bColumnRatioOk = TotalWidth > 1.0f
-        && RI_IsRatioNear(LeftRatio, 0.34f, 0.10f)
-        && RI_IsRatioNear(RightRatio, 0.66f, 0.10f);
+    const bool bSplitSidebarVisible = SplitSidebarBox
+        && SplitSidebarBox->GetVisibility() == ESlateVisibility::Visible
+        && ActorSplitSidebarCanvasSlot.IsValid();
+    const FVector2D SplitSidebarPosition = ActorSplitSidebarCanvasSlot.IsValid()
+        ? ActorSplitSidebarCanvasSlot->GetPosition()
+        : FVector2D::ZeroVector;
+    const FVector2D RootCanvasPosition = PanelRootCanvasSlot.IsValid()
+        ? PanelRootCanvasSlot->GetPosition()
+        : FVector2D::ZeroVector;
+    const float ActualCenterClear = RootCanvasPosition.X - (SplitSidebarPosition.X + ExpectedSplitLeftWidth);
+    const bool bSidebarDetachedFromBody = ActorWorkbenchBodyHost.IsValid()
+        && ActorWorkbenchBodyHost->GetChildIndex(ActorWorkbenchSidebarHost.Get()) == INDEX_NONE;
+    const bool bContentSoloInBody = ActorWorkbenchBodyHost.IsValid()
+        && ActorWorkbenchContentHost.IsValid()
+        && ActorWorkbenchBodyHost->GetChildrenCount() == 1
+        && ActorWorkbenchBodyHost->GetChildAt(0) == ActorWorkbenchContentHost.Get();
+    const bool bSplitPinnedToEdges = !bSplitExpected
+        || (FMath::IsNearlyEqual(SplitSidebarPosition.X, 0.0f, 4.0f)
+            && ([&]()
+            {
+                UWorld* World = GetWorld();
+                if (!World)
+                {
+                    return false;
+                }
+
+                const FVector2D LogicalViewportSize = RI_GetLogicalViewportSize(World);
+                if (LogicalViewportSize.X <= 1.0f)
+                {
+                    return false;
+                }
+
+                const float ExpectedRightX = LogicalViewportSize.X - ExpectedSplitRightWidth;
+                return FMath::IsNearlyEqual(RootCanvasPosition.X, ExpectedRightX, 6.0f)
+                    && ActualCenterClear >= (ExpectedSplitCenterClear - 6.0f);
+            }()));
+    const bool bSplitLayoutOk = !bSplitExpected || (bSplitSidebarVisible && bSidebarDetachedFromBody && bContentSoloInBody && bSplitPinnedToEdges);
+    const bool bColumnRatioOk = bSplitExpected
+        ? (LeftColumnWidth > 1.0f
+            && RightColumnWidth > 1.0f
+            && RI_IsRatioNear(LeftColumnWidth, ExpectedSplitLeftWidth, 26.0f)
+            && RI_IsRatioNear(RightColumnWidth, ExpectedSplitRightWidth, 34.0f))
+        : (TotalWidth > 1.0f
+            && RI_IsRatioNear(LeftRatio, 0.50f, 0.10f)
+            && RI_IsRatioNear(RightRatio, 0.50f, 0.10f));
     const float PropertyHeight = ActorPropertiesSectionWidget.IsValid() ? ActorPropertiesSectionWidget->GetCachedGeometry().GetLocalSize().Y : 0.0f;
     const float FunctionHeight = ActorFunctionsSectionWidget.IsValid() ? ActorFunctionsSectionWidget->GetCachedGeometry().GetLocalSize().Y : 0.0f;
     const float TotalRightHeight = PropertyHeight + FunctionHeight;
@@ -15019,6 +19219,17 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
     bool bTextInputItemFound = false;
     bool bBoolItemFound = false;
     bool bSwatchVisible = false;
+    bool bStructuredVectorItemFound = false;
+    bool bStructuredVectorCommitOk = false;
+    bool bStructuredRotatorItemFound = false;
+    bool bStructuredTransformItemFound = false;
+    bool bStructuredTransformLocationFound = false;
+    bool bStructuredTransformRotationFound = false;
+    bool bStructuredTransformScaleFound = false;
+    bool bStructuredTransformCommitOk = false;
+    bool bStructuredTransformLocationCommitOk = false;
+    bool bStructuredTransformRotationCommitOk = false;
+    bool bStructuredTransformScaleCommitOk = false;
     bool bMaterialScalarRowOk = false;
     bool bMaterialVectorRowOk = false;
     bool bMaterialFavoriteVisible = false;
@@ -15032,6 +19243,12 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
     FString ColorPropertyName = TEXT("None");
     FString TextInputPropertyName = TEXT("None");
     FString BoolPropertyName = TEXT("None");
+    FString StructuredVectorPropertyName = TEXT("None");
+    FString StructuredRotatorPropertyName = TEXT("None");
+    FString StructuredTransformPropertyName = TEXT("None");
+    FString StructuredTransformLocationName = TEXT("None");
+    FString StructuredTransformRotationName = TEXT("None");
+    FString StructuredTransformScaleName = TEXT("None");
     FString MaterialScalarName = TEXT("None");
     FString MaterialVectorName = TEXT("None");
     FString MaterialTreeComponentName = TEXT("None");
@@ -15050,8 +19267,20 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
     bool bTouchHeightContractOk = false;
     bool bSearchBindingOk = false;
     bool bSearchFilterOk = false;
+    bool bCategoryToggleOk = false;
+    bool bCategoryPageMemoryOk = false;
+    bool bCategorySearchAutoExpandOk = false;
+    bool bCategorySearchRestoreOk = false;
+    bool bActorRootTransformBlockVisible = false;
+    bool bActorRootTransformRowsFound = false;
+    bool bActorRootTransformCommitOk = false;
+    bool bActorRootTransformTrackingOk = false;
     int32 UnfilteredSearchEntryCount = 0;
     int32 FilteredSearchEntryCount = 0;
+    FString CategoryAutomationName = TEXT("None");
+    FString CategorySearchPropertyName = TEXT("None");
+    FString ActorRootTransformSummary = TEXT("Hidden");
+    FString ActorRootTransformPropertyNames = TEXT("None");
 
     if (ActorPtr)
     {
@@ -15124,6 +19353,9 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
                     && PropertyItem->IsEditable()
                     && ValueType != EInspectorValueType::Bool
                     && ValueType != EInspectorValueType::Enum
+                    && ValueType != EInspectorValueType::Vector3
+                    && ValueType != EInspectorValueType::Rotator
+                    && ValueType != EInspectorValueType::Transform
                     && ValueType != EInspectorValueType::LinearColor
                     && ValueType != EInspectorValueType::Color)
                 {
@@ -15131,10 +19363,216 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
                     bTextInputItemFound = Row->IsValueTextBoxVisibleForAutomation();
                     PropertyTextInputHeight = Row->GetValueControlHeightForAutomation();
                 }
+                else if (!bStructuredVectorItemFound
+                    && PropertyItem->IsEditable()
+                    && ValueType == EInspectorValueType::Vector3)
+                {
+                    StructuredVectorPropertyName = PropertyItem->GetPropertyName();
+                    bStructuredVectorItemFound = Row->IsStructuredVectorVisibleForAutomation()
+                        && !Row->IsReadOnlyValueVisibleForAutomation()
+                        && !Row->IsValueTextBoxVisibleForAutomation();
+
+                    FVector OriginalVector = FVector::ZeroVector;
+                    if (bStructuredVectorItemFound && PropertyItem->GetVector(OriginalVector))
+                    {
+                        const FVector PatchedVector = OriginalVector + FVector(1.25, -0.75, 0.50);
+                        FString StructApplyError;
+                        bStructuredVectorCommitOk = Row->CommitVectorValueForAutomation(PatchedVector, StructApplyError);
+                        FVector AppliedVector = FVector::ZeroVector;
+                        bStructuredVectorCommitOk = bStructuredVectorCommitOk
+                            && PropertyItem->GetVector(AppliedVector)
+                            && AppliedVector.Equals(PatchedVector, 0.01f);
+
+                        FString RestoreError;
+                        PropertyItem->SetVector(OriginalVector, RestoreError);
+                    }
+                }
+                else if (!bStructuredRotatorItemFound
+                    && PropertyItem->IsEditable()
+                    && ValueType == EInspectorValueType::Rotator)
+                {
+                    StructuredRotatorPropertyName = PropertyItem->GetPropertyName();
+                    bStructuredRotatorItemFound = Row->IsStructuredRotatorVisibleForAutomation()
+                        && !Row->IsReadOnlyValueVisibleForAutomation()
+                        && !Row->IsValueTextBoxVisibleForAutomation();
+                }
+                else if (!bStructuredTransformItemFound
+                    && ValueType == EInspectorValueType::Transform)
+                {
+                    StructuredTransformPropertyName = PropertyItem->GetPropertyName();
+                    bStructuredTransformItemFound = Row->IsStructuredTransformVisibleForAutomation()
+                        && !Row->IsReadOnlyValueVisibleForAutomation()
+                        && !Row->IsValueTextBoxVisibleForAutomation();
+
+                    if (bStructuredTransformItemFound)
+                    {
+                        FTransform OriginalTransform = FTransform::Identity;
+                        if (PropertyItem->GetTransform(OriginalTransform))
+                        {
+                            FTransform PatchedTransform = OriginalTransform;
+                            PatchedTransform.SetLocation(OriginalTransform.GetLocation() + FVector(2.0, -1.0, 0.5));
+                            const FRotator OriginalRotation = OriginalTransform.Rotator();
+                            PatchedTransform.SetRotation(FRotator(
+                                OriginalRotation.Pitch + 5.0,
+                                OriginalRotation.Yaw - 3.0,
+                                OriginalRotation.Roll + 1.5).Quaternion());
+                            PatchedTransform.SetScale3D(OriginalTransform.GetScale3D() + FVector(0.1, 0.2, -0.05));
+
+                            FString StructApplyError;
+                            bStructuredTransformCommitOk = Row->CommitTransformValueForAutomation(PatchedTransform, StructApplyError);
+                            FTransform AppliedTransform = FTransform::Identity;
+                            bStructuredTransformCommitOk = bStructuredTransformCommitOk
+                                && PropertyItem->GetTransform(AppliedTransform)
+                                && AppliedTransform.GetLocation().Equals(PatchedTransform.GetLocation(), 0.01f)
+                                && AppliedTransform.GetScale3D().Equals(PatchedTransform.GetScale3D(), 0.01f)
+                                && AppliedTransform.Rotator().Equals(PatchedTransform.Rotator(), 0.01f);
+
+                            FString RestoreError;
+                            PropertyItem->SetTransform(OriginalTransform, RestoreError);
+                        }
+                    }
+                }
+
+                const FName PropertyFName = PropertyItem->GetPropertyFName();
+                if (PropertyItem->IsEditable() && PropertyFName == TEXT("RelativeLocation") && ValueType == EInspectorValueType::Vector3)
+                {
+                    StructuredTransformLocationName = PropertyItem->GetPropertyName();
+                    bStructuredTransformLocationFound = Row->IsStructuredVectorVisibleForAutomation()
+                        && !Row->IsReadOnlyValueVisibleForAutomation()
+                        && !Row->IsValueTextBoxVisibleForAutomation();
+
+                    if (bStructuredTransformLocationFound)
+                    {
+                        FVector OriginalLocation = FVector::ZeroVector;
+                        if (PropertyItem->GetVector(OriginalLocation))
+                        {
+                            const FVector PatchedLocation = OriginalLocation + FVector(2.0, -1.0, 0.5);
+                            FString StructApplyError;
+                            const bool bLocationCommitOk = Row->CommitVectorValueForAutomation(PatchedLocation, StructApplyError);
+                            FVector AppliedLocation = FVector::ZeroVector;
+                            const USceneComponent* SceneComponent = Cast<USceneComponent>(PropertyItem->GetTargetObject());
+                            bStructuredTransformLocationCommitOk = bLocationCommitOk
+                                && PropertyItem->GetVector(AppliedLocation)
+                                && AppliedLocation.Equals(PatchedLocation, 0.01f)
+                                && (!SceneComponent || SceneComponent->GetRelativeLocation().Equals(PatchedLocation, 0.01f));
+
+                            FString RestoreError;
+                            PropertyItem->SetVector(OriginalLocation, RestoreError);
+                        }
+                    }
+                }
+                else if (PropertyItem->IsEditable() && PropertyFName == TEXT("RelativeRotation") && ValueType == EInspectorValueType::Rotator)
+                {
+                    StructuredTransformRotationName = PropertyItem->GetPropertyName();
+                    bStructuredTransformRotationFound = Row->IsStructuredRotatorVisibleForAutomation()
+                        && !Row->IsReadOnlyValueVisibleForAutomation()
+                        && !Row->IsValueTextBoxVisibleForAutomation();
+
+                    if (bStructuredTransformRotationFound)
+                    {
+                        FRotator OriginalRotation = FRotator::ZeroRotator;
+                        if (PropertyItem->GetRotator(OriginalRotation))
+                        {
+                            const FRotator PatchedRotation(
+                                OriginalRotation.Pitch + 5.0,
+                                OriginalRotation.Yaw - 3.0,
+                                OriginalRotation.Roll + 1.5);
+                            FString StructApplyError;
+                            const bool bRotationCommitOk = Row->CommitRotatorValueForAutomation(PatchedRotation, StructApplyError);
+                            FRotator AppliedRotation = FRotator::ZeroRotator;
+                            const USceneComponent* SceneComponent = Cast<USceneComponent>(PropertyItem->GetTargetObject());
+                            bStructuredTransformRotationCommitOk = bRotationCommitOk
+                                && PropertyItem->GetRotator(AppliedRotation)
+                                && AppliedRotation.Equals(PatchedRotation, 0.01f)
+                                && (!SceneComponent || SceneComponent->GetRelativeRotation().Equals(PatchedRotation, 0.01f));
+
+                            FString RestoreError;
+                            PropertyItem->SetRotator(OriginalRotation, RestoreError);
+                        }
+                    }
+                }
+                else if (PropertyItem->IsEditable() && PropertyFName == TEXT("RelativeScale3D") && ValueType == EInspectorValueType::Vector3)
+                {
+                    StructuredTransformScaleName = PropertyItem->GetPropertyName();
+                    bStructuredTransformScaleFound = Row->IsStructuredVectorVisibleForAutomation()
+                        && !Row->IsReadOnlyValueVisibleForAutomation()
+                        && !Row->IsValueTextBoxVisibleForAutomation();
+
+                    if (bStructuredTransformScaleFound)
+                    {
+                        FVector OriginalScale = FVector::OneVector;
+                        if (PropertyItem->GetVector(OriginalScale))
+                        {
+                            const FVector PatchedScale = OriginalScale + FVector(0.1, 0.2, -0.05);
+                            FString StructApplyError;
+                            const bool bScaleCommitOk = Row->CommitVectorValueForAutomation(PatchedScale, StructApplyError);
+                            FVector AppliedScale = FVector::ZeroVector;
+                            const USceneComponent* SceneComponent = Cast<USceneComponent>(PropertyItem->GetTargetObject());
+                            bStructuredTransformScaleCommitOk = bScaleCommitOk
+                                && PropertyItem->GetVector(AppliedScale)
+                                && AppliedScale.Equals(PatchedScale, 0.01f)
+                                && (!SceneComponent || SceneComponent->GetRelativeScale3D().Equals(PatchedScale, 0.01f));
+
+                            FString RestoreError;
+                            PropertyItem->SetVector(OriginalScale, RestoreError);
+                        }
+                    }
+                }
             }
 
-            if (bColorItemFound && bTextInputItemFound && bBoolItemFound)
+            if (bColorItemFound
+                && bTextInputItemFound
+                && bBoolItemFound
+                && bStructuredVectorItemFound
+                && bStructuredRotatorItemFound
+                && (bStructuredTransformItemFound
+                    || (bStructuredTransformLocationFound
+                        && bStructuredTransformRotationFound
+                        && bStructuredTransformScaleFound)))
             {
+                break;
+            }
+        }
+
+        if (!bStructuredTransformItemFound)
+        {
+            for (UActorComponent* Component : Components)
+            {
+                USceneComponent* SceneComponent = Cast<USceneComponent>(Component);
+                if (!SceneComponent)
+                {
+                    continue;
+                }
+
+                UInspectorPropertyItem* TransformItem = NewObject<UInspectorPropertyItem>(this);
+                TransformItem->Init(SceneComponent, TEXT("RelativeTransform"));
+                if (TransformItem->GetValueType() != EInspectorValueType::Transform)
+                {
+                    continue;
+                }
+
+                UInspectorPropertyRowWidget* TransformRow = nullptr;
+                if (APlayerController* PC = GetLocalPC())
+                {
+                    TransformRow = CreateWidget<UInspectorPropertyRowWidget>(PC, UInspectorPropertyRowWidget::StaticClass());
+                }
+                else if (UWorld* World = GetWorld())
+                {
+                    TransformRow = CreateWidget<UInspectorPropertyRowWidget>(World, UInspectorPropertyRowWidget::StaticClass());
+                }
+
+                if (!TransformRow)
+                {
+                    continue;
+                }
+
+                TransformRow->TakeWidget();
+                TransformRow->SetInspectorSubsystem(this);
+                TransformRow->SetPropertyItem(TransformItem);
+                StructuredTransformPropertyName = TransformItem->GetPropertyName();
+                bStructuredTransformItemFound = TransformRow->IsStructuredTransformVisibleForAutomation()
+                    && !TransformRow->IsReadOnlyValueVisibleForAutomation()
+                    && !TransformRow->IsValueTextBoxVisibleForAutomation();
                 break;
             }
         }
@@ -15264,8 +19702,9 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
             SetGroupExpanded(ComponentKey, false);
             RefreshPanel(EInspectorRefreshReason::StructureChanged);
 
+            TArray<TObjectPtr<UInspectorGroupButtonProxy>> ProxySnapshot = ActorGroupsClickProxies;
             TArray<FString> VisibleKeys;
-            for (UInspectorGroupButtonProxy* Proxy : ActorGroupsClickProxies)
+            for (UInspectorGroupButtonProxy* Proxy : ProxySnapshot)
             {
                 const FString StableKey = Proxy ? Proxy->GetStableKey() : FString();
                 if (!StableKey.IsEmpty())
@@ -15378,12 +19817,98 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
         }
     }
 
-    SelectedInspectObject = SelectedActor.Get();
-    SelectedGroupKey = TEXT("ROOT_ACTOR");
-    PropertyViewMode = ERIPropertyViewMode::Full;
-    ViewMeshComp = nullptr;
-    ViewMaterialSlot = INDEX_NONE;
+    ApplySelectedActorRootState();
     RefreshPanel(EInspectorRefreshReason::StructureChanged);
+
+    if (ActorPtr && ActorPropertiesSectionWidget.IsValid())
+    {
+        bActorRootTransformBlockVisible = ActorPropertiesSectionWidget->HasActorTransformBlockForAutomation();
+        ActorRootTransformSummary = ActorPropertiesSectionWidget->GetActorTransformDebugSummaryForAutomation();
+
+        TArray<UInspectorPropertyItem*> ActorTransformItems;
+        GetActorWorldTransformPropertyItems(ActorTransformItems);
+        TArray<FString> ActorTransformNames;
+        int32 ActorTransformTrackingCount = 0;
+        UInspectorPropertyItem* ActorLocationItem = nullptr;
+        UInspectorPropertyItem* ActorRotationItem = nullptr;
+        UInspectorPropertyItem* ActorScaleItem = nullptr;
+        for (UInspectorPropertyItem* TransformItem : ActorTransformItems)
+        {
+            if (!TransformItem)
+            {
+                continue;
+            }
+
+            ActorTransformNames.Add(TransformItem->GetPropertyNameWithoutOwnerPrefix());
+            if (TransformItem->GetTrackingTargetObject() == ActorPtr->GetRootComponent()
+                && (TransformItem->GetTrackingPropertyFName() == TEXT("RelativeLocation")
+                    || TransformItem->GetTrackingPropertyFName() == TEXT("RelativeRotation")
+                    || TransformItem->GetTrackingPropertyFName() == TEXT("RelativeScale3D")))
+            {
+                ++ActorTransformTrackingCount;
+            }
+
+            if (TransformItem->GetPropertyFName() == TEXT("ActorWorldLocation"))
+            {
+                ActorLocationItem = TransformItem;
+            }
+            else if (TransformItem->GetPropertyFName() == TEXT("ActorWorldRotation"))
+            {
+                ActorRotationItem = TransformItem;
+            }
+            else if (TransformItem->GetPropertyFName() == TEXT("ActorWorldScale"))
+            {
+                ActorScaleItem = TransformItem;
+            }
+        }
+
+        if (ActorTransformNames.Num() > 0)
+        {
+            ActorRootTransformPropertyNames = FString::Join(ActorTransformNames, TEXT("|"));
+        }
+        bActorRootTransformTrackingOk = ActorTransformTrackingCount == 3;
+
+        UInspectorPropertyRowWidget* ActorLocationRow = ActorPropertiesSectionWidget->FindPropertyRowForAutomation(ActorLocationItem);
+        UInspectorPropertyRowWidget* ActorRotationRow = ActorPropertiesSectionWidget->FindPropertyRowForAutomation(ActorRotationItem);
+        UInspectorPropertyRowWidget* ActorScaleRow = ActorPropertiesSectionWidget->FindPropertyRowForAutomation(ActorScaleItem);
+        bActorRootTransformRowsFound = ActorLocationRow && ActorRotationRow && ActorScaleRow;
+
+        if (bActorRootTransformRowsFound && ActorLocationItem && ActorRotationItem && ActorScaleItem)
+        {
+            FVector OriginalLocation = FVector::ZeroVector;
+            FRotator OriginalRotation = FRotator::ZeroRotator;
+            FVector OriginalScale = FVector::OneVector;
+            if (ActorLocationItem->GetVector(OriginalLocation)
+                && ActorRotationItem->GetRotator(OriginalRotation)
+                && ActorScaleItem->GetVector(OriginalScale))
+            {
+                const FVector PatchedLocation = OriginalLocation + FVector(8.0, -4.0, 3.0);
+                const FRotator PatchedRotation(
+                    OriginalRotation.Pitch + 4.0,
+                    OriginalRotation.Yaw + 7.0,
+                    OriginalRotation.Roll - 2.0);
+                const FVector PatchedScale = OriginalScale + FVector(0.05, 0.07, -0.03);
+
+                FString LocationError;
+                FString RotationError;
+                FString ScaleError;
+                const bool bLocationCommit = ActorLocationRow->CommitVectorValueForAutomation(PatchedLocation, LocationError);
+                const bool bRotationCommit = ActorRotationRow->CommitRotatorValueForAutomation(PatchedRotation, RotationError);
+                const bool bScaleCommit = ActorScaleRow->CommitVectorValueForAutomation(PatchedScale, ScaleError);
+
+                bActorRootTransformCommitOk =
+                    bLocationCommit && bRotationCommit && bScaleCommit
+                    && ActorPtr->GetActorLocation().Equals(PatchedLocation, 0.01f)
+                    && ActorPtr->GetActorRotation().Equals(PatchedRotation, 0.01f)
+                    && ActorPtr->GetActorScale3D().Equals(PatchedScale, 0.01f);
+
+                FString RestoreError;
+                ActorLocationItem->SetVector(OriginalLocation, RestoreError);
+                ActorRotationItem->SetRotator(OriginalRotation, RestoreError);
+                ActorScaleItem->SetVector(OriginalScale, RestoreError);
+            }
+        }
+    }
 
     UnfilteredSearchEntryCount = ActorGroupsEntriesBoxStrong
         ? ActorGroupsEntriesBoxStrong->GetChildrenCount()
@@ -15393,13 +19918,53 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
     const bool bSearchPageReady = SetVisiblePageByName(TEXT("Actor"), SearchPageError);
     if (bSearchPageReady && PanelWidget.IsValid() && PanelWidget->WidgetTree)
     {
-        if (UWidget* SearchWidget = PanelWidget->WidgetTree->FindWidget(TEXT("ETB_Search")))
+        auto RefreshActorSearchViews = [this]()
         {
-            RI_TrySetEditableSearchText(SearchWidget, FText::FromString(TEXT("Arrow")));
-            CacheActorPageSearchTextFromPanel();
             RefreshActorGroupsSection();
             RefreshActorPropertiesSection();
             RefreshActorFunctionsSection();
+        };
+
+        auto FindSearchWidget = [this]() -> UWidget*
+        {
+            return (PanelWidget.IsValid() && PanelWidget->WidgetTree)
+                ? PanelWidget->WidgetTree->FindWidget(TEXT("ETB_Search"))
+                : nullptr;
+        };
+
+        if (UWidget* SearchWidget = FindSearchWidget())
+        {
+            if (ActorPropertiesSectionWidget.IsValid())
+            {
+                CategoryAutomationName = ActorPropertiesSectionWidget->GetFirstCategoryNameForAutomation();
+                if (!CategoryAutomationName.IsEmpty())
+                {
+                    CategorySearchPropertyName = ActorPropertiesSectionWidget->GetFirstPropertyNameInCategoryForAutomation(CategoryAutomationName);
+                    bCategoryToggleOk = ActorPropertiesSectionWidget->SetCategoryExpandedForAutomation(CategoryAutomationName, false)
+                        && !ActorPropertiesSectionWidget->IsCategoryExpandedVisualForAutomation(CategoryAutomationName);
+                }
+            }
+
+            if (bCategoryToggleOk)
+            {
+                FString CategoryRouteError;
+                const bool bSettingsPageReady = SetVisiblePageByName(TEXT("Settings"), CategoryRouteError);
+                const bool bActorPageReturnReady = SetVisiblePageByName(TEXT("Actor"), CategoryRouteError);
+                if (bActorPageReturnReady)
+                {
+                    RefreshPanel(EInspectorRefreshReason::StructureChanged);
+                }
+
+                bCategoryPageMemoryOk =
+                    bSettingsPageReady &&
+                    bActorPageReturnReady &&
+                    ActorPropertiesSectionWidget.IsValid() &&
+                    !ActorPropertiesSectionWidget->IsCategoryExpandedVisualForAutomation(CategoryAutomationName);
+            }
+
+            RI_TrySetEditableSearchText(SearchWidget, FText::FromString(TEXT("Arrow")));
+            CacheActorPageSearchTextFromPanel();
+            RefreshActorSearchViews();
             bSearchBindingOk = CurrentActorSearchText.Equals(TEXT("Arrow"), ESearchCase::IgnoreCase);
             FilteredSearchEntryCount = ActorGroupsEntriesBoxStrong
                 ? ActorGroupsEntriesBoxStrong->GetChildrenCount()
@@ -15410,9 +19975,31 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
 
             RI_TrySetEditableSearchText(SearchWidget, FText::GetEmpty());
             CacheActorPageSearchTextFromPanel();
-            RefreshActorGroupsSection();
-            RefreshActorPropertiesSection();
-            RefreshActorFunctionsSection();
+            RefreshActorSearchViews();
+
+            if (bCategoryPageMemoryOk && !CategorySearchPropertyName.IsEmpty())
+            {
+                SearchWidget = FindSearchWidget();
+                if (SearchWidget)
+                {
+                    RI_TrySetEditableSearchText(SearchWidget, FText::FromString(CategorySearchPropertyName));
+                    CacheActorPageSearchTextFromPanel();
+                    RefreshActorSearchViews();
+                    bCategorySearchAutoExpandOk = ActorPropertiesSectionWidget.IsValid()
+                        && ActorPropertiesSectionWidget->IsCategoryExpandedVisualForAutomation(CategoryAutomationName);
+
+                    RI_TrySetEditableSearchText(SearchWidget, FText::GetEmpty());
+                    CacheActorPageSearchTextFromPanel();
+                    RefreshActorSearchViews();
+                    bCategorySearchRestoreOk = ActorPropertiesSectionWidget.IsValid()
+                        && !ActorPropertiesSectionWidget->IsCategoryExpandedVisualForAutomation(CategoryAutomationName);
+                }
+            }
+
+            if (ActorPropertiesSectionWidget.IsValid() && !CategoryAutomationName.IsEmpty())
+            {
+                ActorPropertiesSectionWidget->SetCategoryExpandedForAutomation(CategoryAutomationName, true);
+            }
         }
     }
 
@@ -15438,17 +20025,53 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
         && FMath::Abs(PropertyColorHeight - ExpectedValueControlHeight) <= HeightTolerance
         && FMath::Abs(MaterialVectorHeight - ExpectedValueControlHeight) <= HeightTolerance;
 
+    const bool bStructuredTransformContractOk =
+        (bStructuredTransformItemFound && bStructuredTransformCommitOk)
+        || (bStructuredTransformLocationFound
+            && bStructuredTransformRotationFound
+            && bStructuredTransformScaleFound
+            && bStructuredTransformLocationCommitOk
+            && bStructuredTransformRotationCommitOk
+            && bStructuredTransformScaleCommitOk);
+
+    const FString StructuredTransformContractName = bStructuredTransformItemFound
+        ? StructuredTransformPropertyName
+        : FString::Printf(
+            TEXT("%s|%s|%s"),
+            *StructuredTransformLocationName,
+            *StructuredTransformRotationName,
+            *StructuredTransformScaleName);
+
     const bool bPassed = GroupCount > 0
+        && bRootContractOk
+        && !bVisibleActorRootRow
+        && bVisibleComponentsRootRow
+        && bComponentsHeaderOk
+        && bActorHeaderSelectedOk
+        && bFreshOpenActorStripOk
+        && bFreshOpenSharedStripHidden
         && bSidebarHostOk
+        && bSplitLayoutOk
         && bWorkspaceHostOk
         && bSidebarFillOk
         && bWorkspaceFillOk
-        && bSelectionBandOk
-        && bSelectionBandOrderOk
+        && bActorStripOk
+        && bActorStripOrderOk
+        && bSharedStripHidden
+        && bSelectionBandHidden
         && bPropertyBoxVisible
         && bFunctionBoxVisible
         && bPropertyScrollOk
+        && bPropertyTouchOk
+        && bActorRootTransformBlockVisible
+        && bActorRootTransformRowsFound
+        && bActorRootTransformCommitOk
+        && bActorRootTransformTrackingOk
+        && CategorySectionCount > 0
         && bFunctionScrollOk
+        && bFunctionTouchOk
+        && bGroupTouchOk
+        && bPinnedTouchOk
         && bFunctionSummaryOk
         && bFooterOk
         && bLegacySelectionHeaderHidden
@@ -15459,6 +20082,10 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
         && bStarReady
         && bFocusedComponentOk
         && bColorItemFound
+        && bStructuredVectorItemFound
+        && bStructuredVectorCommitOk
+        && bStructuredRotatorItemFound
+        && bStructuredTransformContractOk
         && bMaterialScalarRowOk
         && bMaterialVectorRowOk
         && bMaterialFavoriteVisible
@@ -15467,6 +20094,10 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
         && bTouchHeightContractOk
         && bSearchBindingOk
         && bSearchFilterOk
+        && bCategoryToggleOk
+        && bCategoryPageMemoryOk
+        && bCategorySearchAutoExpandOk
+        && bCategorySearchRestoreOk
         && bMaterialSingleClickExpandOk
         && bMaterialTreeFound
         && bMaterialTreeExpandedOk
@@ -15474,23 +20105,53 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
         && bMaterialSlotSelectionOk;
 
     OutReport = FString::Printf(
-        TEXT("ActorPageStructureSelfTest=%s | Groups=%d | Sidebar=%d/%d Workspace=%d/%d Selection=%d/%d Footer=%d LegacyHeader=%d VisibleLegacy=%d | PropertyBox=%d Scroll=%d | FunctionBox=%d Scroll=%d SummaryHidden=%d | Columns=%d Left=%.2f Right=%.2f | Vertical=%d Property=%.2f Function=%.2f Dominant=%d | Starred=%d | FocusedComponent=%s | FocusOk=%d | ColorProperty=%s | ColorItem=%d | Swatch=%d | ValueHeights=%d Text=%s:%.1f Bool=%s:%.1f Color=%.1f MaterialScalar=%d(%s:%.1f) MaterialVector=%d(%s:%.1f) Touch=%d Favorite=%.1f/%.1f | Search=%d/%d Entries=%d->%d | MaterialStar=%d | MaterialTree=%d/%d/%d/%d/%d Component=%s Slot=%s Keys=%s | Summary=%s"),
+        TEXT("ActorPageStructureSelfTest=%s | Groups=%d Roots=%d/%d/%d/%d Header=%d/%d Rows=%d/%d | FreshOpen=%d/%d Strip=%d Search=%d | Sidebar=%d/%d Split=%d/%d/%d Workspace=%d/%d ContextStrip=%d/%d/%d/%d LegacySelectionHidden=%d Footer=%d LegacyHeader=%d VisibleLegacy=%d | PropertyBox=%d Scroll=%d Touch=%d ActorXform=%d/%d/%d/%d[%s|%s] Categories=%d[%s] | FunctionBox=%d Scroll=%d Touch=%d SummaryHidden=%d | GroupTouch=%d PinnedTouch=%d | Columns=%d Left=%.2f Right=%.2f | Vertical=%d Property=%.2f Function=%.2f Dominant=%d | Starred=%d | FocusedComponent=%s | FocusOk=%d | ColorProperty=%s | ColorItem=%d | Struct=%d Vec=%s/%d Rot=%s/%d Xform=%s/%d | Swatch=%d | ValueHeights=%d Text=%s:%.1f Bool=%s:%.1f Color=%.1f MaterialScalar=%d(%s:%.1f) MaterialVector=%d(%s:%.1f) Touch=%d Favorite=%.1f/%.1f | Search=%d/%d Entries=%d->%d | CategoryToggle=%d/%d/%d/%d Name=%s Query=%s | MaterialStar=%d | MaterialTree=%d/%d/%d/%d/%d Component=%s Slot=%s Keys=%s | Summary=%s"),
         bPassed ? TEXT("PASS") : TEXT("FAIL"),
         GroupCount,
+        bRootContractOk ? 1 : 0,
+        bRootsContainComponents ? 1 : 0,
+        bRootsContainPinned ? 1 : 0,
+        bRootsContainActor ? 1 : 0,
+        bComponentsHeaderOk ? 1 : 0,
+        bActorHeaderSelectedOk ? 1 : 0,
+        bVisibleComponentsRootRow ? 1 : 0,
+        bVisibleActorRootRow ? 1 : 0,
+        bFreshOpenActorStripOk ? 1 : 0,
+        bFreshOpenSharedStripHidden ? 1 : 0,
+        FreshOpenStripIndex,
+        FreshOpenSearchIndex,
         bSidebarHostOk ? 1 : 0,
         bSidebarFillOk ? 1 : 0,
+        bSplitExpected ? 1 : 0,
+        bSplitLayoutOk ? 1 : 0,
+        bSplitSidebarVisible ? 1 : 0,
         bWorkspaceHostOk ? 1 : 0,
         bWorkspaceFillOk ? 1 : 0,
-        bSelectionBandOk ? 1 : 0,
-        bSelectionBandOrderOk ? 1 : 0,
+        bActorStripOk ? 1 : 0,
+        bActorStripOrderOk ? 1 : 0,
+        ActorStripIndex,
+        bSharedStripHidden ? 1 : 0,
+        bSelectionBandHidden ? 1 : 0,
         bFooterOk ? 1 : 0,
         bLegacySelectionHeaderHidden ? 1 : 0,
         VisibleLegacySiblingCount,
         bPropertyBoxVisible ? 1 : 0,
         bPropertyScrollOk ? 1 : 0,
+        bPropertyTouchOk ? 1 : 0,
+        bActorRootTransformBlockVisible ? 1 : 0,
+        bActorRootTransformRowsFound ? 1 : 0,
+        bActorRootTransformCommitOk ? 1 : 0,
+        bActorRootTransformTrackingOk ? 1 : 0,
+        *ActorRootTransformPropertyNames,
+        *ActorRootTransformSummary,
+        CategorySectionCount,
+        *CategorySummary,
         bFunctionBoxVisible ? 1 : 0,
         bFunctionScrollOk ? 1 : 0,
+        bFunctionTouchOk ? 1 : 0,
         bFunctionSummaryOk ? 1 : 0,
+        bGroupTouchOk ? 1 : 0,
+        bPinnedTouchOk ? 1 : 0,
         bColumnRatioOk ? 1 : 0,
         LeftRatio,
         RightRatio,
@@ -15503,6 +20164,13 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
         bFocusedComponentOk ? 1 : 0,
         *ColorPropertyName,
         bColorItemFound ? 1 : 0,
+        (bStructuredVectorItemFound && bStructuredVectorCommitOk && bStructuredRotatorItemFound && bStructuredTransformContractOk) ? 1 : 0,
+        *StructuredVectorPropertyName,
+        bStructuredVectorCommitOk ? 1 : 0,
+        *StructuredRotatorPropertyName,
+        bStructuredRotatorItemFound ? 1 : 0,
+        *StructuredTransformContractName,
+        bStructuredTransformContractOk ? 1 : 0,
         bSwatchVisible ? 1 : 0,
         bValueHeightContractOk ? 1 : 0,
         *TextInputPropertyName,
@@ -15523,6 +20191,12 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
         bSearchFilterOk ? 1 : 0,
         UnfilteredSearchEntryCount,
         FilteredSearchEntryCount,
+        bCategoryToggleOk ? 1 : 0,
+        bCategoryPageMemoryOk ? 1 : 0,
+        bCategorySearchAutoExpandOk ? 1 : 0,
+        bCategorySearchRestoreOk ? 1 : 0,
+        *CategoryAutomationName,
+        *CategorySearchPropertyName,
         bMaterialFavoriteVisible ? 1 : 0,
         bMaterialSingleClickExpandOk ? 1 : 0,
         bMaterialTreeFound ? 1 : 0,
@@ -16119,8 +20793,7 @@ bool UInspectorWorldSubsystem::RunFilePromoteWorkflowSelfTest(FString& OutReport
     auto EnsureComparePageReady = [&](FString& OutInjectionReport) -> UInspectorFilePageWidget*
     {
         Close();
-        Open();
-        ShowFilePage();
+        OpenToPage(ERIVisiblePage::Changes);
         UInspectorFilePageWidget* ComparePage = FilePageWidget.Get();
         const bool bInjectionOkLocal = ComparePage != nullptr || RunFilePageInjectionSelfTest(OutInjectionReport);
         if (!ComparePage)
@@ -16429,8 +21102,7 @@ bool UInspectorWorldSubsystem::RunFileCompareViewSelfTest(FString& OutReport)
     auto EnsureComparePageReady = [&](FString& OutInjectionReport) -> UInspectorFilePageWidget*
     {
         Close();
-        Open();
-        ShowFilePage();
+        OpenToPage(ERIVisiblePage::Changes);
         UInspectorFilePageWidget* ComparePage = FilePageWidget.Get();
         const bool bInjectionOkLocal = ComparePage != nullptr || RunFilePageInjectionSelfTest(OutInjectionReport);
         if (!ComparePage)
@@ -16630,8 +21302,7 @@ bool UInspectorWorldSubsystem::RunFileRemoteSessionCompareViewSelfTest(FString& 
     auto EnsureToolsPageReady = [&](FString& OutInjectionReport) -> UInspectorTestPageWidget*
     {
         Close();
-        Open();
-        ShowTestPage();
+        OpenToPage(ERIVisiblePage::Tools);
         UInspectorTestPageWidget* ComparePage = TestPageWidget.Get();
         const bool bInjectionOkLocal = ComparePage != nullptr || RunWorkflowPageViewSelfTest(OutInjectionReport);
         if (!ComparePage)
@@ -16875,8 +21546,7 @@ bool UInspectorWorldSubsystem::RunFileRoleCompareViewSelfTest(FString& OutReport
     auto EnsureToolsPageReady = [&](FString& OutInjectionReport) -> UInspectorTestPageWidget*
     {
         Close();
-        Open();
-        ShowTestPage();
+        OpenToPage(ERIVisiblePage::Tools);
         UInspectorTestPageWidget* ComparePage = TestPageWidget.Get();
         const bool bInjectionOkLocal = ComparePage != nullptr || RunWorkflowPageViewSelfTest(OutInjectionReport);
         if (!ComparePage)
@@ -17714,8 +22384,7 @@ bool UInspectorWorldSubsystem::RunRuntimeSessionRoleSelfTest(FString& OutReport)
     auto EnsureSettingsPageReady = [&](FString& OutInjectionReport) -> UInspectorSettingsPageWidget*
     {
         Close();
-        Open();
-        ShowSettingsPage();
+        OpenToPage(ERIVisiblePage::Settings);
         UInspectorSettingsPageWidget* Page = SettingsPageWidget.Get();
         if (Page)
         {
@@ -18017,74 +22686,142 @@ FString UInspectorWorldSubsystem::RunRuntimeRoleCompareSelfTestSimple()
 bool UInspectorWorldSubsystem::PickActorUnderCursor()
 {
 #if RUNTIME_INSPECTOR_ENABLED
-    APlayerController* PC = GetLocalPC();
-    if (!PC) return false;
-
-    // 你也可以改成 ECC_Camera / 自定义 TraceChannel
-    FHitResult Hit;
-    const bool bHit = PC->GetHitResultUnderCursorByChannel(
-        UEngineTypes::ConvertToTraceType(ECC_Visibility),
-        /*bTraceComplex=*/ true,
-        Hit
-    );
-
-    AActor* HitActor = Hit.GetActor();
-    if (!bHit || !HitActor) return false;
-
-    // ✅ 这里要复用你现有“选中一个Actor后”的逻辑
-    // 常见是：SelectedActor = HitActor; Refresh/RequestRebuild/OnInspectorRefreshEx 等
-    // 我不写伪代码：你项目里一般是走 SetSelectedActor / SetSelectedObject 这类函数
-    // 直接调用你已有的“设置选中”的函数即可，例如：
-    SetSelectedActor(HitActor);   // <- 用你项目里真实存在的函数名替换/对应
-    return true;
+    return PickActorAtMousePositionInternal(TEXT("PickActorUnderCursor"));
 #else
     return false;
+#endif
+}
+
+bool UInspectorWorldSubsystem::HandleRightMousePickInput(bool bCtrlDown, bool bShiftDown)
+{
+#if !RUNTIME_INSPECTOR_ENABLED
+    return false;
+#else
+    if (!bOpen)
+    {
+        return false;
+    }
+
+    const URuntimeInspectorSettings* Settings = GetDefault<URuntimeInspectorSettings>();
+    if (!Settings || !Settings->bEnableRightMousePick)
+    {
+        return false;
+    }
+
+    if (Settings->bRightMousePickRequiresCtrl && !bCtrlDown)
+    {
+        return false;
+    }
+
+    if (Settings->bRightMousePickRequiresShift && !bShiftDown)
+    {
+        return false;
+    }
+
+    PickActorAtMousePositionInternal(TEXT("RightMouse"));
+    return true;
+#endif
+}
+
+bool UInspectorWorldSubsystem::PickActorAtMousePositionInternal(const TCHAR* SourceTag)
+{
+#if !RUNTIME_INSPECTOR_ENABLED
+    return false;
+#else
+    if (!bOpen)
+    {
+        UpdateLastPickDebugSummary(SourceTag, false, TEXT("None"), TEXT("None"), TEXT("PanelClosed"));
+        return false;
+    }
+
+    APlayerController* PC = GetLocalPC();
+    if (!PC)
+    {
+        UpdateLastPickDebugSummary(SourceTag, false, TEXT("None"), TEXT("None"), TEXT("NoPlayerController"));
+        return false;
+    }
+
+    float MouseX = 0.f;
+    float MouseY = 0.f;
+    bool bHasMousePosition = PC->GetMousePosition(MouseX, MouseY);
+    if (!bHasMousePosition)
+    {
+        UWorld* World = GetWorld();
+        UGameViewportClient* ViewportClient = World ? World->GetGameViewport() : nullptr;
+        FSceneViewport* SceneViewport = ViewportClient ? ViewportClient->GetGameViewport() : nullptr;
+        if (SceneViewport)
+        {
+            FIntPoint ViewportMousePos(INDEX_NONE, INDEX_NONE);
+            SceneViewport->GetMousePos(ViewportMousePos, true);
+            if (ViewportMousePos.X >= 0 && ViewportMousePos.Y >= 0)
+            {
+                MouseX = static_cast<float>(ViewportMousePos.X);
+                MouseY = static_cast<float>(ViewportMousePos.Y);
+                bHasMousePosition = true;
+            }
+        }
+    }
+
+    if (!bHasMousePosition)
+    {
+        UpdateLastPickDebugSummary(SourceTag, false, TEXT("None"), TEXT("None"), TEXT("NoMousePosition"));
+        return false;
+    }
+
+    FHitResult Hit;
+    TArray<TEnumAsByte<EObjectTypeQuery>> ObjectTypes;
+    ObjectTypes.Reserve(6);
+    ObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECC_Pawn));
+    ObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECC_WorldStatic));
+    ObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECC_WorldDynamic));
+    ObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECC_PhysicsBody));
+    ObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECC_Vehicle));
+    ObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECC_Destructible));
+    const bool bHit = PC->GetHitResultAtScreenPosition(
+        FVector2D(MouseX, MouseY),
+        ObjectTypes,
+        true,
+        Hit);
+
+    AActor* HitActor = bHit ? Hit.GetActor() : nullptr;
+    const FString ActorPath = HitActor ? HitActor->GetPathName() : TEXT("None");
+    const FString ComponentName = Hit.GetComponent() ? Hit.GetComponent()->GetName() : TEXT("None");
+    if (!HitActor)
+    {
+        UpdateLastPickDebugSummary(SourceTag, false, ActorPath, ComponentName, bHit ? TEXT("HitWithoutActor") : TEXT("NoHit"));
+        return false;
+    }
+
+    SetSelectedActor(HitActor);
+    UpdateLastPickDebugSummary(SourceTag, true, ActorPath, ComponentName, TEXT("Selected"));
+    return true;
+#endif
+}
+
+void UInspectorWorldSubsystem::UpdateLastPickDebugSummary(
+    const TCHAR* SourceTag,
+    bool bHit,
+    const FString& ActorPath,
+    const FString& ComponentName,
+    const TCHAR* Reason)
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    LastPickDebugSummary = FString::Printf(
+        TEXT("Source=%s Query=ObjectUnderCursor Hit=%d Actor=%s Component=%s Reason=%s"),
+        SourceTag ? SourceTag : TEXT("Unknown"),
+        bHit ? 1 : 0,
+        ActorPath.IsEmpty() ? TEXT("None") : *ActorPath,
+        ComponentName.IsEmpty() ? TEXT("None") : *ComponentName,
+        Reason ? Reason : TEXT("Unknown"));
+    UE_CLOG(RI_IsDebugLogEnabled(), LogRuntimeInspector, Log, TEXT("[RI][Pick] %s"), *LastPickDebugSummary);
 #endif
 }
 
 
 void UInspectorWorldSubsystem::PickActorInView()
 {
-    UE_CLOG(RI_IsDebugLogEnabled(), LogRuntimeInspector, Log, TEXT("Test:::::::PickActorInView"));
 #if RUNTIME_INSPECTOR_ENABLED
-    if (!bOpen) return;
-
-    APlayerController* PC = GetLocalPC();
-    if (!PC) return;
-
-    // 1) 拿鼠标在 viewport 内的坐标（像素）
-    float MouseX = 0.f;
-    float MouseY = 0.f;
-    if (!PC->GetMousePosition(MouseX, MouseY))
-    {
-        return;
-    }
-
-    // 2) 反投影到世界射线
-    FVector WorldOrigin;
-    FVector WorldDir;
-    if (!PC->DeprojectScreenPositionToWorld(MouseX, MouseY, WorldOrigin, WorldDir))
-    {
-        return;
-    }
-
-    const FVector Start = WorldOrigin;
-    const FVector End = Start + WorldDir * 100000.f;
-
-    FHitResult Hit;
-    FCollisionQueryParams Params(SCENE_QUERY_STAT(RuntimeInspectorPick), true);
-    Params.bReturnPhysicalMaterial = false;
-
-    // 可选：避免点到自己控制的Pawn/Character（如果你想）
-    // if (APawn* Pawn = PC->GetPawn()) { Params.AddIgnoredActor(Pawn); }
-
-    if (GetWorld()->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, Params))
-    {
-        if (AActor* HitActor = Hit.GetActor())
-        {
-            SetSelectedActor(HitActor);
-        }
-    }
+    PickActorAtMousePositionInternal(TEXT("PickActorInView"));
 #endif
 }
 
@@ -18138,10 +22875,18 @@ void UInspectorWorldSubsystem::SetSelectedActor(AActor* NewActor)
 
     // 2) Set new selection + bind
     SelectedActor = NewActor;
-    SelectedInspectObject = NewActor;
-    SelectedMaterialSlotIndex = INDEX_NONE;
-    SelectedGroupKey.Reset();
+    if (NewActor)
+    {
+        RememberSelectedActorRecoveryIdentity(NewActor);
+        bSelectedActorRecoveryPending = false;
+        SelectedActorRecoveryWaitSeconds = 0.f;
+    }
+    else
+    {
+        ClearSelectedActorRecoveryState();
+    }
     BindToSelectedActor(NewActor);
+    ApplySelectedActorRootState(NewActor);
 
     if (NewActor)
     {
@@ -18164,6 +22909,7 @@ void UInspectorWorldSubsystem::SetSelectedActor(AActor* NewActor)
 
     // 切换选中对象：清理 ItemPool，避免旧 Items 残留
     ClearItemPool();
+    MarkActorPageStructureDirty();
     // New session baseline for this selection
     CaptureBaselineForSelection(/*bIncludeMaterialParams=*/ true);
     RefreshPanel(EInspectorRefreshReason::StructureChanged);
@@ -18181,6 +22927,7 @@ void UInspectorWorldSubsystem::RefreshPanel()
 void UInspectorWorldSubsystem::RequestActorPageRefresh()
 {
 #if RUNTIME_INSPECTOR_ENABLED
+    MarkActorPageStructureDirty();
     RefreshPanel(EInspectorRefreshReason::StructureChanged);
 #endif
 }
@@ -18188,9 +22935,64 @@ void UInspectorWorldSubsystem::RequestActorPageRefresh()
 void UInspectorWorldSubsystem::RefreshPanel(EInspectorRefreshReason Reason)
 {
 #if RUNTIME_INSPECTOR_ENABLED
+    const double StartSeconds = FPlatformTime::Seconds();
+    ApplyPanelInteractionPresentation();
+    const ERIVisiblePage VisiblePage = GetVisiblePage();
+    const bool bActorPageVisible = VisiblePage == ERIVisiblePage::Actor;
+    UE_LOG(
+        LogRuntimeInspector,
+        Log,
+        TEXT("[RI][Perf] RefreshPanel Begin | Page=%d Reason=%d"),
+        static_cast<int32>(VisiblePage),
+        static_cast<int32>(Reason));
+
+    if (!bActorPageVisible)
+    {
+        switch (VisiblePage)
+        {
+        case ERIVisiblePage::Changes:
+            if (UInspectorFilePageWidget* FilePage = FilePageWidget.Get())
+            {
+                if (Reason == EInspectorRefreshReason::ValuesChanged)
+                {
+                    FilePage->RefreshFastFromSubsystem();
+                }
+                else
+                {
+                    FilePage->RefreshFromSubsystem();
+                }
+            }
+            break;
+        case ERIVisiblePage::Settings:
+            if (UInspectorSettingsPageWidget* SettingsPage = SettingsPageWidget.Get())
+            {
+                SettingsPage->RefreshFromSubsystem();
+            }
+            break;
+        case ERIVisiblePage::Tools:
+            if (UInspectorTestPageWidget* TestPage = TestPageWidget.Get())
+            {
+                TestPage->RefreshFromSubsystem();
+            }
+            break;
+        case ERIVisiblePage::Actor:
+        default:
+            break;
+        }
+
+        UpdateSharedContextStrip();
+        UE_LOG(
+            LogRuntimeInspector,
+            Log,
+            TEXT("[RI][Perf] RefreshPanel %.2f ms | Page=%d Reason=%d"),
+            (FPlatformTime::Seconds() - StartSeconds) * 1000.0,
+            static_cast<int32>(VisiblePage),
+            static_cast<int32>(Reason));
+        return;
+    }
+
     BindActorSearchBox();
     CacheActorPageSearchTextFromPanel();
-    UpdateSharedContextStrip();
     if (UUserWidget* W = PanelWidget.Get())
     {
         RI_EnsureInspectBodyLayout(W);
@@ -18198,46 +23000,63 @@ void UInspectorWorldSubsystem::RefreshPanel(EInspectorRefreshReason Reason)
     EnsureActorGroupsSectionInjected();
     EnsureActorPropertiesSectionInjected();
     EnsureActorFunctionsSectionInjected();
-    UpdateActorWorkspaceSelectionBand();
+
+    const bool bStructureRefresh =
+        Reason == EInspectorRefreshReason::StructureChanged
+        || Reason == EInspectorRefreshReason::TargetInvalid;
+
+    if (bStructureRefresh)
+    {
+        if (UUserWidget* W = PanelWidget.Get())
+        {
+            static const FName RefreshExName(TEXT("OnInspectorRefreshEx"));
+            if (UFunction* Fn = W->GetClass()->FindFunctionByName(RefreshExName))
+            {
+                struct FParams
+                {
+                    EInspectorRefreshReason Reason;
+                };
+                FParams Params{ Reason };
+                W->ProcessEvent(Fn, &Params);
+            }
+            else
+            {
+                static const FName RefreshName(TEXT("OnInspectorRefresh"));
+                if (UFunction* FnOld = W->GetClass()->FindFunctionByName(RefreshName))
+                {
+                    W->ProcessEvent(FnOld, nullptr);
+                }
+            }
+
+            RI_EnsureInspectBodyLayout(W);
+        }
+
+        RefreshActorGroupsSection();
+        RefreshActorPropertiesSection(true);
+        RefreshActorFunctionsSection();
+        LastActorPageStructureKey = BuildActorPageStructureKey();
+        bActorPageStructureDirty = false;
+    }
+    else
+    {
+        RefreshActorPropertiesSection(IsActorOnlyModifiedFilterEnabled());
+        RefreshActorValuePresentation();
+    }
+
     if (UUserWidget* W = PanelWidget.Get())
     {
-        // 推荐：WBP 实现 OnInspectorRefreshEx(Reason)
-        static const FName RefreshExName(TEXT("OnInspectorRefreshEx"));
-        if (UFunction* Fn = W->GetClass()->FindFunctionByName(RefreshExName))
-        {
-            struct FParams
-            {
-                EInspectorRefreshReason Reason;
-            };
-            FParams Params{ Reason };
-            W->ProcessEvent(Fn, &Params);
-            RI_EnsureInspectBodyLayout(W);
-            RefreshActorGroupsSection();
-            UpdateActorWorkspaceSelectionBand();
-            EnsureActorPropertiesSectionInjected();
-            RefreshActorPropertiesSection();
-            RefreshActorFunctionsSection();
-            RI_ApplyLegacyActorHeaderVisibilityFix(W);
-            RI_UpdateActorPropertyHeader(W, GetFocusedInspectObject());
-            return;
-        }
-
-        // 兼容旧：OnInspectorRefresh()
-        static const FName RefreshName(TEXT("OnInspectorRefresh"));
-        if (UFunction* FnOld = W->GetClass()->FindFunctionByName(RefreshName))
-        {
-            W->ProcessEvent(FnOld, nullptr);
-        }
-
-        RI_EnsureInspectBodyLayout(W);
-        RefreshActorGroupsSection();
-        UpdateActorWorkspaceSelectionBand();
-        EnsureActorPropertiesSectionInjected();
-        RefreshActorPropertiesSection();
-        RefreshActorFunctionsSection();
         RI_ApplyLegacyActorHeaderVisibilityFix(W);
         RI_UpdateActorPropertyHeader(W, GetFocusedInspectObject());
     }
+
+    UpdateActorWorkspaceSelectionBand();
+    UE_LOG(
+        LogRuntimeInspector,
+        Log,
+        TEXT("[RI][Perf] RefreshPanel %.2f ms | Page=%d Reason=%d"),
+        (FPlatformTime::Seconds() - StartSeconds) * 1000.0,
+        static_cast<int32>(VisiblePage),
+        static_cast<int32>(Reason));
 #endif
 }
 void UInspectorWorldSubsystem::SetGroupExpanded(const FString& GroupKey, bool bExpanded)
@@ -18262,14 +23081,6 @@ void UInspectorWorldSubsystem::GetGroupTreeRootsForSelected(const FString& Searc
     if (!ActorPtr) return;
 
     const bool bSearchMode = !SearchText.IsEmpty();
-
-    UInspectorGroupItem* ActorGroup = GetOrCreateGroupItem(TEXT("ROOT_ACTOR"));
-    ActorGroup->Kind = EInspectorGroupKind::RootActor;
-    ActorGroup->DisplayName = TEXT("Actor");
-    ActorGroup->StableKey = TEXT("ROOT_ACTOR");
-    ActorGroup->Depth = 0;
-    ActorGroup->bExpanded = bSearchMode ? true : GetGroupExpanded(ActorGroup->StableKey, true);
-    OutRoots.Add(ActorGroup);
 
     UInspectorGroupItem* CompRoot = GetOrCreateGroupItem(TEXT("ROOT_COMPONENTS"));
     CompRoot->Kind = EInspectorGroupKind::RootComponents;
@@ -18575,7 +23386,7 @@ void UInspectorWorldSubsystem::GetGroupTreeChildrenForItem(
         }
         return;
     }
-       
+
 
     // 2) 如果 Parent 是一个“真实组件节点”，并且它是 StaticMeshComponent -> 返回一个 MaterialsRoot
     //    注意：这里要排除 Parent 自己就是 MaterialsRoot/Slot 的情况（靠 StableKey 判断）
@@ -18735,15 +23546,6 @@ void UInspectorWorldSubsystem::GetGroupItemsForSelected(const FString& SearchTex
 
     const bool bSearchMode = !SearchText.IsEmpty();
 
-    // Actor 根组
-    UInspectorGroupItem* ActorGroup = GetOrCreateGroupItem(TEXT("ROOT_ACTOR"));
-    ActorGroup->Kind = EInspectorGroupKind::RootActor;
-    ActorGroup->DisplayName = TEXT("Actor");
-    ActorGroup->StableKey = TEXT("ROOT_ACTOR");
-    ActorGroup->Depth = 0;
-    ActorGroup->bExpanded = bSearchMode ? true : GetGroupExpanded(ActorGroup->StableKey, true);
-    OutGroups.Add(ActorGroup);
-
     // Components 根组
     UInspectorGroupItem* CompRoot = GetOrCreateGroupItem(TEXT("ROOT_COMPONENTS"));
     CompRoot->Kind = EInspectorGroupKind::RootComponents;
@@ -18804,7 +23606,7 @@ void UInspectorWorldSubsystem::GetGroupItemsForSelected(const FString& SearchTex
 
                     const FString SlotKey = MatRootKey + FString::Printf(TEXT(":MAT:%d"), Slot);
 
-                    
+
                     UInspectorGroupItem* SlotGroup = GetOrCreateGroupItem(SlotKey);
                     SlotGroup->Kind = EInspectorGroupKind::Component;
                     SlotGroup->TargetObject = SMC;
@@ -18837,7 +23639,7 @@ void UInspectorWorldSubsystem::GetPropertyItemsForSelected(const FString& Search
 #if RUNTIME_INSPECTOR_ENABLED
 
 
-   
+
     OutItems.Reset();
 
     AActor* TargetActor = SelectedActor.Get();
@@ -18942,7 +23744,7 @@ void UInspectorWorldSubsystem::GetPinnedItemsForSelected(const FString& SearchTe
         // 如果你不希望 pinned 被搜索框影响，可以直接注释掉这一段
         if (bSearchMode && !K.Contains(SearchText)) continue;
 
-       
+
         // ---------- 新格式：M|ActorPath|CompPath|Slot|TypeInt|ParamName ----------
         if (K.Contains(TEXT("|")))
         {
@@ -19234,6 +24036,7 @@ void UInspectorWorldSubsystem::RecordChange(const FInspectorChange& Change)
 
     UndoStack.Add(Change);
     RedoStack.Reset();
+    InvalidateFileManagementSummaryCache();
 
     // 可选：打印一条日志
     UE_CLOG(RI_IsDebugLogEnabled(), LogRuntimeInspector, Log, TEXT("[RI] Record: %s.%s %s -> %s"),
@@ -19284,7 +24087,7 @@ void UInspectorWorldSubsystem::OnPickKeyPressed()
         }
     }
 
-    PickActorInView();
+    PickActorAtMousePositionInternal(TEXT("PickKey"));
 #endif
 }
 
@@ -19535,7 +24338,7 @@ void UInspectorWorldSubsystem::UnregisterInputProcessor()
     if (!FSlateApplication::IsInitialized())
     {
         InputProcessor.Reset();
-       
+
         return;
     }
 
@@ -19578,6 +24381,54 @@ bool UInspectorWorldSubsystem::GetGroupExpanded(const FString& GroupKey, bool bD
     return bDefault;
 }
 
+FString UInspectorWorldSubsystem::BuildPropertyCategoryStateKey(const UObject* TargetObject, const FString& PrimaryCategory) const
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    const UObject* EffectiveTarget = TargetObject ? TargetObject : GetFocusedInspectObject();
+    const FString TargetToken = (EffectiveTarget && EffectiveTarget->GetClass())
+        ? EffectiveTarget->GetClass()->GetPathName()
+        : TEXT("None");
+    const FString GroupToken = SelectedGroupKey.IsEmpty() ? TEXT("ACTOR_ROOT") : SelectedGroupKey;
+    const FString CategoryToken = PrimaryCategory.TrimStartAndEnd().IsEmpty()
+        ? TEXT("Default")
+        : PrimaryCategory.TrimStartAndEnd();
+
+    return FString::Printf(
+        TEXT("%s|mode=%d|group=%s|cat=%s"),
+        *TargetToken,
+        static_cast<int32>(PropertyViewMode),
+        *GroupToken,
+        *CategoryToken);
+#else
+    return FString();
+#endif
+}
+
+bool UInspectorWorldSubsystem::GetPropertyCategoryExpanded(const UObject* TargetObject, const FString& PrimaryCategory, bool bDefault) const
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    const FString StateKey = BuildPropertyCategoryStateKey(TargetObject, PrimaryCategory);
+    if (const bool* Found = PropertyCategoryExpandedMap.Find(StateKey))
+    {
+        return *Found;
+    }
+    return bDefault;
+#else
+    return bDefault;
+#endif
+}
+
+void UInspectorWorldSubsystem::SetPropertyCategoryExpanded(const UObject* TargetObject, const FString& PrimaryCategory, bool bExpanded)
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    const FString StateKey = BuildPropertyCategoryStateKey(TargetObject, PrimaryCategory);
+    if (!StateKey.IsEmpty())
+    {
+        PropertyCategoryExpandedMap.Add(StateKey, bExpanded);
+    }
+#endif
+}
+
 void UInspectorWorldSubsystem::ToggleGroupExpanded(const FString& GroupKey, bool bDefault)
 {
     const bool Current = GetGroupExpanded(GroupKey, bDefault);
@@ -19592,7 +24443,7 @@ void UInspectorWorldSubsystem::ToggleGroupExpanded(const FString& GroupKey, bool
 //{
 //    bool& b = GroupExpandedMap.FindOrAdd(GroupKey);
 //    b = !b;
-//	
+//
 //    // 这里不主动“推 UI 刷新”，因为你的 UI 刷新逻辑在 BP 里：
 //    // 组标题点击后：ToggleGroupExpanded -> 再调用 GetPropertyItemsForSelected -> SetListItems
 //}
@@ -19703,7 +24554,7 @@ void UInspectorWorldSubsystem::AppendPropertiesForObject(
     //    if (!NameMatchesSearch(PropNameStr, SearchText)) continue;
 
     //    UInspectorPropertyItem* Item = NewObject<UInspectorPropertyItem>(this);
-    //    Item->Init(TargetObject, Prop->GetFName());    
+    //    Item->Init(TargetObject, Prop->GetFName());
     //    OutItems.Add(Item);
     //}
 	//// 旧版参考v0.1（注释掉以免误导）：
@@ -19949,10 +24800,115 @@ void UInspectorWorldSubsystem::HandleSelectedActorDestroyed(AActor* DestroyedAct
 #if RUNTIME_INSPECTOR_ENABLED
     if (DestroyedActor && DestroyedActor == SelectedActor.Get())
     {
-        SelectedActor = nullptr;
-        ClearItemPool();
-        RefreshPanel(EInspectorRefreshReason::TargetInvalid);
+        BeginSelectedActorRecovery(DestroyedActor);
+        TryRecoverSelectedActorFromIdentity();
     }
+#endif
+}
+
+void UInspectorWorldSubsystem::RememberSelectedActorRecoveryIdentity(AActor* Actor)
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    if (!Actor)
+    {
+        return;
+    }
+
+    SelectedActorRecoveryPath = Actor->GetPathName();
+    SelectedActorRecoveryBaseName = RI_ExtractActorBaseName(Actor->GetName());
+    SelectedActorRecoveryDisplayLabel = RI_GetActorDisplayLabel(Actor);
+
+    if (UClass* ActorClass = Actor->GetClass())
+    {
+        SelectedActorRecoveryClassPath = ActorClass->GetPathName();
+        SelectedActorRecoveryClassDisplayLabel = ActorClass->GetName();
+    }
+    else
+    {
+        SelectedActorRecoveryClassPath.Reset();
+        SelectedActorRecoveryClassDisplayLabel.Reset();
+    }
+#else
+    (void)Actor;
+#endif
+}
+
+void UInspectorWorldSubsystem::ClearSelectedActorRecoveryState()
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    SelectedActorRecoveryPath.Reset();
+    SelectedActorRecoveryBaseName.Reset();
+    SelectedActorRecoveryClassPath.Reset();
+    SelectedActorRecoveryDisplayLabel.Reset();
+    SelectedActorRecoveryClassDisplayLabel.Reset();
+    bSelectedActorRecoveryPending = false;
+    SelectedActorRecoveryWaitSeconds = 0.f;
+#endif
+}
+
+void UInspectorWorldSubsystem::BeginSelectedActorRecovery(AActor* PreviousActor)
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    RememberSelectedActorRecoveryIdentity(PreviousActor);
+    bSelectedActorRecoveryPending = !SelectedActorRecoveryPath.IsEmpty() || !SelectedActorRecoveryBaseName.IsEmpty();
+    SelectedActorRecoveryWaitSeconds = 0.f;
+
+    if (PreviousActor)
+    {
+        SetActorOutline(PreviousActor, false);
+    }
+
+    OutlinedActor.Reset();
+    UnbindFromSelectedActor();
+    SelectedActor = nullptr;
+    ClearItemPool();
+
+    UE_LOG(
+        LogRuntimeInspector,
+        Log,
+        TEXT("[RI][SelectionRecovery] Started | Path=%s Class=%s Base=%s"),
+        *SelectedActorRecoveryPath,
+        *SelectedActorRecoveryClassPath,
+        *SelectedActorRecoveryBaseName);
+#else
+    (void)PreviousActor;
+#endif
+}
+
+bool UInspectorWorldSubsystem::TryRecoverSelectedActorFromIdentity()
+{
+#if !RUNTIME_INSPECTOR_ENABLED
+    return false;
+#else
+    if (SelectedActor.IsValid())
+    {
+        bSelectedActorRecoveryPending = false;
+        SelectedActorRecoveryWaitSeconds = 0.f;
+        return true;
+    }
+
+    if (SelectedActorRecoveryPath.IsEmpty() && SelectedActorRecoveryBaseName.IsEmpty())
+    {
+        return false;
+    }
+
+    AActor* RecoveredActor = ResolveRuntimeActorTarget(
+        SelectedActorRecoveryPath,
+        SelectedActorRecoveryClassPath,
+        SelectedActorRecoveryBaseName);
+    if (!RecoveredActor)
+    {
+        return false;
+    }
+
+    UE_LOG(
+        LogRuntimeInspector,
+        Log,
+        TEXT("[RI][SelectionRecovery] Recovered | Wanted=%s Actual=%s"),
+        *SelectedActorRecoveryPath,
+        *RecoveredActor->GetPathName());
+    SetSelectedActor(RecoveredActor);
+    return true;
 #endif
 }
 
@@ -19975,19 +24931,134 @@ UInspectorGroupItem* UInspectorWorldSubsystem::GetOrCreateGroupItem(const FStrin
 
 UInspectorPropertyItem* UInspectorWorldSubsystem::GetOrCreatePropertyItem(UObject* TargetObject, FName PropertyName)
 {
+    const auto IsActorWorldSyntheticProperty = [](FName InPropertyName) -> bool
+    {
+        return InPropertyName == TEXT("ActorWorldLocation")
+            || InPropertyName == TEXT("ActorWorldRotation")
+            || InPropertyName == TEXT("ActorWorldScale");
+    };
+
+    const auto GetSyntheticTrackingProperty = [](FName InPropertyName) -> FName
+    {
+        if (InPropertyName == TEXT("ActorWorldLocation"))
+        {
+            return TEXT("RelativeLocation");
+        }
+        if (InPropertyName == TEXT("ActorWorldRotation"))
+        {
+            return TEXT("RelativeRotation");
+        }
+        if (InPropertyName == TEXT("ActorWorldScale"))
+        {
+            return TEXT("RelativeScale3D");
+        }
+        return NAME_None;
+    };
+
+    const auto GetSyntheticKind = [](FName InPropertyName) -> UInspectorPropertyItem::ESyntheticKind
+    {
+        if (InPropertyName == TEXT("ActorWorldLocation"))
+        {
+            return UInspectorPropertyItem::ESyntheticKind::ActorWorldLocation;
+        }
+        if (InPropertyName == TEXT("ActorWorldRotation"))
+        {
+            return UInspectorPropertyItem::ESyntheticKind::ActorWorldRotation;
+        }
+        if (InPropertyName == TEXT("ActorWorldScale"))
+        {
+            return UInspectorPropertyItem::ESyntheticKind::ActorWorldScale;
+        }
+        return UInspectorPropertyItem::ESyntheticKind::None;
+    };
+
     const FString Key = FString::Printf(TEXT("PROP:%s:%s"),
         *GetNameSafe(TargetObject),
         *PropertyName.ToString());
 
     if (TObjectPtr<UObject>* Found = ItemPool.Find(Key))
     {
-        return Cast<UInspectorPropertyItem>(*Found);
+        if (UInspectorPropertyItem* FoundItem = Cast<UInspectorPropertyItem>(*Found))
+        {
+            if (AActor* Actor = Cast<AActor>(TargetObject); Actor && IsActorWorldSyntheticProperty(PropertyName))
+            {
+                if (USceneComponent* RootComponent = Actor->GetRootComponent())
+                {
+                    FoundItem->InitSyntheticActorWorld(
+                        Actor,
+                        PropertyName,
+                        RootComponent,
+                        GetSyntheticTrackingProperty(PropertyName),
+                        GetSyntheticKind(PropertyName));
+                }
+            }
+            return FoundItem;
+        }
+        return nullptr;
     }
 
     UInspectorPropertyItem* NewItem = NewObject<UInspectorPropertyItem>(this);
-    NewItem->Init(TargetObject, PropertyName);
+    if (AActor* Actor = Cast<AActor>(TargetObject); Actor && IsActorWorldSyntheticProperty(PropertyName))
+    {
+        if (USceneComponent* RootComponent = Actor->GetRootComponent())
+        {
+            NewItem->InitSyntheticActorWorld(
+                Actor,
+                PropertyName,
+                RootComponent,
+                GetSyntheticTrackingProperty(PropertyName),
+                GetSyntheticKind(PropertyName));
+        }
+        else
+        {
+            NewItem->Init(TargetObject, PropertyName);
+        }
+    }
+    else
+    {
+        NewItem->Init(TargetObject, PropertyName);
+    }
     ItemPool.Add(Key, NewItem);
     return NewItem;
+}
+
+void UInspectorWorldSubsystem::GetActorWorldTransformPropertyItems(TArray<UInspectorPropertyItem*>& OutItems)
+{
+    OutItems.Reset();
+
+#if RUNTIME_INSPECTOR_ENABLED
+    if (!IsActorRootSelectionActive())
+    {
+        return;
+    }
+
+    AActor* Actor = Cast<AActor>(GetFocusedInspectObject());
+    if (!Actor)
+    {
+        Actor = SelectedActor.Get();
+    }
+    if (!Actor || !Actor->GetRootComponent())
+    {
+        return;
+    }
+
+    static const FName LocationName(TEXT("ActorWorldLocation"));
+    static const FName RotationName(TEXT("ActorWorldRotation"));
+    static const FName ScaleName(TEXT("ActorWorldScale"));
+
+    if (UInspectorPropertyItem* LocationItem = GetOrCreatePropertyItem(Actor, LocationName))
+    {
+        OutItems.Add(LocationItem);
+    }
+    if (UInspectorPropertyItem* RotationItem = GetOrCreatePropertyItem(Actor, RotationName))
+    {
+        OutItems.Add(RotationItem);
+    }
+    if (UInspectorPropertyItem* ScaleItem = GetOrCreatePropertyItem(Actor, ScaleName))
+    {
+        OutItems.Add(ScaleItem);
+    }
+#endif
 }
 
 UInspectorMaterialParamItem* UInspectorWorldSubsystem::GetOrCreateMaterialItem(
@@ -20124,7 +25195,7 @@ void UInspectorWorldSubsystem::ToggleFavoriteForItem(UInspectorPropertyItem* Ite
     if (!Item) return;
 
 
-    
+
 
     UObject* TargetObj = Item->GetTargetObject();
     const FName PropName = Item->GetPropertyFName();
@@ -20150,14 +25221,14 @@ void UInspectorWorldSubsystem::ToggleFavoriteForItem(UInspectorPropertyItem* Ite
 
 
 
-    
+
 
     UE_CLOG(RI_IsDebugLogEnabled(), LogRuntimeInspector, Warning, TEXT("[RI] After=%d  Contains=%d"),
         FavoriteKeys.Num(),
         FavoriteKeys.Contains(Key));
 
-    // 这里用你现有刷新机制：建议当作 UIStateChanged
-    RefreshPanel(/*EInspectorRefreshReason::UIStateChanged*/);
+    MarkActorPageStructureDirty();
+    RefreshPanel(EInspectorRefreshReason::StructureChanged);
 #endif
 }
 
@@ -20347,6 +25418,7 @@ void UInspectorWorldSubsystem::ToggleFavoriteForAnyItem(UObject* Item)
             *Key, Before, FavoriteKeys.Num());
 
         SaveFavorites();
+        MarkActorPageStructureDirty();
         RefreshPanel(EInspectorRefreshReason::StructureChanged);
         return;
     }
@@ -20369,11 +25441,12 @@ void UInspectorWorldSubsystem::ToggleFavoriteForAnyItem(UObject* Item)
         }
 
         SaveFavorites();
+        MarkActorPageStructureDirty();
         RefreshPanel(EInspectorRefreshReason::StructureChanged);
         return;
     }
 
-    
+
 #endif
 }
 
@@ -21141,6 +26214,10 @@ bool UInspectorWorldSubsystem::ExecuteFilePromoteApplyAction(FString& OutSummary
     FString Error;
     const bool bOk = PromotePatchToSource(GetStagedPatch(), Result, Error);
     LastPromoteResult = Result;
+    if (!SelectedActor.IsValid() || bSelectedActorRecoveryPending)
+    {
+        TryRecoverSelectedActorFromIdentity();
+    }
 
     if (bOk)
     {
@@ -21474,7 +26551,14 @@ bool UInspectorWorldSubsystem::RequestApplyPropertyText(UObject* TargetObject, F
     // (Most of our widgets use the same text source, so this breaks the loop.)
     {
         FString CurrentText;
-        InspectorPropertyUtils::GetValueAsText(TargetObject, PropertyName, CurrentText);
+        if (UInspectorPropertyItem* ExistingItem = GetOrCreatePropertyItem(TargetObject, PropertyName))
+        {
+            CurrentText = ExistingItem->GetValueText();
+        }
+        else
+        {
+            InspectorPropertyUtils::GetValueAsText(TargetObject, PropertyName, CurrentText);
+        }
         if (CurrentText == NewText)
         {
             return true;
@@ -21536,6 +26620,25 @@ bool UInspectorWorldSubsystem::ApplyPropertyTextNow(UObject* TargetObject, FName
     {
         OutError = TEXT("Invalid target/property");
         return false;
+    }
+
+    UInspectorPropertyItem* StructuredItem = GetOrCreatePropertyItem(TargetObject, PropertyName);
+    if (StructuredItem)
+    {
+        const EInspectorValueType ValueType = StructuredItem->GetValueType();
+        const bool bIsSceneTransformFamily =
+            Cast<USceneComponent>(TargetObject)
+            && ((PropertyName == TEXT("RelativeLocation") && ValueType == EInspectorValueType::Vector3)
+                || (PropertyName == TEXT("RelativeRotation") && ValueType == EInspectorValueType::Rotator)
+                || (PropertyName == TEXT("RelativeScale3D") && ValueType == EInspectorValueType::Vector3)
+                || (PropertyName == TEXT("RelativeTransform") && ValueType == EInspectorValueType::Transform));
+        const bool bIsStandaloneTransformProperty = ValueType == EInspectorValueType::Transform;
+        const bool bIsSyntheticActorWorldTransform = StructuredItem->IsSyntheticActorWorldTransform();
+
+        if (bIsSceneTransformFamily || bIsStandaloneTransformProperty || bIsSyntheticActorWorldTransform)
+        {
+            return StructuredItem->ApplyFromText(NewText, OutError);
+        }
     }
 
     // Old value (for undo + modified tracking)
@@ -21616,8 +26719,9 @@ void UInspectorWorldSubsystem::FlushPendingPropertyApplies()
 #if RUNTIME_INSPECTOR_ENABLED
     if (PendingPropertyApplyByKey.Num() == 0) return;
 
+    const double StartSeconds = FPlatformTime::Seconds();
     const double Now = FPlatformTime::Seconds();
-    bool bAnyApplied = false;
+    TArray<TPair<TWeakObjectPtr<UObject>, FName>> ChangedProperties;
 
     // Iterate by copy of keys to allow removal while iterating.
     TArray<FString> Keys;
@@ -21666,18 +26770,46 @@ void UInspectorWorldSubsystem::FlushPendingPropertyApplies()
             InspectorPropertyUtils::GetValueAsText(Target, P->PropertyName, AfterText);
             if (BeforeText != AfterText)
             {
-                bAnyApplied = true;
+                ChangedProperties.Emplace(Target, P->PropertyName);
             }
         }
 
         PendingPropertyApplyByKey.Remove(Key);
     }
 
-    if (bAnyApplied)
+    if (ChangedProperties.Num() > 0)
     {
-        // Keep this light: refresh values without rebuilding structure.
-        RefreshPanel(EInspectorRefreshReason::ValuesChanged);
+        if (GetVisiblePage() == ERIVisiblePage::Actor)
+        {
+            if (IsActorOnlyModifiedFilterEnabled())
+            {
+                MarkActorPageStructureDirty();
+                RefreshActorPropertiesSection(true);
+                RefreshActorValuePresentation();
+            }
+            else
+            {
+                for (const TPair<TWeakObjectPtr<UObject>, FName>& Entry : ChangedProperties)
+                {
+                    if (UObject* TargetObject = Entry.Key.Get())
+                    {
+                        RefreshActorPropertyValue(TargetObject, Entry.Value, false);
+                    }
+                }
+            }
+        }
+        else
+        {
+            RefreshPanel(EInspectorRefreshReason::ValuesChanged);
+        }
     }
+
+    UE_LOG(
+        LogRuntimeInspector,
+        Log,
+        TEXT("[RI][Perf] FlushPendingPropertyApplies %.2f ms | Changed=%d"),
+        (FPlatformTime::Seconds() - StartSeconds) * 1000.0,
+        ChangedProperties.Num());
 #endif
 }
 
@@ -21939,6 +27071,21 @@ bool UInspectorWorldSubsystem::TryBuildPatchOperationFromModifiedKey(const FStri
                 if (UMeshComponent* MeshComp = Cast<UMeshComponent>(Component))
                 {
                     OutOperation.Target.MaterialSlotName = RI_GetMeshMaterialSlotName(MeshComp, MaterialSlotIndex);
+                    const FString MaterialSourceAssetPath = RI_ResolveMaterialPromoteSourceAssetPath(MeshComp->GetMaterial(MaterialSlotIndex));
+                    if (!MaterialSourceAssetPath.IsEmpty())
+                    {
+                        OutOperation.SourceTag = FString::Printf(TEXT("Material:%s"), *MaterialSourceAssetPath);
+                    }
+
+                    UE_LOG(
+                        LogRuntimeInspector,
+                        Log,
+                        TEXT("[RI][PromoteMaterial] Stage Key=%s Slot=%d Param=%s SourceTag=%s RuntimeMaterial=%s"),
+                        *Key,
+                        MaterialSlotIndex,
+                        *ParamName,
+                        *OutOperation.SourceTag,
+                        *GetNameSafe(MeshComp->GetMaterial(MaterialSlotIndex)));
                 }
             }
         }
@@ -22789,7 +27936,7 @@ bool UInspectorWorldSubsystem::ExportSnapshot(bool bOnlyModified, FString& OutFi
                 // M|ActorPath|CompPath|Slot|TypeInt|ParamName
                 if (Parts.Num() >= 6)
                 {
-                 
+
                     const FString ActorPath = Parts[1];
                     const FString ActorBase = RI_ExtractActorBaseName(RI_ExtractTailAfterLastDot(ActorPath));
 
@@ -22832,7 +27979,7 @@ bool UInspectorWorldSubsystem::ExportSnapshot(bool bOnlyModified, FString& OutFi
                 if (!IsSupportedByInspector(Prop)) continue;
                 if (Whitelist && !Whitelist->Contains(Prop->GetFName())) continue;
 
-               
+
 
                 FString ValText;
                 if (!InspectorPropertyUtils::GetValueAsText(Obj, Prop->GetFName(), ValText))
@@ -22863,7 +28010,7 @@ bool UInspectorWorldSubsystem::ExportSnapshot(bool bOnlyModified, FString& OutFi
                     }
                 }
 
-                if (!InspectorPropertyUtils::CanSetFromText(Obj, Prop)) 
+                if (!InspectorPropertyUtils::CanSetFromText(Obj, Prop))
                 {
                     continue;
                 }
@@ -23785,7 +28932,7 @@ bool UInspectorWorldSubsystem::ImportSnapshot(const FString& InFilePath, FString
             UInspectorPropertyItem* Temp = NewObject<UInspectorPropertyItem>(this);
             Temp->Init(TargetObj, FName(*PropNameStr));
 
-  
+
             const FString OldText = Temp->GetValueText();
 
             double ValueIntD = 0.0;
@@ -24139,7 +29286,7 @@ static bool RI_IsUnderDir(const FString& FilePath, const FString& DirPath)
 
 void UInspectorWorldSubsystem::CopySnapshotPathToClipboard(const FString& FullPath)
 {
-    
+
 
     if (FullPath.IsEmpty())
     {
@@ -24153,7 +29300,7 @@ void UInspectorWorldSubsystem::CopySnapshotPathToClipboard(const FString& FullPa
     }
 }
 
-bool UInspectorWorldSubsystem::DeleteSnapshotFile(const FString& FullPath, FString& OutError) 
+bool UInspectorWorldSubsystem::DeleteSnapshotFile(const FString& FullPath, FString& OutError)
 {
     OutError.Reset();
 
@@ -24573,9 +29720,20 @@ bool UInspectorWorldSubsystem::IsItemModified(UObject* Item) const
 void UInspectorWorldSubsystem::ClearSelectedGroupItem()
 {
 #if RUNTIME_INSPECTOR_ENABLED
-    SelectedInspectObject = nullptr;
-    SelectedMaterialSlotIndex = INDEX_NONE;
-    SelectedGroupKey.Reset();
+    if (SelectedActor.IsValid())
+    {
+        ApplySelectedActorRootState();
+    }
+    else
+    {
+        SelectedInspectObject = nullptr;
+        SelectedMaterialSlotIndex = INDEX_NONE;
+        SelectedGroupKey.Reset();
+        PropertyViewMode = ERIPropertyViewMode::Full;
+        ViewMeshComp = nullptr;
+        ViewMaterialSlot = INDEX_NONE;
+        MarkActorPageStructureDirty();
+    }
 #endif
 }
 
@@ -24592,24 +29750,23 @@ void UInspectorWorldSubsystem::SetSelectedGroupItem(UInspectorGroupItem* Item)
 
     if (!Item) return;
 
-    // 3) ROOT_ACTOR：强制显示 Actor
+    // 3) ROOT_ACTOR：内部 actor-level 锚点，不再要求 UI 上有单独一行
     if (Item->StableKey == TEXT("ROOT_ACTOR"))
     {
-        SelectedInspectObject = ActorPtr;
+        ApplySelectedActorRootState(ActorPtr);
         return;
     }
 
-    // 4) ROOT_COMPONENTS：一般不显示任何组件属性（你想显示 Actor 也行）
+    // 4) ROOT_COMPONENTS：继续回到 actor-level，避免把 Components 根误当成具体组件
     if (Item->StableKey == TEXT("ROOT_COMPONENTS"))
     {
-        SelectedInspectObject = ActorPtr;
+        ApplySelectedActorRootState(ActorPtr);
         return;
     }
 
     if (RI_IsPinnedRootKey(Item->StableKey))
     {
-        SelectedInspectObject = ActorPtr;
-        PropertyViewMode = ERIPropertyViewMode::Full;
+        ApplySelectedActorRootState(ActorPtr);
         return;
     }
 
@@ -24663,6 +29820,7 @@ void UInspectorWorldSubsystem::SetSelectedGroupItem(UInspectorGroupItem* Item)
         // 这里用你项目里“默认模式”的枚举值替换（比如 All / Default / ActorAndComponents 等）
         PropertyViewMode = ERIPropertyViewMode::Full;
     }
+    MarkActorPageStructureDirty();
 #endif
 }
 
@@ -24735,6 +29893,7 @@ bool UInspectorWorldSubsystem::FocusSelectedActorComponentByName(const FString& 
     PropertyViewMode = ERIPropertyViewMode::Full;
     ViewMeshComp = nullptr;
     ViewMaterialSlot = INDEX_NONE;
+    MarkActorPageStructureDirty();
     RefreshPanel(EInspectorRefreshReason::StructureChanged);
     return true;
 #endif
@@ -24877,12 +30036,7 @@ bool UInspectorWorldSubsystem::NavigateToPinnedItem(UObject* ItemObject, FString
         }
         else
         {
-            SelectedInspectObject = TargetActor;
-            SelectedGroupKey = TEXT("ROOT_ACTOR");
-            SelectedMaterialSlotIndex = INDEX_NONE;
-            PropertyViewMode = ERIPropertyViewMode::Full;
-            ViewMeshComp = nullptr;
-            ViewMaterialSlot = INDEX_NONE;
+            ApplySelectedActorRootState(TargetActor);
             RefreshPanel(EInspectorRefreshReason::StructureChanged);
         }
 
@@ -25027,12 +30181,7 @@ bool UInspectorWorldSubsystem::NavigateToPinnedItem(UObject* ItemObject, FString
         }
         else
         {
-            SelectedInspectObject = TargetActor;
-            SelectedGroupKey = TEXT("ROOT_ACTOR");
-            SelectedMaterialSlotIndex = INDEX_NONE;
-            PropertyViewMode = ERIPropertyViewMode::Full;
-            ViewMeshComp = nullptr;
-            ViewMaterialSlot = INDEX_NONE;
+            ApplySelectedActorRootState(TargetActor);
             RefreshPanel(EInspectorRefreshReason::StructureChanged);
         }
 

@@ -6,6 +6,9 @@
 #include "InspectorTypes.h"
 #include "InspectorPropertyItem.generated.h"
 
+class AActor;
+class USceneComponent;
+
 
 UCLASS(BlueprintType)
 class RUNTIMEINSPECTOR_API UInspectorPropertyItem : public UObject
@@ -13,10 +16,29 @@ class RUNTIMEINSPECTOR_API UInspectorPropertyItem : public UObject
     GENERATED_BODY()
 
 public:
+    enum class ESyntheticKind : uint8
+    {
+        None,
+        ActorWorldLocation,
+        ActorWorldRotation,
+        ActorWorldScale,
+    };
+
     void Init(UObject* InTarget, FName InPropertyName);
+    void InitSyntheticActorWorld(
+        AActor* InActor,
+        FName InSyntheticPropertyName,
+        USceneComponent* InTrackingRootComponent,
+        FName InTrackingPropertyName,
+        ESyntheticKind InSyntheticKind);
 
     UFUNCTION(BlueprintCallable, Category = "RuntimeInspector")
     FString GetPropertyName() const;
+
+    FString GetPropertyNameWithoutOwnerPrefix() const;
+    FString GetCategoryPath() const;
+    FString GetPrimaryCategoryName() const;
+    FString GetSubcategoryPath() const;
 
     UFUNCTION(BlueprintCallable, Category = "RuntimeInspector")
     FString GetValueText();
@@ -99,7 +121,19 @@ public:
 
     UFUNCTION(BlueprintPure, Category = "RuntimeInspector")
     FName GetPropertyFName() const { return PropertyName; }
+
+    UFUNCTION(BlueprintPure, Category = "RuntimeInspector")
+    UObject* GetTrackingTargetObject() const;
+
+    UFUNCTION(BlueprintPure, Category = "RuntimeInspector")
+    FName GetTrackingPropertyFName() const;
+
+    bool IsSyntheticItem() const { return SyntheticKind != ESyntheticKind::None; }
+    bool IsSyntheticActorWorldTransform() const;
 private:
     TWeakObjectPtr<UObject> Target;
     FName PropertyName;
+    TWeakObjectPtr<UObject> TrackingTarget;
+    FName TrackingPropertyName;
+    ESyntheticKind SyntheticKind = ESyntheticKind::None;
 };

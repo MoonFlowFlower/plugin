@@ -20,7 +20,7 @@ $PackageRoot = Join-Path $ValidationRoot "Package"
 $ExePath = Join-Path $PackageRoot "Windows\PluginMaker.exe"
 $StatePath = Join-Path $ValidationRoot "state.json"
 $RunLogPath = Join-Path $ProjectRoot "Saved\run_packaged_runtime_validation.log"
-$PortCandidates = 9897..9901
+$PortCandidates = 12097..12101
 
 function Test-TcpPort {
     param(
@@ -196,7 +196,7 @@ if (-not $ReadyPort) {
         Stop-Process -Id $Process.Id -Force -ErrorAction Stop
     } catch {
     }
-    throw "Packaged validation runtime bridge did not begin listening on ports 9897-9901."
+    throw "Packaged validation runtime bridge did not begin listening on ports 12097-12101."
 }
 
 $ReadyState = [ordered]@{

@@ -1,6 +1,7 @@
 #include "InspectorSettingsPageWidget.h"
 
 #include "InspectorCompactWidgetUtils.h"
+#include "InspectorTouchScrollBox.h"
 #include "InspectorWorldSubsystem.h"
 
 #include "Blueprint/WidgetTree.h"
@@ -70,15 +71,25 @@ UInspectorSettingsPageWidget::UInspectorSettingsPageWidget(const FObjectInitiali
     SetIsFocusable(true);
 }
 
+bool UInspectorSettingsPageWidget::HasTouchScrollSupportForAutomation() const
+{
+    return RIInspectorTouchScroll::HasTouchSupport(PageScrollBox);
+}
+
 void UInspectorSettingsPageWidget::SetInspectorSubsystem(UInspectorWorldSubsystem* InSubsystem)
 {
     CancelDeferredRefresh();
     Subsystem = InSubsystem;
+    RefreshFromSubsystem();
 }
 
 TSharedRef<SWidget> UInspectorSettingsPageWidget::RebuildWidget()
 {
-    if (WidgetTree && !WidgetTree->RootWidget)
+    const bool bHasUsableBlueprintLayout = PageScrollBox
+        || (WidgetTree && (WidgetTree->FindWidget(TEXT("PageScrollBox")) != nullptr
+            || WidgetTree->FindWidget(TEXT("RI_SettingsScroll")) != nullptr));
+
+    if (WidgetTree && (!WidgetTree->RootWidget || !bHasUsableBlueprintLayout))
     {
         BuildWidgetTree();
     }
@@ -89,12 +100,25 @@ TSharedRef<SWidget> UInspectorSettingsPageWidget::RebuildWidget()
 void UInspectorSettingsPageWidget::NativeConstruct()
 {
     Super::NativeConstruct();
+    if (!PageScrollBox && WidgetTree)
+    {
+        PageScrollBox = Cast<UScrollBox>(WidgetTree->FindWidget(TEXT("PageScrollBox")));
+        if (!PageScrollBox)
+        {
+            PageScrollBox = Cast<UScrollBox>(WidgetTree->FindWidget(TEXT("RI_SettingsScroll")));
+        }
+    }
+    RIInspectorTouchScroll::Configure(PageScrollBox);
+    bControlsReady = false;
+    BindControlDelegates();
     RefreshFromSubsystem();
+    bControlsReady = true;
 }
 
 void UInspectorSettingsPageWidget::NativeDestruct()
 {
     CancelDeferredRefresh();
+    bControlsReady = false;
     PendingCaptureTarget = ERIHotkeyCaptureTarget::None;
     Super::NativeDestruct();
 }
@@ -132,6 +156,148 @@ void UInspectorSettingsPageWidget::HandleDeferredRefreshTimerElapsed()
     const double StartSeconds = FPlatformTime::Seconds();
     RefreshFromSubsystem();
     UE_LOG(LogRuntimeInspector, Log, TEXT("[RI][Perf] Snapshot DeferredRefresh %.2f ms"), (FPlatformTime::Seconds() - StartSeconds) * 1000.0);
+}
+
+bool UInspectorSettingsPageWidget::ShouldIgnoreControlChange() const
+{
+    return bRefreshingUI || !bControlsReady;
+}
+
+void UInspectorSettingsPageWidget::ResetControlReferences()
+{
+    ToggleKeyValueText = nullptr;
+    PickKeyValueText = nullptr;
+    DirtyStateText = nullptr;
+    StatusMessageText = nullptr;
+    CaptureHintText = nullptr;
+    RuntimeEnabledValueText = nullptr;
+    DisabledReasonValueText = nullptr;
+    SessionValueText = nullptr;
+    NetModeValueText = nullptr;
+    SelectedActorValueText = nullptr;
+    SelectedRoleValueText = nullptr;
+    LockStateValueText = nullptr;
+    UnlockCodeValueText = nullptr;
+    OutlineMaterialValueText = nullptr;
+    CustomDepthValueText = nullptr;
+    PageScrollBox = nullptr;
+    ThemePresetComboBox = nullptr;
+    ToggleKeyButton = nullptr;
+    PickKeyButton = nullptr;
+    SaveButton = nullptr;
+    ResetButton = nullptr;
+    PickRequiresCtrlCheckBox = nullptr;
+    PickRequiresShiftCheckBox = nullptr;
+    EnableRightMousePickCheckBox = nullptr;
+    RightMousePickRequiresCtrlCheckBox = nullptr;
+    RightMousePickRequiresShiftCheckBox = nullptr;
+    EnableOutlineCheckBox = nullptr;
+    EnableApplyDebounceCheckBox = nullptr;
+    RequireUnlockCheckBox = nullptr;
+    AutoLockOnCloseCheckBox = nullptr;
+    OutlineWeightSpinBox = nullptr;
+    ApplyDebounceSecondsSpinBox = nullptr;
+}
+
+void UInspectorSettingsPageWidget::EnsureThemePresetOptions()
+{
+    if (!ThemePresetComboBox)
+    {
+        return;
+    }
+
+    ThemePresetComboBox->ClearOptions();
+    ThemePresetComboBox->AddOption(RI_GetThemePresetLabel(ERuntimeInspectorThemePreset::StudioSlate));
+    ThemePresetComboBox->AddOption(RI_GetThemePresetLabel(ERuntimeInspectorThemePreset::SoftContrast));
+    RICompactUI::ConfigureComboBoxString(ThemePresetComboBox, RI_SettingsTextColor(), 180.0f, RICompactUI::ERIInputVisualStyle::Strong);
+}
+
+void UInspectorSettingsPageWidget::BindControlDelegates()
+{
+    EnsureThemePresetOptions();
+
+    if (ToggleKeyButton)
+    {
+        ToggleKeyButton->OnClicked.RemoveDynamic(this, &UInspectorSettingsPageWidget::HandleToggleKeyCaptureClicked);
+        ToggleKeyButton->OnClicked.AddDynamic(this, &UInspectorSettingsPageWidget::HandleToggleKeyCaptureClicked);
+    }
+    if (PickKeyButton)
+    {
+        PickKeyButton->OnClicked.RemoveDynamic(this, &UInspectorSettingsPageWidget::HandlePickKeyCaptureClicked);
+        PickKeyButton->OnClicked.AddDynamic(this, &UInspectorSettingsPageWidget::HandlePickKeyCaptureClicked);
+    }
+    if (PickRequiresCtrlCheckBox)
+    {
+        PickRequiresCtrlCheckBox->OnCheckStateChanged.RemoveDynamic(this, &UInspectorSettingsPageWidget::HandlePickRequiresCtrlChanged);
+        PickRequiresCtrlCheckBox->OnCheckStateChanged.AddDynamic(this, &UInspectorSettingsPageWidget::HandlePickRequiresCtrlChanged);
+    }
+    if (PickRequiresShiftCheckBox)
+    {
+        PickRequiresShiftCheckBox->OnCheckStateChanged.RemoveDynamic(this, &UInspectorSettingsPageWidget::HandlePickRequiresShiftChanged);
+        PickRequiresShiftCheckBox->OnCheckStateChanged.AddDynamic(this, &UInspectorSettingsPageWidget::HandlePickRequiresShiftChanged);
+    }
+    if (EnableRightMousePickCheckBox)
+    {
+        EnableRightMousePickCheckBox->OnCheckStateChanged.RemoveDynamic(this, &UInspectorSettingsPageWidget::HandleEnableRightMousePickChanged);
+        EnableRightMousePickCheckBox->OnCheckStateChanged.AddDynamic(this, &UInspectorSettingsPageWidget::HandleEnableRightMousePickChanged);
+    }
+    if (RightMousePickRequiresCtrlCheckBox)
+    {
+        RightMousePickRequiresCtrlCheckBox->OnCheckStateChanged.RemoveDynamic(this, &UInspectorSettingsPageWidget::HandleRightMousePickRequiresCtrlChanged);
+        RightMousePickRequiresCtrlCheckBox->OnCheckStateChanged.AddDynamic(this, &UInspectorSettingsPageWidget::HandleRightMousePickRequiresCtrlChanged);
+    }
+    if (RightMousePickRequiresShiftCheckBox)
+    {
+        RightMousePickRequiresShiftCheckBox->OnCheckStateChanged.RemoveDynamic(this, &UInspectorSettingsPageWidget::HandleRightMousePickRequiresShiftChanged);
+        RightMousePickRequiresShiftCheckBox->OnCheckStateChanged.AddDynamic(this, &UInspectorSettingsPageWidget::HandleRightMousePickRequiresShiftChanged);
+    }
+    if (EnableOutlineCheckBox)
+    {
+        EnableOutlineCheckBox->OnCheckStateChanged.RemoveDynamic(this, &UInspectorSettingsPageWidget::HandleEnableOutlineChanged);
+        EnableOutlineCheckBox->OnCheckStateChanged.AddDynamic(this, &UInspectorSettingsPageWidget::HandleEnableOutlineChanged);
+    }
+    if (OutlineWeightSpinBox)
+    {
+        OutlineWeightSpinBox->OnValueChanged.RemoveDynamic(this, &UInspectorSettingsPageWidget::HandleOutlineWeightChanged);
+        OutlineWeightSpinBox->OnValueChanged.AddDynamic(this, &UInspectorSettingsPageWidget::HandleOutlineWeightChanged);
+    }
+    if (EnableApplyDebounceCheckBox)
+    {
+        EnableApplyDebounceCheckBox->OnCheckStateChanged.RemoveDynamic(this, &UInspectorSettingsPageWidget::HandleEnableApplyDebounceChanged);
+        EnableApplyDebounceCheckBox->OnCheckStateChanged.AddDynamic(this, &UInspectorSettingsPageWidget::HandleEnableApplyDebounceChanged);
+    }
+    if (ApplyDebounceSecondsSpinBox)
+    {
+        ApplyDebounceSecondsSpinBox->OnValueChanged.RemoveDynamic(this, &UInspectorSettingsPageWidget::HandleApplyDebounceSecondsChanged);
+        ApplyDebounceSecondsSpinBox->OnValueChanged.AddDynamic(this, &UInspectorSettingsPageWidget::HandleApplyDebounceSecondsChanged);
+    }
+    if (ThemePresetComboBox)
+    {
+        ThemePresetComboBox->OnSelectionChanged.RemoveDynamic(this, &UInspectorSettingsPageWidget::HandleThemePresetSelectionChanged);
+        ThemePresetComboBox->OnSelectionChanged.AddDynamic(this, &UInspectorSettingsPageWidget::HandleThemePresetSelectionChanged);
+        ThemePresetComboBox->OnGenerateWidgetEvent.Unbind();
+        ThemePresetComboBox->OnGenerateWidgetEvent.BindDynamic(this, &UInspectorSettingsPageWidget::HandleGenerateThemePresetOptionWidget);
+    }
+    if (RequireUnlockCheckBox)
+    {
+        RequireUnlockCheckBox->OnCheckStateChanged.RemoveDynamic(this, &UInspectorSettingsPageWidget::HandleRequireUnlockChanged);
+        RequireUnlockCheckBox->OnCheckStateChanged.AddDynamic(this, &UInspectorSettingsPageWidget::HandleRequireUnlockChanged);
+    }
+    if (AutoLockOnCloseCheckBox)
+    {
+        AutoLockOnCloseCheckBox->OnCheckStateChanged.RemoveDynamic(this, &UInspectorSettingsPageWidget::HandleAutoLockOnCloseChanged);
+        AutoLockOnCloseCheckBox->OnCheckStateChanged.AddDynamic(this, &UInspectorSettingsPageWidget::HandleAutoLockOnCloseChanged);
+    }
+    if (SaveButton)
+    {
+        SaveButton->OnClicked.RemoveDynamic(this, &UInspectorSettingsPageWidget::HandleSaveClicked);
+        SaveButton->OnClicked.AddDynamic(this, &UInspectorSettingsPageWidget::HandleSaveClicked);
+    }
+    if (ResetButton)
+    {
+        ResetButton->OnClicked.RemoveDynamic(this, &UInspectorSettingsPageWidget::HandleResetClicked);
+        ResetButton->OnClicked.AddDynamic(this, &UInspectorSettingsPageWidget::HandleResetClicked);
+    }
 }
 
 FReply UInspectorSettingsPageWidget::NativeOnPreviewKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent)
@@ -193,6 +359,8 @@ void UInspectorSettingsPageWidget::BuildWidgetTree()
         return;
     }
 
+    ResetControlReferences();
+
     UBorder* RootBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("RI_SettingsRoot"));
     RootBorder->SetPadding(RICompactUI::GetPanelPadding());
     RootBorder->SetBrushColor(RICompactUI::GetPageBackgroundColor());
@@ -200,7 +368,8 @@ void UInspectorSettingsPageWidget::BuildWidgetTree()
     UVerticalBox* MainBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_SettingsMainBox"));
     RootBorder->SetContent(MainBox);
 
-    PageScrollBox = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("RI_SettingsScroll"));
+    PageScrollBox = WidgetTree->ConstructWidget<UInspectorTouchScrollBox>(UInspectorTouchScrollBox::StaticClass(), TEXT("PageScrollBox"));
+    RIInspectorTouchScroll::Configure(PageScrollBox);
     if (UVerticalBoxSlot* ScrollSlot = MainBox->AddChildToVerticalBox(PageScrollBox))
     {
         ScrollSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
@@ -275,48 +444,48 @@ void UInspectorSettingsPageWidget::BuildWidgetTree()
         TEXT("How the panel opens, picks targets, and responds to input."),
         true,
         TEXT("RI_SettingsInteractionCard"));
-    AddCardChild(InteractionCard, CreateKeybindRow(TEXT("Toggle Key"), ToggleKeyValueText, ToggleKeyButton));
-    AddCardChild(InteractionCard, CreateKeybindRow(TEXT("Pick Key"), PickKeyValueText, PickKeyButton));
-    AddCardChild(InteractionCard, CreateCheckRow(TEXT("Pick Requires Ctrl"), PickRequiresCtrlCheckBox));
-    AddCardChild(InteractionCard, CreateCheckRow(TEXT("Pick Requires Shift"), PickRequiresShiftCheckBox));
-    AddCardChild(InteractionCard, CreateCheckRow(TEXT("Enable Ctrl+RMB Pick"), EnableRightMousePickCheckBox));
-    AddCardChild(InteractionCard, CreateCheckRow(TEXT("RMB Requires Ctrl"), RightMousePickRequiresCtrlCheckBox));
-    AddCardChild(InteractionCard, CreateCheckRow(TEXT("RMB Requires Shift"), RightMousePickRequiresShiftCheckBox), true);
+    AddCardChild(InteractionCard, CreateKeybindRow(TEXT("Toggle Key"), ToggleKeyValueText, ToggleKeyButton, TEXT("ToggleKeyValueText"), TEXT("ToggleKeyButton")));
+    AddCardChild(InteractionCard, CreateKeybindRow(TEXT("Pick Key"), PickKeyValueText, PickKeyButton, TEXT("PickKeyValueText"), TEXT("PickKeyButton")));
+    AddCardChild(InteractionCard, CreateCheckRow(TEXT("Pick Requires Ctrl"), PickRequiresCtrlCheckBox, TEXT("PickRequiresCtrlCheckBox")));
+    AddCardChild(InteractionCard, CreateCheckRow(TEXT("Pick Requires Shift"), PickRequiresShiftCheckBox, TEXT("PickRequiresShiftCheckBox")));
+    AddCardChild(InteractionCard, CreateCheckRow(TEXT("Enable Ctrl+RMB Pick"), EnableRightMousePickCheckBox, TEXT("EnableRightMousePickCheckBox")));
+    AddCardChild(InteractionCard, CreateCheckRow(TEXT("RMB Requires Ctrl"), RightMousePickRequiresCtrlCheckBox, TEXT("RightMousePickRequiresCtrlCheckBox")));
+    AddCardChild(InteractionCard, CreateCheckRow(TEXT("RMB Requires Shift"), RightMousePickRequiresShiftCheckBox, TEXT("RightMousePickRequiresShiftCheckBox")), true);
 
     UVerticalBox* AppearanceCard = AddGroupCard(
         TEXT("Appearance"),
         TEXT("Tune outline behavior and theme without leaving the active runtime session."),
         true,
         TEXT("RI_SettingsAppearanceCard"));
-    AddCardChild(AppearanceCard, CreateCheckRow(TEXT("Enable Outline"), EnableOutlineCheckBox));
-    AddCardChild(AppearanceCard, CreateSpinRow(TEXT("Outline Weight"), OutlineWeightSpinBox));
-    AddCardChild(AppearanceCard, CreateThemePresetRow(TEXT("Theme Preset"), ThemePresetComboBox), true);
+    AddCardChild(AppearanceCard, CreateCheckRow(TEXT("Enable Outline"), EnableOutlineCheckBox, TEXT("EnableOutlineCheckBox")));
+    AddCardChild(AppearanceCard, CreateSpinRow(TEXT("Outline Weight"), OutlineWeightSpinBox, TEXT("OutlineWeightSpinBox")));
+    AddCardChild(AppearanceCard, CreateThemePresetRow(TEXT("Theme Preset"), ThemePresetComboBox, TEXT("ThemePresetComboBox")), true);
 
     UVerticalBox* ApplyCard = AddGroupCard(
         TEXT("Apply Flow"),
         TEXT("Reduce noisy writes while preserving responsive runtime editing."),
         true,
         TEXT("RI_SettingsApplyCard"));
-    AddCardChild(ApplyCard, CreateCheckRow(TEXT("Enable Apply Debounce"), EnableApplyDebounceCheckBox));
-    AddCardChild(ApplyCard, CreateSpinRow(TEXT("Debounce Seconds"), ApplyDebounceSecondsSpinBox), true);
+    AddCardChild(ApplyCard, CreateCheckRow(TEXT("Enable Apply Debounce"), EnableApplyDebounceCheckBox, TEXT("EnableApplyDebounceCheckBox")));
+    AddCardChild(ApplyCard, CreateSpinRow(TEXT("Debounce Seconds"), ApplyDebounceSecondsSpinBox, TEXT("ApplyDebounceSecondsSpinBox")), true);
 
     UVerticalBox* StatusCard = AddGroupCard(
         TEXT("Security & Runtime Status"),
         TEXT("Current guardrails and session health for the active inspector authority."),
         true,
         TEXT("RI_SettingsStatusCard"));
-    AddCardChild(StatusCard, CreateCheckRow(TEXT("Require Unlock"), RequireUnlockCheckBox));
-    AddCardChild(StatusCard, CreateCheckRow(TEXT("Auto Lock On Close"), AutoLockOnCloseCheckBox));
-    AddCardChild(StatusCard, CreateStatusRow(TEXT("Runtime"), RuntimeEnabledValueText));
-    AddCardChild(StatusCard, CreateStatusRow(TEXT("Disabled Reason"), DisabledReasonValueText, true));
-    AddCardChild(StatusCard, CreateStatusRow(TEXT("Session"), SessionValueText));
-    AddCardChild(StatusCard, CreateStatusRow(TEXT("Net Mode"), NetModeValueText));
-    AddCardChild(StatusCard, CreateStatusRow(TEXT("Selected Actor"), SelectedActorValueText, true));
-    AddCardChild(StatusCard, CreateStatusRow(TEXT("Selected Role"), SelectedRoleValueText));
-    AddCardChild(StatusCard, CreateStatusRow(TEXT("Lock State"), LockStateValueText));
-    AddCardChild(StatusCard, CreateStatusRow(TEXT("Unlock Code"), UnlockCodeValueText));
-    AddCardChild(StatusCard, CreateStatusRow(TEXT("Outline Material"), OutlineMaterialValueText, true));
-    AddCardChild(StatusCard, CreateStatusRow(TEXT("Custom Depth Stencil"), CustomDepthValueText), true);
+    AddCardChild(StatusCard, CreateCheckRow(TEXT("Require Unlock"), RequireUnlockCheckBox, TEXT("RequireUnlockCheckBox")));
+    AddCardChild(StatusCard, CreateCheckRow(TEXT("Auto Lock On Close"), AutoLockOnCloseCheckBox, TEXT("AutoLockOnCloseCheckBox")));
+    AddCardChild(StatusCard, CreateStatusRow(TEXT("Runtime"), RuntimeEnabledValueText, false, TEXT("RuntimeEnabledValueText")));
+    AddCardChild(StatusCard, CreateStatusRow(TEXT("Disabled Reason"), DisabledReasonValueText, true, TEXT("DisabledReasonValueText")));
+    AddCardChild(StatusCard, CreateStatusRow(TEXT("Session"), SessionValueText, false, TEXT("SessionValueText")));
+    AddCardChild(StatusCard, CreateStatusRow(TEXT("Net Mode"), NetModeValueText, false, TEXT("NetModeValueText")));
+    AddCardChild(StatusCard, CreateStatusRow(TEXT("Selected Actor"), SelectedActorValueText, true, TEXT("SelectedActorValueText")));
+    AddCardChild(StatusCard, CreateStatusRow(TEXT("Selected Role"), SelectedRoleValueText, false, TEXT("SelectedRoleValueText")));
+    AddCardChild(StatusCard, CreateStatusRow(TEXT("Lock State"), LockStateValueText, false, TEXT("LockStateValueText")));
+    AddCardChild(StatusCard, CreateStatusRow(TEXT("Unlock Code"), UnlockCodeValueText, false, TEXT("UnlockCodeValueText")));
+    AddCardChild(StatusCard, CreateStatusRow(TEXT("Outline Material"), OutlineMaterialValueText, true, TEXT("OutlineMaterialValueText")));
+    AddCardChild(StatusCard, CreateStatusRow(TEXT("Custom Depth Stencil"), CustomDepthValueText, false, TEXT("CustomDepthValueText")), true);
 
     UBorder* FooterBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("RI_SettingsFooter"));
     FooterBorder->SetPadding(RICompactUI::GetSurfaceCardPadding());
@@ -330,7 +499,7 @@ void UInspectorSettingsPageWidget::BuildWidgetTree()
     UVerticalBox* FooterBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_SettingsFooterBox"));
     FooterBorder->SetContent(FooterBox);
 
-    StatusMessageText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("TXT_SettingsStatus"));
+    StatusMessageText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("StatusMessageText"));
     StatusMessageText->SetAutoWrapText(true);
     RI_ApplyTextStyle(StatusMessageText, RICompactUI::GetValueFontSize(), false, RI_SettingsMutedTextColor());
     if (UVerticalBoxSlot* StatusSlot = FooterBox->AddChildToVerticalBox(StatusMessageText))
@@ -338,7 +507,7 @@ void UInspectorSettingsPageWidget::BuildWidgetTree()
         StatusSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
     }
 
-    CaptureHintText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("TXT_SettingsCaptureHint"));
+    CaptureHintText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("CaptureHintText"));
     CaptureHintText->SetAutoWrapText(true);
     RI_ApplyTextStyle(CaptureHintText, RICompactUI::GetValueFontSize(), false, RI_SettingsWarningColor());
     if (UVerticalBoxSlot* HintSlot = FooterBox->AddChildToVerticalBox(CaptureHintText))
@@ -346,100 +515,60 @@ void UInspectorSettingsPageWidget::BuildWidgetTree()
         HintSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
     }
 
+    DirtyStateText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("DirtyStateText"));
+    RI_ApplyTextStyle(DirtyStateText, RICompactUI::GetSectionTitleFontSize(), true, RI_SettingsWarningColor());
+    DirtyStateText->SetAutoWrapText(true);
+    if (UVerticalBoxSlot* DirtySlot = FooterBox->AddChildToVerticalBox(DirtyStateText))
+    {
+        DirtySlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+    }
+
     UHorizontalBox* FooterButtonsRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_SettingsFooterButtons"));
     FooterBox->AddChildToVerticalBox(FooterButtonsRow);
 
-    DirtyStateText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("TXT_SettingsDirty"));
-    RI_ApplyTextStyle(DirtyStateText, RICompactUI::GetSectionTitleFontSize(), true, RI_SettingsWarningColor());
-    DirtyStateText->SetAutoWrapText(true);
-    if (UHorizontalBoxSlot* DirtySlot = FooterButtonsRow->AddChildToHorizontalBox(DirtyStateText))
-    {
-        DirtySlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-        DirtySlot->SetPadding(FMargin(0.f, 0.f, 10.f, 0.f));
-        DirtySlot->SetVerticalAlignment(VAlign_Center);
-    }
-
     SaveButton = RICompactUI::MakeLabeledButton(
         WidgetTree,
-        TEXT("BTN_SettingsSave"),
+        TEXT("SaveButton"),
         TEXT("Save"),
         RICompactUI::ERIButtonVisualStyle::Primary,
-        88.0f);
-    SaveButton->OnClicked.AddDynamic(this, &UInspectorSettingsPageWidget::HandleSaveClicked);
+        0.0f);
     if (UHorizontalBoxSlot* SaveSlot = FooterButtonsRow->AddChildToHorizontalBox(SaveButton))
     {
-        SaveSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
-        SaveSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
+        SaveSlot->SetPadding(FMargin(0.f, 0.f, 6.f, 0.f));
+        SaveSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+        SaveSlot->SetHorizontalAlignment(HAlign_Fill);
     }
 
     ResetButton = RICompactUI::MakeLabeledButton(
         WidgetTree,
-        TEXT("BTN_SettingsReset"),
+        TEXT("ResetButton"),
         TEXT("Reset"),
         RICompactUI::ERIButtonVisualStyle::Danger,
-        88.0f);
-    ResetButton->OnClicked.AddDynamic(this, &UInspectorSettingsPageWidget::HandleResetClicked);
-    FooterButtonsRow->AddChildToHorizontalBox(ResetButton);
-
-    if (ToggleKeyButton)
+        0.0f);
+    if (UHorizontalBoxSlot* ResetSlot = FooterButtonsRow->AddChildToHorizontalBox(ResetButton))
     {
-        ToggleKeyButton->OnClicked.AddDynamic(this, &UInspectorSettingsPageWidget::HandleToggleKeyCaptureClicked);
-    }
-    if (PickKeyButton)
-    {
-        PickKeyButton->OnClicked.AddDynamic(this, &UInspectorSettingsPageWidget::HandlePickKeyCaptureClicked);
-    }
-    if (PickRequiresCtrlCheckBox)
-    {
-        PickRequiresCtrlCheckBox->OnCheckStateChanged.AddDynamic(this, &UInspectorSettingsPageWidget::HandlePickRequiresCtrlChanged);
-    }
-    if (PickRequiresShiftCheckBox)
-    {
-        PickRequiresShiftCheckBox->OnCheckStateChanged.AddDynamic(this, &UInspectorSettingsPageWidget::HandlePickRequiresShiftChanged);
-    }
-    if (EnableRightMousePickCheckBox)
-    {
-        EnableRightMousePickCheckBox->OnCheckStateChanged.AddDynamic(this, &UInspectorSettingsPageWidget::HandleEnableRightMousePickChanged);
-    }
-    if (RightMousePickRequiresCtrlCheckBox)
-    {
-        RightMousePickRequiresCtrlCheckBox->OnCheckStateChanged.AddDynamic(this, &UInspectorSettingsPageWidget::HandleRightMousePickRequiresCtrlChanged);
-    }
-    if (RightMousePickRequiresShiftCheckBox)
-    {
-        RightMousePickRequiresShiftCheckBox->OnCheckStateChanged.AddDynamic(this, &UInspectorSettingsPageWidget::HandleRightMousePickRequiresShiftChanged);
-    }
-    if (EnableOutlineCheckBox)
-    {
-        EnableOutlineCheckBox->OnCheckStateChanged.AddDynamic(this, &UInspectorSettingsPageWidget::HandleEnableOutlineChanged);
-    }
-    if (OutlineWeightSpinBox)
-    {
-        OutlineWeightSpinBox->OnValueChanged.AddDynamic(this, &UInspectorSettingsPageWidget::HandleOutlineWeightChanged);
-    }
-    if (EnableApplyDebounceCheckBox)
-    {
-        EnableApplyDebounceCheckBox->OnCheckStateChanged.AddDynamic(this, &UInspectorSettingsPageWidget::HandleEnableApplyDebounceChanged);
-    }
-    if (ApplyDebounceSecondsSpinBox)
-    {
-        ApplyDebounceSecondsSpinBox->OnValueChanged.AddDynamic(this, &UInspectorSettingsPageWidget::HandleApplyDebounceSecondsChanged);
-    }
-    if (ThemePresetComboBox)
-    {
-        ThemePresetComboBox->OnSelectionChanged.AddDynamic(this, &UInspectorSettingsPageWidget::HandleThemePresetSelectionChanged);
-    }
-    if (RequireUnlockCheckBox)
-    {
-        RequireUnlockCheckBox->OnCheckStateChanged.AddDynamic(this, &UInspectorSettingsPageWidget::HandleRequireUnlockChanged);
-    }
-    if (AutoLockOnCloseCheckBox)
-    {
-        AutoLockOnCloseCheckBox->OnCheckStateChanged.AddDynamic(this, &UInspectorSettingsPageWidget::HandleAutoLockOnCloseChanged);
+        ResetSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+        ResetSlot->SetHorizontalAlignment(HAlign_Fill);
     }
 
     WidgetTree->RootWidget = RootBorder;
 }
+
+#if WITH_EDITOR
+void UInspectorSettingsPageWidget::BuildFallbackWidgetTreeForExport(UWidgetTree* TargetWidgetTree)
+{
+    if (!TargetWidgetTree)
+    {
+        return;
+    }
+
+    UWidgetTree* OriginalWidgetTree = WidgetTree;
+    WidgetTree = TargetWidgetTree;
+    TargetWidgetTree->RootWidget = nullptr;
+    BuildWidgetTree();
+    WidgetTree = OriginalWidgetTree;
+}
+#endif
 
 UWidget* UInspectorSettingsPageWidget::CreateSectionTitle(const FString& InTitle, bool bEmphasis)
 {
@@ -449,192 +578,122 @@ UWidget* UInspectorSettingsPageWidget::CreateSectionTitle(const FString& InTitle
         bEmphasis ? RICompactUI::ERISectionVisualStyle::Emphasis : RICompactUI::ERISectionVisualStyle::Standard);
 }
 
-UWidget* UInspectorSettingsPageWidget::CreateKeybindRow(const FString& InLabel, UTextBlock*& OutValueText, UButton*& OutButton)
+UWidget* UInspectorSettingsPageWidget::CreateKeybindRow(const FString& InLabel, UTextBlock*& OutValueText, UButton*& OutButton, FName ValueTextName, FName ButtonName)
 {
     UHorizontalBox* ValueBox = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
 
-    OutValueText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+    OutValueText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), ValueTextName);
     RI_ApplyTextStyle(OutValueText, RICompactUI::GetValueFontSize(), true, RI_SettingsTextColor());
     if (UHorizontalBoxSlot* ValueSlot = ValueBox->AddChildToHorizontalBox(OutValueText))
     {
         ValueSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
         ValueSlot->SetVerticalAlignment(VAlign_Center);
-        ValueSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
+        ValueSlot->SetPadding(FMargin(0.f, 0.f, 6.f, 0.f));
     }
 
     OutButton = RICompactUI::MakeLabeledButton(
         WidgetTree,
-        NAME_None,
+        ButtonName,
         TEXT("Rebind"),
         RICompactUI::ERIButtonVisualStyle::Secondary,
-        56.0f);
+        72.0f);
     if (UHorizontalBoxSlot* ButtonSlot = ValueBox->AddChildToHorizontalBox(OutButton))
     {
         ButtonSlot->SetVerticalAlignment(VAlign_Center);
     }
 
-    UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
-    USizeBox* LabelBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-    LabelBox->SetWidthOverride(104.0f);
-
-    UTextBlock* LabelText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
-    LabelText->SetText(FText::FromString(InLabel));
-    RI_ApplyTextStyle(LabelText, RICompactUI::GetLabelFontSize(), true, RI_SettingsTextColor());
-    LabelBox->SetContent(LabelText);
-
-    if (UHorizontalBoxSlot* LabelSlot = Row->AddChildToHorizontalBox(LabelBox))
-    {
-        LabelSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
-        LabelSlot->SetVerticalAlignment(VAlign_Center);
-    }
-    if (UHorizontalBoxSlot* ValueSlot = Row->AddChildToHorizontalBox(ValueBox))
-    {
-        ValueSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-        ValueSlot->SetVerticalAlignment(VAlign_Center);
-    }
-
-    UBorder* Border = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
-    Border->SetPadding(FMargin(6.f, 3.f));
-    Border->SetBrushColor(RI_SettingsRowColor());
-    Border->SetContent(Row);
-    return Border;
+    return RICompactUI::MakeStackedContentRow(
+        WidgetTree,
+        InLabel,
+        ValueBox,
+        RI_SettingsRowColor(),
+        RI_SettingsTextColor());
 }
 
-UWidget* UInspectorSettingsPageWidget::CreateCheckRow(const FString& InLabel, UCheckBox*& OutCheckBox)
+UWidget* UInspectorSettingsPageWidget::CreateCheckRow(const FString& InLabel, UCheckBox*& OutCheckBox, FName CheckBoxName)
 {
-    UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
-
-    USizeBox* LabelBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-    LabelBox->SetWidthOverride(104.0f);
-    UTextBlock* LabelText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
-    LabelText->SetText(FText::FromString(InLabel));
-    RI_ApplyTextStyle(LabelText, RICompactUI::GetLabelFontSize(), true, RI_SettingsTextColor());
-    LabelBox->SetContent(LabelText);
-
-    if (UHorizontalBoxSlot* LabelSlot = Row->AddChildToHorizontalBox(LabelBox))
+    UBorder* Border = RICompactUI::MakeSurfaceCard(
+        WidgetTree,
+        NAME_None,
+        RI_SettingsRowColor(),
+        FMargin(6.f, 4.f));
+    if (!Border)
     {
-        LabelSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
-        LabelSlot->SetVerticalAlignment(VAlign_Center);
+        return nullptr;
     }
 
-    OutCheckBox = WidgetTree->ConstructWidget<UCheckBox>(UCheckBox::StaticClass());
+    UHorizontalBox* ValueBox = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
+    Border->SetContent(ValueBox);
+
+    UTextBlock* LabelText = RICompactUI::MakeText(
+        WidgetTree,
+        InLabel,
+        RICompactUI::GetLabelFontSize(),
+        true,
+        RI_SettingsTextColor(),
+        true);
+    if (UHorizontalBoxSlot* LabelSlot = ValueBox->AddChildToHorizontalBox(LabelText))
+    {
+        LabelSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+        LabelSlot->SetHorizontalAlignment(HAlign_Fill);
+        LabelSlot->SetVerticalAlignment(VAlign_Center);
+        LabelSlot->SetPadding(FMargin(0.f, 0.f, 6.f, 0.f));
+    }
+
+    OutCheckBox = WidgetTree->ConstructWidget<UCheckBox>(UCheckBox::StaticClass(), CheckBoxName);
     OutCheckBox->SetRenderScale(FVector2D(0.55f, 0.55f));
-    if (UHorizontalBoxSlot* ValueSlot = Row->AddChildToHorizontalBox(OutCheckBox))
+    if (UHorizontalBoxSlot* CheckBoxSlot = ValueBox->AddChildToHorizontalBox(OutCheckBox))
     {
-        ValueSlot->SetVerticalAlignment(VAlign_Center);
+        CheckBoxSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
+        CheckBoxSlot->SetHorizontalAlignment(HAlign_Right);
+        CheckBoxSlot->SetVerticalAlignment(VAlign_Center);
     }
 
-    UBorder* Border = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
-    Border->SetPadding(FMargin(6.f, 3.f));
-    Border->SetBrushColor(RI_SettingsRowColor());
-    Border->SetContent(Row);
     return Border;
 }
 
-UWidget* UInspectorSettingsPageWidget::CreateSpinRow(const FString& InLabel, USpinBox*& OutSpinBox)
+UWidget* UInspectorSettingsPageWidget::CreateSpinRow(const FString& InLabel, USpinBox*& OutSpinBox, FName SpinBoxName)
 {
-    UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
-
-    USizeBox* LabelBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-    LabelBox->SetWidthOverride(104.0f);
-    UTextBlock* LabelText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
-    LabelText->SetText(FText::FromString(InLabel));
-    RI_ApplyTextStyle(LabelText, RICompactUI::GetLabelFontSize(), true, RI_SettingsTextColor());
-    LabelBox->SetContent(LabelText);
-
-    if (UHorizontalBoxSlot* LabelSlot = Row->AddChildToHorizontalBox(LabelBox))
-    {
-        LabelSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
-        LabelSlot->SetVerticalAlignment(VAlign_Center);
-    }
-
     USizeBox* SpinBoxSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-    SpinBoxSizeBox->SetWidthOverride(70.0f);
+    SpinBoxSizeBox->SetWidthOverride(92.0f);
     SpinBoxSizeBox->SetHeightOverride(RICompactUI::GetInputHeight());
-    OutSpinBox = WidgetTree->ConstructWidget<USpinBox>(USpinBox::StaticClass());
-    OutSpinBox->SetMinDesiredWidth(70.0f);
+    OutSpinBox = WidgetTree->ConstructWidget<USpinBox>(USpinBox::StaticClass(), SpinBoxName);
+    OutSpinBox->SetMinDesiredWidth(92.0f);
     OutSpinBox->SetMinFractionalDigits(2);
     OutSpinBox->SetMaxFractionalDigits(3);
     SpinBoxSizeBox->SetContent(OutSpinBox);
-    if (UHorizontalBoxSlot* ValueSlot = Row->AddChildToHorizontalBox(SpinBoxSizeBox))
-    {
-        ValueSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
-        ValueSlot->SetVerticalAlignment(VAlign_Center);
-    }
-
-    UBorder* Border = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
-    Border->SetPadding(FMargin(6.f, 3.f));
-    Border->SetBrushColor(RI_SettingsRowColor());
-    Border->SetContent(Row);
-    return Border;
+    return RICompactUI::MakeStackedContentRow(
+        WidgetTree,
+        InLabel,
+        SpinBoxSizeBox,
+        RI_SettingsRowColor(),
+        RI_SettingsTextColor());
 }
 
-UWidget* UInspectorSettingsPageWidget::CreateThemePresetRow(const FString& InLabel, UComboBoxString*& OutComboBox)
+UWidget* UInspectorSettingsPageWidget::CreateThemePresetRow(const FString& InLabel, UComboBoxString*& OutComboBox, FName ComboBoxName)
 {
-    UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
-
-    USizeBox* LabelBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-    LabelBox->SetWidthOverride(104.0f);
-    UTextBlock* LabelText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
-    LabelText->SetText(FText::FromString(InLabel));
-    RI_ApplyTextStyle(LabelText, RICompactUI::GetLabelFontSize(), true, RI_SettingsTextColor());
-    LabelBox->SetContent(LabelText);
-
-    if (UHorizontalBoxSlot* LabelSlot = Row->AddChildToHorizontalBox(LabelBox))
-    {
-        LabelSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
-        LabelSlot->SetVerticalAlignment(VAlign_Center);
-    }
-
-    OutComboBox = WidgetTree->ConstructWidget<UComboBoxString>(UComboBoxString::StaticClass());
-    OutComboBox->AddOption(RI_GetThemePresetLabel(ERuntimeInspectorThemePreset::StudioSlate));
-    OutComboBox->AddOption(RI_GetThemePresetLabel(ERuntimeInspectorThemePreset::SoftContrast));
+    OutComboBox = WidgetTree->ConstructWidget<UComboBoxString>(UComboBoxString::StaticClass(), ComboBoxName);
     RICompactUI::ConfigureComboBoxString(OutComboBox, RI_SettingsTextColor(), 180.0f, RICompactUI::ERIInputVisualStyle::Strong);
-    OutComboBox->OnGenerateWidgetEvent.BindDynamic(this, &UInspectorSettingsPageWidget::HandleGenerateThemePresetOptionWidget);
-    if (UHorizontalBoxSlot* ValueSlot = Row->AddChildToHorizontalBox(RICompactUI::WrapFixedHeight(WidgetTree, OutComboBox, RICompactUI::GetInputHeight())))
-    {
-        ValueSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-        ValueSlot->SetVerticalAlignment(VAlign_Center);
-    }
-
-    UBorder* Border = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
-    Border->SetPadding(FMargin(6.f, 3.f));
-    Border->SetBrushColor(RI_SettingsRowColor());
-    Border->SetContent(Row);
-    return Border;
+    EnsureThemePresetOptions();
+    return RICompactUI::MakeStackedContentRow(
+        WidgetTree,
+        InLabel,
+        RICompactUI::WrapFixedHeight(WidgetTree, OutComboBox, RICompactUI::GetInputHeight()),
+        RI_SettingsRowColor(),
+        RI_SettingsTextColor());
 }
 
-UWidget* UInspectorSettingsPageWidget::CreateStatusRow(const FString& InLabel, UTextBlock*& OutValueText, bool bWrapValue)
+UWidget* UInspectorSettingsPageWidget::CreateStatusRow(const FString& InLabel, UTextBlock*& OutValueText, bool bWrapValue, FName ValueTextName)
 {
-    UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
-
-    USizeBox* LabelBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-    LabelBox->SetWidthOverride(104.0f);
-    UTextBlock* LabelText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
-    LabelText->SetText(FText::FromString(InLabel));
-    RI_ApplyTextStyle(LabelText, RICompactUI::GetLabelFontSize(), true, RI_SettingsTextColor());
-    LabelBox->SetContent(LabelText);
-
-    if (UHorizontalBoxSlot* LabelSlot = Row->AddChildToHorizontalBox(LabelBox))
-    {
-        LabelSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
-        LabelSlot->SetVerticalAlignment(VAlign_Top);
-    }
-
-    OutValueText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
-    RI_ApplyTextStyle(OutValueText, RICompactUI::GetValueFontSize(), false, RI_SettingsMutedTextColor());
-    OutValueText->SetAutoWrapText(bWrapValue);
-    if (UHorizontalBoxSlot* ValueSlot = Row->AddChildToHorizontalBox(OutValueText))
-    {
-        ValueSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-        ValueSlot->SetVerticalAlignment(VAlign_Center);
-    }
-
-    UBorder* Border = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
-    Border->SetPadding(FMargin(6.f, 3.f));
-    Border->SetBrushColor(RI_SettingsRowColor());
-    Border->SetContent(Row);
-    return Border;
+    return RICompactUI::MakeStackedValueRow(
+        WidgetTree,
+        InLabel,
+        OutValueText,
+        RI_SettingsRowColor(),
+        RI_SettingsTextColor(),
+        RI_SettingsMutedTextColor(),
+        bWrapValue,
+        ValueTextName);
 }
 
 void UInspectorSettingsPageWidget::RefreshFromSubsystem()
@@ -646,6 +705,13 @@ void UInspectorSettingsPageWidget::RefreshFromSubsystem()
         RuntimeSessionSummary = InspectorSubsystem->GetRuntimeSessionSummary();
         RuntimeActorRoleSummary = InspectorSubsystem->GetSelectedActorRoleSummary();
         ActiveThemePreset = InspectorSubsystem->GetThemePreset();
+        UE_LOG(
+            LogRuntimeInspector,
+            Log,
+            TEXT("[RI][SettingsUI] Refresh Outline=%.3f Theme=%d Dirty=%d"),
+            DraftSettings.OutlinePPWeight,
+            static_cast<int32>(ActiveThemePreset),
+            InspectorSubsystem->HasUnsavedSettingsChanges() ? 1 : 0);
     }
     else
     {
@@ -698,27 +764,27 @@ void UInspectorSettingsPageWidget::UpdateUIFromState()
     if (PickRequiresCtrlCheckBox)
     {
         PickRequiresCtrlCheckBox->SetIsChecked(DraftSettings.bPickKeyRequiresCtrl);
-        SetEnabledState(PickRequiresCtrlCheckBox, bEditable, EditDisabledReason, TEXT("Toggle whether the pick key requires Ctrl."));
+        SetEnabledState(PickRequiresCtrlCheckBox, bEditable, EditDisabledReason, TEXT("Toggle whether object-based mouse-position pick requires Ctrl."));
     }
     if (PickRequiresShiftCheckBox)
     {
         PickRequiresShiftCheckBox->SetIsChecked(DraftSettings.bPickKeyRequiresShift);
-        SetEnabledState(PickRequiresShiftCheckBox, bEditable, EditDisabledReason, TEXT("Toggle whether the pick key requires Shift."));
+        SetEnabledState(PickRequiresShiftCheckBox, bEditable, EditDisabledReason, TEXT("Toggle whether object-based mouse-position pick requires Shift."));
     }
     if (EnableRightMousePickCheckBox)
     {
         EnableRightMousePickCheckBox->SetIsChecked(DraftSettings.bEnableRightMousePick);
-        SetEnabledState(EnableRightMousePickCheckBox, bEditable, EditDisabledReason, TEXT("Enable or disable right mouse pick."));
+        SetEnabledState(EnableRightMousePickCheckBox, bEditable, EditDisabledReason, TEXT("Enable or disable object-based right mouse picking at the current mouse position, including player characters."));
     }
     if (RightMousePickRequiresCtrlCheckBox)
     {
         RightMousePickRequiresCtrlCheckBox->SetIsChecked(DraftSettings.bRightMousePickRequiresCtrl);
-        SetEnabledState(RightMousePickRequiresCtrlCheckBox, bEditable && DraftSettings.bEnableRightMousePick, EditDisabledReason.IsEmpty() ? TEXT("Enable right mouse pick first.") : EditDisabledReason, TEXT("Right mouse pick requires Ctrl."));
+        SetEnabledState(RightMousePickRequiresCtrlCheckBox, bEditable && DraftSettings.bEnableRightMousePick, EditDisabledReason.IsEmpty() ? TEXT("Enable right mouse pick first.") : EditDisabledReason, TEXT("Object-based mouse-position right mouse pick requires Ctrl."));
     }
     if (RightMousePickRequiresShiftCheckBox)
     {
         RightMousePickRequiresShiftCheckBox->SetIsChecked(DraftSettings.bRightMousePickRequiresShift);
-        SetEnabledState(RightMousePickRequiresShiftCheckBox, bEditable && DraftSettings.bEnableRightMousePick, EditDisabledReason.IsEmpty() ? TEXT("Enable right mouse pick first.") : EditDisabledReason, TEXT("Right mouse pick requires Shift."));
+        SetEnabledState(RightMousePickRequiresShiftCheckBox, bEditable && DraftSettings.bEnableRightMousePick, EditDisabledReason.IsEmpty() ? TEXT("Enable right mouse pick first.") : EditDisabledReason, TEXT("Object-based mouse-position right mouse pick requires Shift."));
     }
     if (EnableOutlineCheckBox)
     {
@@ -772,7 +838,7 @@ void UInspectorSettingsPageWidget::UpdateUIFromState()
     }
     if (PickKeyButton)
     {
-        SetEnabledState(PickKeyButton, bEditable, EditDisabledReason, TEXT("Rebind the pick key."));
+        SetEnabledState(PickKeyButton, bEditable, EditDisabledReason, TEXT("Rebind the object-based mouse-position pick key."));
     }
     if (SaveButton)
     {
@@ -865,6 +931,63 @@ void UInspectorSettingsPageWidget::SetStatusMessage(const FString& InMessage, bo
     UpdateUIFromState();
 }
 
+void UInspectorSettingsPageWidget::SyncDraftSettingsFromControls()
+{
+    if (PickRequiresCtrlCheckBox)
+    {
+        DraftSettings.bPickKeyRequiresCtrl = PickRequiresCtrlCheckBox->IsChecked();
+    }
+    if (PickRequiresShiftCheckBox)
+    {
+        DraftSettings.bPickKeyRequiresShift = PickRequiresShiftCheckBox->IsChecked();
+    }
+    if (EnableRightMousePickCheckBox)
+    {
+        DraftSettings.bEnableRightMousePick = EnableRightMousePickCheckBox->IsChecked();
+    }
+    if (RightMousePickRequiresCtrlCheckBox)
+    {
+        DraftSettings.bRightMousePickRequiresCtrl = RightMousePickRequiresCtrlCheckBox->IsChecked();
+    }
+    if (RightMousePickRequiresShiftCheckBox)
+    {
+        DraftSettings.bRightMousePickRequiresShift = RightMousePickRequiresShiftCheckBox->IsChecked();
+    }
+    if (EnableOutlineCheckBox)
+    {
+        DraftSettings.bEnableOutlinePP = EnableOutlineCheckBox->IsChecked();
+    }
+    if (OutlineWeightSpinBox)
+    {
+        DraftSettings.OutlinePPWeight = OutlineWeightSpinBox->GetValue();
+    }
+    if (EnableApplyDebounceCheckBox)
+    {
+        DraftSettings.bEnableApplyDebounce = EnableApplyDebounceCheckBox->IsChecked();
+    }
+    if (ApplyDebounceSecondsSpinBox)
+    {
+        DraftSettings.ApplyDebounceSeconds = ApplyDebounceSecondsSpinBox->GetValue();
+    }
+    if (RequireUnlockCheckBox)
+    {
+        DraftSettings.bRequireUnlock = RequireUnlockCheckBox->IsChecked();
+    }
+    if (AutoLockOnCloseCheckBox)
+    {
+        DraftSettings.bAutoLockOnClose = AutoLockOnCloseCheckBox->IsChecked();
+    }
+
+    if (ThemePresetComboBox)
+    {
+        const FString SelectedTheme = ThemePresetComboBox->GetSelectedOption();
+        if (!SelectedTheme.IsEmpty())
+        {
+            ActiveThemePreset = RI_ParseThemePresetLabel(SelectedTheme);
+        }
+    }
+}
+
 void UInspectorSettingsPageWidget::ClearStatusMessage()
 {
     StatusMessage.Reset();
@@ -953,7 +1076,7 @@ void UInspectorSettingsPageWidget::HandlePickKeyCaptureClicked()
 
 void UInspectorSettingsPageWidget::HandlePickRequiresCtrlChanged(bool bIsChecked)
 {
-    if (bRefreshingUI) return;
+    if (ShouldIgnoreControlChange()) return;
     FRIEditableSettings Candidate = DraftSettings;
     Candidate.bPickKeyRequiresCtrl = bIsChecked;
     ApplyPreviewSettings(Candidate);
@@ -961,7 +1084,7 @@ void UInspectorSettingsPageWidget::HandlePickRequiresCtrlChanged(bool bIsChecked
 
 void UInspectorSettingsPageWidget::HandlePickRequiresShiftChanged(bool bIsChecked)
 {
-    if (bRefreshingUI) return;
+    if (ShouldIgnoreControlChange()) return;
     FRIEditableSettings Candidate = DraftSettings;
     Candidate.bPickKeyRequiresShift = bIsChecked;
     ApplyPreviewSettings(Candidate);
@@ -969,7 +1092,7 @@ void UInspectorSettingsPageWidget::HandlePickRequiresShiftChanged(bool bIsChecke
 
 void UInspectorSettingsPageWidget::HandleEnableRightMousePickChanged(bool bIsChecked)
 {
-    if (bRefreshingUI) return;
+    if (ShouldIgnoreControlChange()) return;
     FRIEditableSettings Candidate = DraftSettings;
     Candidate.bEnableRightMousePick = bIsChecked;
     ApplyPreviewSettings(Candidate);
@@ -977,7 +1100,7 @@ void UInspectorSettingsPageWidget::HandleEnableRightMousePickChanged(bool bIsChe
 
 void UInspectorSettingsPageWidget::HandleRightMousePickRequiresCtrlChanged(bool bIsChecked)
 {
-    if (bRefreshingUI) return;
+    if (ShouldIgnoreControlChange()) return;
     FRIEditableSettings Candidate = DraftSettings;
     Candidate.bRightMousePickRequiresCtrl = bIsChecked;
     ApplyPreviewSettings(Candidate);
@@ -985,7 +1108,7 @@ void UInspectorSettingsPageWidget::HandleRightMousePickRequiresCtrlChanged(bool 
 
 void UInspectorSettingsPageWidget::HandleRightMousePickRequiresShiftChanged(bool bIsChecked)
 {
-    if (bRefreshingUI) return;
+    if (ShouldIgnoreControlChange()) return;
     FRIEditableSettings Candidate = DraftSettings;
     Candidate.bRightMousePickRequiresShift = bIsChecked;
     ApplyPreviewSettings(Candidate);
@@ -993,7 +1116,7 @@ void UInspectorSettingsPageWidget::HandleRightMousePickRequiresShiftChanged(bool
 
 void UInspectorSettingsPageWidget::HandleEnableOutlineChanged(bool bIsChecked)
 {
-    if (bRefreshingUI) return;
+    if (ShouldIgnoreControlChange()) return;
     FRIEditableSettings Candidate = DraftSettings;
     Candidate.bEnableOutlinePP = bIsChecked;
     ApplyPreviewSettings(Candidate);
@@ -1001,7 +1124,7 @@ void UInspectorSettingsPageWidget::HandleEnableOutlineChanged(bool bIsChecked)
 
 void UInspectorSettingsPageWidget::HandleOutlineWeightChanged(float InValue)
 {
-    if (bRefreshingUI) return;
+    if (ShouldIgnoreControlChange()) return;
     FRIEditableSettings Candidate = DraftSettings;
     Candidate.OutlinePPWeight = InValue;
     ApplyPreviewSettings(Candidate);
@@ -1009,7 +1132,7 @@ void UInspectorSettingsPageWidget::HandleOutlineWeightChanged(float InValue)
 
 void UInspectorSettingsPageWidget::HandleEnableApplyDebounceChanged(bool bIsChecked)
 {
-    if (bRefreshingUI) return;
+    if (ShouldIgnoreControlChange()) return;
     FRIEditableSettings Candidate = DraftSettings;
     Candidate.bEnableApplyDebounce = bIsChecked;
     ApplyPreviewSettings(Candidate);
@@ -1017,7 +1140,7 @@ void UInspectorSettingsPageWidget::HandleEnableApplyDebounceChanged(bool bIsChec
 
 void UInspectorSettingsPageWidget::HandleApplyDebounceSecondsChanged(float InValue)
 {
-    if (bRefreshingUI) return;
+    if (ShouldIgnoreControlChange()) return;
     FRIEditableSettings Candidate = DraftSettings;
     Candidate.ApplyDebounceSeconds = InValue;
     ApplyPreviewSettings(Candidate);
@@ -1025,7 +1148,7 @@ void UInspectorSettingsPageWidget::HandleApplyDebounceSecondsChanged(float InVal
 
 void UInspectorSettingsPageWidget::HandleRequireUnlockChanged(bool bIsChecked)
 {
-    if (bRefreshingUI) return;
+    if (ShouldIgnoreControlChange()) return;
     FRIEditableSettings Candidate = DraftSettings;
     Candidate.bRequireUnlock = bIsChecked;
     ApplyPreviewSettings(Candidate);
@@ -1033,7 +1156,7 @@ void UInspectorSettingsPageWidget::HandleRequireUnlockChanged(bool bIsChecked)
 
 void UInspectorSettingsPageWidget::HandleAutoLockOnCloseChanged(bool bIsChecked)
 {
-    if (bRefreshingUI) return;
+    if (ShouldIgnoreControlChange()) return;
     FRIEditableSettings Candidate = DraftSettings;
     Candidate.bAutoLockOnClose = bIsChecked;
     ApplyPreviewSettings(Candidate);
@@ -1041,7 +1164,7 @@ void UInspectorSettingsPageWidget::HandleAutoLockOnCloseChanged(bool bIsChecked)
 
 void UInspectorSettingsPageWidget::HandleThemePresetSelectionChanged(FString SelectedItem, ESelectInfo::Type SelectionType)
 {
-    if (bRefreshingUI || !Subsystem.IsValid() || SelectedItem.IsEmpty())
+    if (ShouldIgnoreControlChange() || !Subsystem.IsValid() || SelectedItem.IsEmpty())
     {
         return;
     }
@@ -1065,6 +1188,8 @@ void UInspectorSettingsPageWidget::HandleSaveClicked()
         SetStatusMessage(TEXT("Inspector settings are unavailable."), true);
         return;
     }
+
+    SyncDraftSettingsFromControls();
 
     if (!ApplyPreviewSettings(DraftSettings, false))
     {

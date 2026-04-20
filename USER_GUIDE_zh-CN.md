@@ -2,7 +2,7 @@
 
 本文档是 **终端用户操作指南**，不是 agent 开发权威源。
 
-如果你要修改 RuntimeInspector 的实现、workflow、self-test、验收链或 UI 结构，请看 `Docs/AGENT_DEVELOPMENT.md`。
+如果你要修改 RuntimeInspector 的实现、workflow、self-test、验收链或 UI 结构，请看 `docs/AGENT_DEVELOPMENT.md`。
 
 本文档面向首次接触 `Runtime Inspector` 的项目成员、测试人员和内容制作人员，目标是帮助你在 Unreal Engine 5.5 中完成安装、启用、基础操作和常见问题排查。
 
@@ -52,7 +52,7 @@
 
 1. 启动 PIE。
 2. 按 `O` 打开 Runtime Inspector。
-3. 按 `P` 对准场景中的 Actor 进行拾取，或者使用你在 `Settings` 中配置的拾取方式。
+3. 将鼠标悬停到目标 Actor 上后按 `P` 进行拾取，或者使用你在 `Settings` 中配置的鼠标位置拾取方式。当前拾取使用 object query，所以鼠标下的玩家角色和场景 Actor 都可以被选中。
 4. 在 `Actor` 页查看当前对象和支持的属性。
 5. 修改一个安全的运行时属性并确认结果。
 6. 切到 `Changes` 页执行 `Stage Runtime Changes`。
@@ -147,7 +147,7 @@
   - 再用 `Scripts\CaptureFabMedia.cmd` 生成确定性的截图素材
   - 输出默认落在 `Saved\RuntimeInspector\FabMediaCapture\`
 
-更详细的内部开发/验收规则见 `Docs/AGENT_DEVELOPMENT.md`。
+更详细的内部开发/验收规则见 `docs/AGENT_DEVELOPMENT.md`。
 
 ## 9. 支持与反馈
 

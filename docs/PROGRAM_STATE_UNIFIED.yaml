@@ -1,0 +1,106 @@
+schema_version: 1
+project:
+  name: RuntimeInspector
+  repo_root: /mnt/d/Project/Game/UE/PluginMaker/Plugins/RuntimeInspector
+  plugin_descriptor: /mnt/d/Project/Game/UE/PluginMaker/Plugins/RuntimeInspector/RuntimeInspector.uplugin
+  host_project: /mnt/d/Project/Game/UE/PluginMaker/PluginMaker.uproject
+
+doc_authority:
+  directory: docs
+  default_session_entrypoints:
+    - docs/PROGRAM_STATE_UNIFIED.yaml
+    - docs/STATUS.md
+    - docs/codex/tasks/TASK_LANE_INDEX.md
+    - docs/AGENT_DEVELOPMENT.md
+    - docs/TROUBLESHOOTING.md
+  development_authority: docs/AGENT_DEVELOPMENT.md
+  troubleshooting_reference: docs/TROUBLESHOOTING.md
+  ui_appendix: docs/UI_GUARDRAILS.md
+  handoff_role: historical_only
+
+current_baseline:
+  branch: codex/runtimeinspector-fab-rc
+  head_commit: 7e471dd19a21ea5bc71b7b13f8fbf19f36422960
+  head_summary: Tighten actor rows and fix actor search
+  worktree_state: dirty
+  stability_status: dirty_pre_rc_freeze
+
+current_focus:
+  program_goal: >
+    Keep RuntimeInspector usable as a real runtime inspection, change review,
+    validation, and controlled promote workbench inside Editor + PIE.
+  current_stage_goal: >
+    Freeze a clean Fab release candidate from the current branch state and
+    regenerate package, manual smoke, and media evidence from that same commit.
+  stage_success_criteria:
+    - Transform source persistence has passing real-flow evidence for the next PIE run.
+    - A clean RC commit is frozen from codex/runtimeinspector-fab-rc.
+    - Package, blank-host manual smoke, screenshots, and demo media all point to the same RC commit.
+    - Actor/Changes/Settings/Tools remain usable in real user flows on the release candidate.
+  next_decision_gate: >
+    After freezing a clean RC and regenerating release evidence on that commit,
+    decide whether the remaining work is Fab metadata-only cleanup or another
+    packaging/manual-smoke correction.
+
+active_risks:
+  - id: transform_source_persistence
+    status: resolved
+    summary: >
+      Real PIE -> Stage -> Apply To Source -> next PIE persistence is now
+      validated for SceneComponent RelativeLocation, RelativeRotation, and
+      RelativeScale3D using the passing artifact set at
+      Saved/RuntimeInspector/Validation/TransformSourcePersistence/BC8B047E-400B-566E-1347-2DA5AA231920/.
+      The earlier actor-root scale false negative was traced to
+      BP_TestVarsActor Event Tick overriding SetActorScale3D(TestScale), not a
+      source-promote failure.
+  - id: rc_baseline_mismatch
+    status: active
+    summary: >
+      Fab checklist, package/media outputs, and signoff docs are still pinned to
+      an older RC baseline while the current worktree is dirty; a new clean RC
+      must be frozen before final release evidence can be considered authoritative.
+  - id: ui_state_vs_screenshot_gap
+    status: mitigated
+    summary: >
+      Deterministic Fab media capture now passes on the current dirty local
+      baseline and the main required shots were visually spot-checked from
+      Saved/RuntimeInspector/FabMediaCapture/, but final media still needs to
+      be regenerated from the eventual clean RC commit.
+  - id: worktree_noise
+    status: active
+    summary: >
+      The worktree contains many unrelated local changes and generated assets;
+      future commits must isolate only intentional scope.
+
+validation_authority:
+  build: PluginMakerEditor Win64 Development
+  primary_runtime_entry: toggle_input_via_O_path
+  required_evidence:
+    - successful_editor_build
+    - affected_self_tests_pass
+    - real_user_flow_validation_for_behavior_changes
+  preferred_runtime_validation:
+    - ue_mcp_or_bridge
+    - real_window_screenshot
+    - self_test_or_workflow_summary
+  closure_rule: >
+    Do not claim closed completion without real main-flow evidence; use
+    pending-validation or local-only when only compile/self-test evidence exists.
+
+task_system:
+  lane_index: docs/codex/tasks/TASK_LANE_INDEX.md
+  task_file_pattern: docs/codex/tasks/<lane>/<task-id>.md
+  status_tags:
+    - proposed
+    - in_progress
+    - blocked
+    - pending_validation
+    - done
+
+session_handoff_policy:
+  write_handoff_when:
+    - conversation_must_stop_with_unresolved_high_value_state
+    - current_state_cannot_be_recovered_quickly_from_program_state_and_status
+  do_not_use_handoff_as:
+    - default_new_session_entry
+    - long_term_project_state_authority

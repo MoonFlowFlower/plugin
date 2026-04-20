@@ -47,6 +47,7 @@ public:
     FString GetSessionComparePreviewText() const { return DiagnosticsSessionComparePreviewText ? DiagnosticsSessionComparePreviewText->GetText().ToString() : FString(); }
     UButton* GetNamedButton(const FName& Name) const;
     bool HasPageScrollRoot() const { return WidgetTree && WidgetTree->FindWidget(TEXT("RI_TestPageScroll")) != nullptr; }
+    bool HasTouchScrollSupportForAutomation() const;
     bool HasRemoteSessionSection() const { return WidgetTree && WidgetTree->FindWidget(TEXT("RI_RemoteSessionSelectionRow")) != nullptr; }
     bool HasAvailableWorkflowSection() const { return WidgetTree && WidgetTree->FindWidget(TEXT("RI_WorkflowDefinitionsScroll")) != nullptr; }
     bool HasAvailableTestsSection() const { return WidgetTree && WidgetTree->FindWidget(TEXT("RI_TestDefinitionsScroll")) != nullptr; }
@@ -337,136 +338,136 @@ private:
     bool bStatusIsError = false;
     FString StatusMessage;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     UVerticalBox* AvailableWorkflowsBox = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     UVerticalBox* AvailableTestsBox = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     UVerticalBox* ResultsBox = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     UScrollBox* AvailableWorkflowsScroll = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     UScrollBox* AvailableTestsScroll = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     UScrollBox* ResultsScroll = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     UTextBlock* SelectedWorkflowValueText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     UTextBlock* SelectedTestValueText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     UTextBlock* SelectedRemoteSessionValueText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     UTextBlock* StatusMessageText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     UTextBlock* SelectedResultStateText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     UTextBlock* SelectedResultReportText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     UButton* RunSelectedWorkflowButton = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     UButton* RunSelectedButton = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     UButton* RunAllButton = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     UButton* RefreshButton = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     UWidget* RemoteSessionSectionWidget = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     UWidget* AvailableTestsSectionWidget = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     UWidget* DiagnosticsSectionWidget = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     UWidget* ActivityLogSectionWidget = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     UWidget* RemoteOverrideSectionWidget = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     UTextBlock* TestsSectionToggleText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     UTextBlock* RemoteSectionToggleText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     UTextBlock* DiagnosticsSectionToggleText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     UTextBlock* ActivityLogSectionToggleText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     UTextBlock* RemoteOverrideToggleText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     UComboBoxString* RemoteSessionComboBox = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     UEditableTextBox* RemoteSessionWorkflowBox = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     UEditableTextBox* RemoteSessionTargetQueryBox = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     UButton* RemoteSessionRefreshButton = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     UButton* RemoteSessionConnectButton = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     UButton* RemoteSessionRunWorkflowButton = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     UButton* DiagnosticsRoleCompareButton = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     UButton* DiagnosticsSessionCompareButton = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     UTextBlock* DiagnosticsRoleCompareSummaryText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     UTextBlock* DiagnosticsRoleCompareAvailableRoleText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     UTextBlock* DiagnosticsRoleCompareStatsText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     UTextBlock* DiagnosticsRoleComparePreviewText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     UTextBlock* DiagnosticsSessionCompareSummaryText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     UTextBlock* DiagnosticsSessionComparePairText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     UTextBlock* DiagnosticsSessionCompareStatsText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     UTextBlock* DiagnosticsSessionComparePreviewText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     UVerticalBox* ActivityLogEntriesBox = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     UButton* ActivityLogClearButton = nullptr;
 
     bool bTestsSectionExpanded = false;

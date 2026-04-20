@@ -1,9 +1,14 @@
 #include "InspectorGroupsSectionWidget.h"
 
 #include "InspectorCompactWidgetUtils.h"
+#include "InspectorFunctionItem.h"
+#include "InspectorFunctionRowWidget.h"
 #include "InspectorGroupItem.h"
 #include "InspectorMaterialParamItem.h"
+#include "InspectorMaterialParamRowWidget.h"
 #include "InspectorPropertyItem.h"
+#include "InspectorPropertyRowWidget.h"
+#include "InspectorTouchScrollBox.h"
 #include "InspectorWorldSubsystem.h"
 
 #include "Blueprint/WidgetTree.h"
@@ -137,6 +142,12 @@ int32 UInspectorGroupsSectionWidget::GetPinnedEntryWidgetCountForDebug() const
     return LastPinnedEntryWidgetCount;
 }
 
+bool UInspectorGroupsSectionWidget::HasTouchScrollSupportForAutomation() const
+{
+    return RIInspectorTouchScroll::HasTouchSupport(ComponentScrollBox)
+        && RIInspectorTouchScroll::HasTouchSupport(PinnedScrollBox);
+}
+
 bool UInspectorGroupsSectionWidget::InvokeGroupItemClickForAutomation(const FString& StableKey)
 {
     if (StableKey.IsEmpty())
@@ -194,6 +205,8 @@ void UInspectorGroupsSectionWidget::NativeConstruct()
         PinnedScrollBox = Cast<UScrollBox>(WidgetTree->FindWidget(TEXT("RI_PinnedSectionScroll")));
         PinnedEntriesBox = Cast<UVerticalBox>(WidgetTree->FindWidget(TEXT("RI_PinnedSectionEntries")));
     }
+    RIInspectorTouchScroll::Configure(ComponentScrollBox);
+    RIInspectorTouchScroll::Configure(PinnedScrollBox);
     RefreshFromSubsystem();
 }
 
@@ -222,9 +235,10 @@ void UInspectorGroupsSectionWidget::BuildWidgetTree()
         HeaderSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
     }
 
-    ComponentScrollBox = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("RI_GroupSectionScroll"));
+    ComponentScrollBox = WidgetTree->ConstructWidget<UInspectorTouchScrollBox>(UInspectorTouchScrollBox::StaticClass(), TEXT("RI_GroupSectionScroll"));
     EntriesBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_GroupSectionEntries"));
     ComponentScrollBox->AddChild(EntriesBox);
+    RIInspectorTouchScroll::Configure(ComponentScrollBox);
     USizeBox* ComponentBodySizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_GroupSectionBodySize"));
     ComponentBodySizeBox->SetHeightOverride(180.0f);
     ComponentBodySizeBox->SetMinDesiredHeight(180.0f);
@@ -253,9 +267,10 @@ void UInspectorGroupsSectionWidget::BuildWidgetTree()
         HeaderSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
     }
 
-    PinnedScrollBox = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("RI_PinnedSectionScroll"));
+    PinnedScrollBox = WidgetTree->ConstructWidget<UInspectorTouchScrollBox>(UInspectorTouchScrollBox::StaticClass(), TEXT("RI_PinnedSectionScroll"));
     PinnedEntriesBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_PinnedSectionEntries"));
     PinnedScrollBox->AddChild(PinnedEntriesBox);
+    RIInspectorTouchScroll::Configure(PinnedScrollBox);
     USizeBox* PinnedBodySizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_PinnedSectionBodySize"));
     PinnedBodySizeBox->SetHeightOverride(120.0f);
     PinnedBodySizeBox->SetMinDesiredHeight(120.0f);
@@ -311,78 +326,74 @@ UWidget* UInspectorGroupsSectionWidget::CreatePinnedRow(UObject* ItemObject)
         return nullptr;
     }
 
-    FString Label = TEXT("Pinned");
-    FString Value;
     if (UInspectorPropertyItem* PropertyItem = Cast<UInspectorPropertyItem>(ItemObject))
     {
-        Label = PropertyItem->GetPropertyName();
-        Value = PropertyItem->GetValueText();
+        UInspectorPropertyRowWidget* Row = nullptr;
+        if (APlayerController* PC = GetOwningPlayer())
+        {
+            Row = CreateWidget<UInspectorPropertyRowWidget>(PC, UInspectorPropertyRowWidget::StaticClass());
+        }
+        else if (UWorld* World = GetWorld())
+        {
+            Row = CreateWidget<UInspectorPropertyRowWidget>(World, UInspectorPropertyRowWidget::StaticClass());
+        }
+        if (!Row)
+        {
+            return nullptr;
+        }
+
+        Row->SetInspectorSubsystem(Subsystem.Get());
+        Row->SetAllowNavigation(true);
+        Row->SetPropertyItem(PropertyItem);
+        Row->TakeWidget();
+        return Row;
     }
     else if (UInspectorMaterialParamItem* MaterialItem = Cast<UInspectorMaterialParamItem>(ItemObject))
     {
-        Label = MaterialItem->GetPropertyName();
-        Value = MaterialItem->GetValueText();
+        UInspectorMaterialParamRowWidget* Row = nullptr;
+        if (APlayerController* PC = GetOwningPlayer())
+        {
+            Row = CreateWidget<UInspectorMaterialParamRowWidget>(PC, UInspectorMaterialParamRowWidget::StaticClass());
+        }
+        else if (UWorld* World = GetWorld())
+        {
+            Row = CreateWidget<UInspectorMaterialParamRowWidget>(World, UInspectorMaterialParamRowWidget::StaticClass());
+        }
+        if (!Row)
+        {
+            return nullptr;
+        }
+
+        Row->SetInspectorSubsystem(Subsystem.Get());
+        Row->SetAllowNavigation(true);
+        Row->SetMaterialItem(MaterialItem);
+        Row->TakeWidget();
+        return Row;
     }
-    else
+    else if (UInspectorFunctionItem* FunctionItem = Cast<UInspectorFunctionItem>(ItemObject))
     {
-        return nullptr;
+        UInspectorFunctionRowWidget* Row = nullptr;
+        if (APlayerController* PC = GetOwningPlayer())
+        {
+            Row = CreateWidget<UInspectorFunctionRowWidget>(PC, UInspectorFunctionRowWidget::StaticClass());
+        }
+        else if (UWorld* World = GetWorld())
+        {
+            Row = CreateWidget<UInspectorFunctionRowWidget>(World, UInspectorFunctionRowWidget::StaticClass());
+        }
+        if (!Row)
+        {
+            return nullptr;
+        }
+
+        Row->SetInspectorSubsystem(Subsystem.Get());
+        Row->SetAllowNavigation(true);
+        Row->SetFunctionItem(FunctionItem);
+        Row->TakeWidget();
+        return Row;
     }
 
-    UButton* RowButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass());
-    if (!RowButton)
-    {
-        return nullptr;
-    }
-
-    RowButton->SetClickMethod(EButtonClickMethod::MouseDown);
-    RowButton->SetBackgroundColor(RICompactUI::GetRowSurfaceBackgroundColor());
-
-    UHorizontalBox* RowBox = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
-    if (!RowBox)
-    {
-        return nullptr;
-    }
-    RowButton->AddChild(RowBox);
-
-    UTextBlock* StarText = RICompactUI::MakeText(WidgetTree, TEXT("*"), RICompactUI::GetLabelFontSize(), true, RICompactUI::GetWarningTextColor(), false);
-    if (UHorizontalBoxSlot* StarSlot = RowBox->AddChildToHorizontalBox(StarText))
-    {
-        StarSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
-        StarSlot->SetVerticalAlignment(VAlign_Top);
-        StarSlot->SetPadding(FMargin(0.f, 1.f, 6.f, 0.f));
-    }
-
-    UVerticalBox* TextBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
-    if (UHorizontalBoxSlot* TextSlot = RowBox->AddChildToHorizontalBox(TextBox))
-    {
-        TextSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-        TextSlot->SetVerticalAlignment(VAlign_Center);
-    }
-
-    if (UVerticalBoxSlot* LabelSlot = TextBox->AddChildToVerticalBox(
-        RICompactUI::MakeText(WidgetTree, Label, RICompactUI::GetLabelFontSize(), true, RICompactUI::GetStrongTextColor(), true)))
-    {
-        LabelSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 1.f));
-    }
-
-    if (!Value.IsEmpty())
-    {
-        TextBox->AddChildToVerticalBox(
-            RICompactUI::MakeText(WidgetTree, Value, RICompactUI::GetMutedFontSize(), false, RICompactUI::GetMutedTextColor(), true));
-    }
-
-    if (UButtonSlot* ButtonSlot = Cast<UButtonSlot>(RowBox->Slot))
-    {
-        ButtonSlot->SetPadding(FMargin(8.f, 4.f, 6.f, 4.f));
-        ButtonSlot->SetHorizontalAlignment(HAlign_Fill);
-        ButtonSlot->SetVerticalAlignment(VAlign_Fill);
-    }
-
-    UInspectorPinnedItemButtonProxy* Proxy = NewObject<UInspectorPinnedItemButtonProxy>(this);
-    Proxy->Initialize(Subsystem.Get(), ItemObject);
-    RowButton->OnClicked.AddDynamic(Proxy, &UInspectorPinnedItemButtonProxy::HandleClicked);
-    PinnedClickProxies.Add(Proxy);
-    return RowButton;
+    return nullptr;
 }
 
 void UInspectorGroupsSectionWidget::RefreshFromSubsystem()
@@ -506,7 +517,7 @@ void UInspectorGroupsSectionWidget::RefreshFromSubsystem()
     if (PinnedItems.Num() == 0)
     {
         PinnedEntriesBox->AddChildToVerticalBox(
-            RICompactUI::MakeText(WidgetTree, TEXT("No starred properties yet."), RICompactUI::GetMutedFontSize(), false, RICompactUI::GetMutedTextColor(), true));
+            RICompactUI::MakeText(WidgetTree, TEXT("No starred items yet."), RICompactUI::GetMutedFontSize(), false, RICompactUI::GetMutedTextColor(), true));
     }
     else
     {

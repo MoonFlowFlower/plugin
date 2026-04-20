@@ -3,6 +3,7 @@
 #include "InspectorCompactWidgetUtils.h"
 #include "InspectorFunctionItem.h"
 #include "InspectorFunctionRowWidget.h"
+#include "InspectorTouchScrollBox.h"
 #include "InspectorWorldSubsystem.h"
 
 #include "Blueprint/WidgetTree.h"
@@ -46,6 +47,11 @@ void UInspectorFunctionsSectionWidget::SetInspectorSubsystem(UInspectorWorldSubs
 int32 UInspectorFunctionsSectionWidget::GetEntryWidgetCountForAutomation() const
 {
     return FunctionsEntriesBox ? FunctionsEntriesBox->GetChildrenCount() : INDEX_NONE;
+}
+
+bool UInspectorFunctionsSectionWidget::HasTouchScrollSupportForAutomation() const
+{
+    return RIInspectorTouchScroll::HasTouchSupport(FunctionsScrollBox);
 }
 
 UInspectorFunctionRowWidget* UInspectorFunctionsSectionWidget::FindFunctionRowForAutomation(const UInspectorFunctionItem* Item) const
@@ -98,6 +104,7 @@ TSharedRef<SWidget> UInspectorFunctionsSectionWidget::RebuildWidget()
 void UInspectorFunctionsSectionWidget::NativeConstruct()
 {
     Super::NativeConstruct();
+    RIInspectorTouchScroll::Configure(FunctionsScrollBox);
     RefreshFromSubsystem();
 }
 
@@ -121,11 +128,12 @@ void UInspectorFunctionsSectionWidget::BuildWidgetTree()
         HeaderSlot->SetPadding(FMargin(0.f, 0.f, 0.f, RICompactUI::GetInlineGap()));
     }
 
-    UScrollBox* ScrollBox = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("RI_ActorFunctionsScroll"));
+    UInspectorTouchScrollBox* ScrollBox = WidgetTree->ConstructWidget<UInspectorTouchScrollBox>(UInspectorTouchScrollBox::StaticClass(), TEXT("RI_ActorFunctionsScroll"));
 
     FunctionsEntriesBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ActorFunctionsEntriesBox"));
     ScrollBox->AddChild(FunctionsEntriesBox);
     FunctionsScrollBox = ScrollBox;
+    RIInspectorTouchScroll::Configure(FunctionsScrollBox);
 
     USizeBox* BodySizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_ActorFunctionsBody"));
     BodySizeBox->SetMinDesiredHeight(220.f);

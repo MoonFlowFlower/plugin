@@ -2,7 +2,7 @@
 
 本文件 **不是** RuntimeInspector 的 agent 总文档。
 
-唯一 agent 开发权威入口是 `Docs/AGENT_DEVELOPMENT.md`。本文件只负责 UI 结构性改动的附录规则。
+唯一 agent 开发权威入口是 `docs/AGENT_DEVELOPMENT.md`。本文件只负责 UI 结构性改动的附录规则。
 
 This document defines the minimum completion bar for RuntimeInspector UI work.
 

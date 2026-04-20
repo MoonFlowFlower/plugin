@@ -2,7 +2,7 @@
 
 This file is a Fab submission checklist, not the RuntimeInspector agent development authority.
 
-For implementation rules and development workflow authority, use `Docs/AGENT_DEVELOPMENT.md`.
+For implementation rules and development workflow authority, use `docs/AGENT_DEVELOPMENT.md`.
 
 Use this checklist when preparing the UE 5.5 Fab submission package.
 
@@ -11,14 +11,29 @@ Use this checklist when preparing the UE 5.5 Fab submission package.
 - Release-candidate baseline must stay fixed while preparing package, screenshots, manual smoke evidence, and demo media.
 - Current RC branch: `codex/runtimeinspector-fab-rc`
 - Current RC commit: `1970ee707288bff2288785c7ca73981da89b6507`
-- Latest automated release evidence refreshed on `2026-04-11`.
+- The RC commit above is now stale and no longer release-authoritative for the current worktree.
+- Transform source persistence is no longer a Fab blocker on the local baseline:
+  - `Saved/RuntimeInspector/Validation/TransformSourcePersistence/BC8B047E-400B-566E-1347-2DA5AA231920/prepare_report.json`
+  - `Saved/RuntimeInspector/Validation/TransformSourcePersistence/BC8B047E-400B-566E-1347-2DA5AA231920/verify_restore_report.json`
+- Latest automated release evidence refreshed on `2026-04-16`.
 - Preserved blank-install smoke host:
   - `Saved/FabRelease/BlankProjectValidation/RuntimeInspectorBlank_UE55/RuntimeInspectorBlank/RuntimeInspectorBlank.uproject`
 - Current deterministic screenshot set:
   - `Saved/RuntimeInspector/FabMediaCapture/`
+- Automated screenshot staging was refreshed on `2026-04-16` on the current dirty local baseline:
+  - `Saved/RuntimeInspector/FabMediaCapture/capture_fab_media.log`
+  - `Saved/RuntimeInspector/FabMediaCapture/capture_manifest.txt`
+- Required current-UI shots were visually spot-checked from that staging set:
+  - `cover.png`
+  - `screenshot_01_actor_panel.png`
+  - `screenshot_02_changes_workflow.png`
+  - `screenshot_03_settings.png`
+  - `screenshot_04_tools.png`
 - Manual smoke and demo capture procedure:
-  - `Docs/FAB_RC_SIGNOFF.md`
+  - `docs/FAB_RC_SIGNOFF.md`
 - Remaining pre-submit items are intentionally narrow:
+  - Freeze a new clean RC commit from the current branch/worktree state.
+  - Regenerate package, screenshots, and signoff evidence from that same commit.
   - Re-run the packaged-install manual smoke path on the preserved blank host project.
   - Record the short demo video or GIF.
   - Fill `MarketplaceURL` after the Fab listing exists.
@@ -52,7 +67,19 @@ Use this checklist when preparing the UE 5.5 Fab submission package.
 
 ## Validation
 
+- [x] Real PIE `SceneComponent transform -> Stage -> Apply To Source -> next PIE persists` validation passes on the local baseline.
+  - Use `Scripts\ValidateTransformSourcePersistence.ps1`.
+  - Latest passing artifact:
+    - `Saved\RuntimeInspector\Validation\TransformSourcePersistence\BC8B047E-400B-566E-1347-2DA5AA231920\prepare_report.json`
+    - `Saved\RuntimeInspector\Validation\TransformSourcePersistence\BC8B047E-400B-566E-1347-2DA5AA231920\verify_restore_report.json`
 - [x] UE 5.5 `BuildPlugin` validation passes through the release script.
+- [x] Fresh local package regeneration and blank-project automated load validation were re-run on `2026-04-16`.
+  - package root:
+    - `Saved\FabRelease\Package\RuntimeInspector_UE55\RuntimeInspector`
+  - preserved validation host:
+    - `Saved\FabRelease\BlankProjectValidation\RuntimeInspectorBlank_UE55\RuntimeInspectorBlank\RuntimeInspectorBlank.uproject`
+  - automated load log:
+    - `Saved\fab_blank_project_validation.log`
 - [x] Install the packaged plugin into a clean blank UE 5.5 project and confirm it loads.
   - Use `Scripts\ValidateFabBlankProject.cmd` for the automated load check.
   - `ValidateFabBlankProject` may still perform a controlled shutdown after `QUIT`, but it no longer emits a misleading warning for that successful path.
@@ -66,6 +93,9 @@ Use this checklist when preparing the UE 5.5 Fab submission package.
 - [x] Capture Fab screenshots from the main `PluginMaker` editor state, not the blank validation host.
   - Use `Scripts\OpenFabScreenshotState.cmd` to open the clean screenshot presentation state.
   - Use `Scripts\CaptureFabMedia.cmd` to generate the deterministic screenshot staging output.
+  - Latest refreshed staging evidence:
+    - `Saved\RuntimeInspector\FabMediaCapture\capture_fab_media.log`
+    - `Saved\RuntimeInspector\FabMediaCapture\capture_manifest.txt`
 
 ## Optional Cleanup Before Submission
 

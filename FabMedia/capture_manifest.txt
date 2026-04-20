@@ -1,7 +1,0 @@
-﻿cover.png -> D:\project\game\ue\pluginmaker\Plugins\RuntimeInspector\FabMedia\cover.png
-screenshot_01_actor_panel.png -> D:\project\game\ue\pluginmaker\Plugins\RuntimeInspector\FabMedia\screenshot_01_actor_panel.png
-screenshot_02_changes_workflow.png -> D:\project\game\ue\pluginmaker\Plugins\RuntimeInspector\FabMedia\screenshot_02_changes_workflow.png
-screenshot_03_settings.png -> D:\project\game\ue\pluginmaker\Plugins\RuntimeInspector\FabMedia\screenshot_03_settings.png
-screenshot_04_tools.png -> D:\project\game\ue\pluginmaker\Plugins\RuntimeInspector\FabMedia\screenshot_04_tools.png
-screenshot_05_remote_session.png -> D:\project\game\ue\pluginmaker\Plugins\RuntimeInspector\FabMedia\screenshot_05_remote_session.png
-screenshot_06_promote_or_audit.png -> D:\project\game\ue\pluginmaker\Plugins\RuntimeInspector\FabMedia\screenshot_06_promote_or_audit.png

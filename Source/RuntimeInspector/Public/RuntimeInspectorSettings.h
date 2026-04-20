@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Engine/DeveloperSettings.h"
+#include "Engine/DataTable.h"
 #include "Materials/MaterialInterface.h"
 #include "InputCoreTypes.h"
 #include "RuntimeInspectorSettings.generated.h"
@@ -25,7 +26,7 @@ public:
     UPROPERTY(EditAnywhere, config, Category = "Hotkeys")
     FKey ToggleKey;
 
-    // 键盘：拾取（相机正前方 LineTrace）
+    // 键盘：按当前鼠标位置拾取命中的 Actor
     UPROPERTY(EditAnywhere, config, Category = "Hotkeys")
     FKey PickKey;
 
@@ -69,6 +70,12 @@ public:
 
     UPROPERTY(EditAnywhere, config, Category = "Appearance")
     ERuntimeInspectorThemePreset ThemePreset = ERuntimeInspectorThemePreset::StudioSlate;
+
+    UPROPERTY(EditAnywhere, config, Category = "Tools")
+    TSoftObjectPtr<UDataTable> ToolsSelfTestsTable;
+
+    UPROPERTY(EditAnywhere, config, Category = "Tools")
+    TSoftObjectPtr<UDataTable> ToolsWorkflowsTable;
 
     // ===== Security (optional) =====
     // If enabled, the inspector panel will stay locked until unlocked via console command `ri.Unlock`.

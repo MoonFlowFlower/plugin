@@ -1,7 +1,9 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/DataTable.h"
 #include "InputCoreTypes.h"
+#include "InspectorPatchTypes.h"
 #include "InspectorRemoteSessionTypes.h"
 
 #include "InspectorTypes.generated.h"
@@ -227,6 +229,105 @@ struct FRIRuntimeActorRoleSummary
     FString Summary;
 };
 
+UENUM(BlueprintType)
+enum class ERIToolActionType : uint8
+{
+    None UMETA(DisplayName = "None"),
+    RequirePIE UMETA(DisplayName = "Require PIE"),
+    RequireSelectedActor UMETA(DisplayName = "Require Selected Actor"),
+    SelectActorByQuery UMETA(DisplayName = "Select Actor By Query"),
+    RunSelfTest UMETA(DisplayName = "Run Self Test"),
+    RunVerificationProfile UMETA(DisplayName = "Run Verification Profile"),
+    RunWorkflow UMETA(DisplayName = "Run Workflow"),
+    RunWorkflowMatrix UMETA(DisplayName = "Run Workflow Matrix"),
+    ShowPage UMETA(DisplayName = "Show Page"),
+    OpenPanel UMETA(DisplayName = "Open Panel"),
+    RefreshPanel UMETA(DisplayName = "Refresh Panel"),
+    SetRemoteSessionUIContext UMETA(DisplayName = "Set Remote Session UI Context"),
+    SetRemoteSessionCompareOverride UMETA(DisplayName = "Set Remote Session Compare Override"),
+    ClearRemoteSessionCompareOverride UMETA(DisplayName = "Clear Remote Session Compare Override"),
+    EnsurePackagedRuntimeValidationSession UMETA(DisplayName = "Ensure Packaged Runtime Validation Session"),
+    ConnectRemoteRuntimeSession UMETA(DisplayName = "Connect Remote Runtime Session"),
+    AppendReportMessage UMETA(DisplayName = "Append Report Message"),
+    NativeBridgeAction UMETA(DisplayName = "Native Bridge Action"),
+};
+
+UENUM(BlueprintType)
+enum class ERIToolPageTarget : uint8
+{
+    Current UMETA(DisplayName = "Current"),
+    Actor UMETA(DisplayName = "Actor"),
+    Changes UMETA(DisplayName = "Changes"),
+    Settings UMETA(DisplayName = "Settings"),
+    Tools UMETA(DisplayName = "Tools"),
+};
+
+USTRUCT(BlueprintType)
+struct FRIToolActionDefinition
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Tools")
+    ERIToolActionType ActionType = ERIToolActionType::None;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Tools")
+    FName RefId = NAME_None;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Tools")
+    FString StringValue;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Tools")
+    FString StringValueB;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Tools")
+    FString StringValueC;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Tools")
+    FString StringValueD;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Tools")
+    FRIRuntimeSessionTargetSetCompareRequest RemoteSessionCompareRequest;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Tools")
+    ERIToolPageTarget PageTarget = ERIToolPageTarget::Current;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Tools")
+    uint8 RefreshReason = 0;
+};
+
+USTRUCT(BlueprintType)
+struct FRISelfTestTableRow : public FTableRowBase
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|SelfTest")
+    FName Id = NAME_None;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|SelfTest")
+    FString DisplayName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|SelfTest")
+    FString Category;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|SelfTest")
+    FString Description;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|SelfTest")
+    bool bRequiresPIE = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|SelfTest")
+    bool bMutatesRuntime = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|SelfTest")
+    bool bEnabled = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|SelfTest")
+    TArray<FRIToolActionDefinition> ActionSequence;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|SelfTest")
+    FName LegacyNativeBridgeId = NAME_None;
+};
+
 USTRUCT(BlueprintType)
 struct FRISelfTestDefinition
 {
@@ -378,6 +479,45 @@ struct FRIWorkflowDefinition
 };
 
 USTRUCT(BlueprintType)
+struct FRIWorkflowTableRow : public FTableRowBase
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Workflow")
+    FName WorkflowId = NAME_None;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Workflow")
+    FString DisplayName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Workflow")
+    FString Description;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Workflow")
+    FString Category;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Workflow")
+    bool bRequiresPIE = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Workflow")
+    bool bRequiresSelectedActor = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Workflow")
+    bool bMutatesRuntime = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Workflow")
+    bool bMutatesSource = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Workflow")
+    bool bEnabled = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Workflow")
+    TArray<FString> Tags;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Workflow")
+    TArray<FRIToolActionDefinition> ActionSequence;
+};
+
+USTRUCT(BlueprintType)
 struct FRIWorkflowRunResult
 {
     GENERATED_BODY()
@@ -435,6 +575,273 @@ struct FRIWorkflowRunResult
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Workflow")
     TArray<FRISelfTestResult> SelfTestResults;
+};
+
+USTRUCT(BlueprintType)
+struct FRIValidationCaptureMetric
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FString Name;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    double ValueMs = 0.0;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FString Details;
+};
+
+USTRUCT(BlueprintType)
+struct FRIValidationCapturePageState
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FString VisiblePage;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    bool bPanelOpen = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    bool bHasStagedPatch = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FString StagedState;
+};
+
+USTRUCT(BlueprintType)
+struct FRIValidationCaptureSelectedActorState
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    bool bActorMissing = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FString ActorLabel;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FString ActorClass;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FString SourcePath;
+};
+
+USTRUCT(BlueprintType)
+struct FRIValidationCaptureSessionState
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    bool bSessionAvailable = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    bool bIsPIEWorld = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    bool bHasLocalPlayerController = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FString WorldTypeLabel;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FString NetModeLabel;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FString MapName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FString Summary;
+};
+
+USTRUCT(BlueprintType)
+struct FRIValidationCaptureReport
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FString CaptureId;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FString ScenarioId;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FString StartedAt;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    int32 DurationMs = 0;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    bool bPassed = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    bool bBlocked = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FString Summary;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FString ArtifactDirectory;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FString ReportPath;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    TArray<FRIValidationCaptureMetric> Metrics;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    TArray<FString> KeyLogLines;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    TArray<FString> ScreenshotPaths;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FString HostWindowTitle;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FString HostWindowSummary;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FString ScreenshotMode;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FRIValidationCapturePageState PageState;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FRIValidationCaptureSelectedActorState SelectedActor;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FRIValidationCaptureSessionState SessionState;
+};
+
+USTRUCT(BlueprintType)
+struct FRITransformSourcePersistenceValueState
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FString FieldPath;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FString BaselineValue;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FString PatchedValue;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FString ObservedRuntimeValue;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FString ObservedSourceValue;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    bool bRuntimeMatched = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    bool bSourceMatched = false;
+};
+
+USTRUCT(BlueprintType)
+struct FRITransformSourcePersistenceCheckpoint
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FString CaptureId;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FString PreparedAt;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FString ActorPath;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FString ActorClass;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FString ActorBaseName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FString ActorLabel;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FString ComponentPath;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FString ComponentName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FString ComponentClass;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FString SourceAssetPath;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FString ArtifactDirectory;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FRIPatchBundle Bundle;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    TArray<FRITransformSourcePersistenceValueState> Values;
+};
+
+USTRUCT(BlueprintType)
+struct FRITransformSourcePersistenceReport
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FString CaptureId;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FString PhaseId;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FString StartedAt;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    int32 DurationMs = 0;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    bool bPassed = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    bool bBlocked = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FString Summary;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FString ArtifactDirectory;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FString ReportPath;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FString PendingStatePath;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FString ActorLabel;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FString ActorClass;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FString SourceAssetPath;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FString ComponentName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    FString ComponentClass;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    TArray<FRITransformSourcePersistenceValueState> Values;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Validation")
+    TArray<FString> KeyLogLines;
 };
 
 USTRUCT(BlueprintType)

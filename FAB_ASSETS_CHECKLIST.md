@@ -2,7 +2,7 @@
 
 This file is a Fab asset checklist, not the RuntimeInspector agent development authority.
 
-For implementation rules and development workflow authority, use `Docs/AGENT_DEVELOPMENT.md`.
+For implementation rules and development workflow authority, use `docs/AGENT_DEVELOPMENT.md`.
 
 Capture only shipped UE 5.5 functionality. Avoid internal-only test views, debug logs, or obviously experimental setups.
 

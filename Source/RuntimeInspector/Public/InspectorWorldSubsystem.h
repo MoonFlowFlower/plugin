@@ -222,6 +222,31 @@ public:
     UFUNCTION(BlueprintPure, Category = "RuntimeInspector|WorkflowMatrix")
     FRIWorkflowMatrixRunResult GetLastWorkflowMatrixRunResult() const { return LastWorkflowMatrixRunResult; }
 
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Validation")
+    bool RunValidationCaptureScenario(FName ScenarioId, FRIValidationCaptureReport& OutReport);
+
+    UFUNCTION(BlueprintPure, Category = "RuntimeInspector|Validation")
+    FRIValidationCaptureReport GetLastValidationCaptureReport() const { return LastValidationCaptureReport; }
+
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Validation")
+    bool ExportLastValidationCaptureReport(FString& OutFilePath, FString& OutError) const;
+
+    void RecordValidationCaptureMetric(const FString& MetricName, double ValueMs, const FString& Details = FString());
+    void AppendValidationCaptureLogLine(const FString& LogLine);
+    bool IsValidationCaptureActive() const { return bValidationCaptureActive; }
+
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Validation")
+    bool RunTransformSourcePersistencePrepareSelfTest(FString& OutReport);
+
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Validation")
+    FString RunTransformSourcePersistencePrepareSelfTestSimple();
+
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Validation")
+    bool RunTransformSourcePersistenceVerifyRestoreSelfTest(FString& OutReport);
+
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Validation")
+    FString RunTransformSourcePersistenceVerifyRestoreSelfTestSimple();
+
     UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Debug")
     bool RunConfirmDialogColorInputSelfTest(FString& OutReport);
 
@@ -667,13 +692,25 @@ public:
     UFUNCTION(BlueprintPure, Category = "RuntimeInspector|Automation")
     FString GetActorPropertyHostDebugSummaryForAutomation() const;
     UFUNCTION(BlueprintPure, Category = "RuntimeInspector|Automation")
+    bool HasActorGroupsTouchScrollSupportForAutomation() const;
+    UFUNCTION(BlueprintPure, Category = "RuntimeInspector|Automation")
     FString GetActorPropertyAnchorChainForAutomation() const;
     UFUNCTION(BlueprintPure, Category = "RuntimeInspector|Automation")
     FString GetInspectBodyChildrenDebugSummaryForAutomation() const;
     UFUNCTION(BlueprintPure, Category = "RuntimeInspector|Automation")
     FString GetPanelPresentationDebugSummaryForAutomation() const;
     UFUNCTION(BlueprintPure, Category = "RuntimeInspector|Automation")
+    FString GetPageRoutingDebugSummaryForAutomation() const;
+    UFUNCTION(BlueprintPure, Category = "RuntimeInspector|Automation")
+    FString GetActorTopContextValueDebugSummaryForAutomation() const;
+    UFUNCTION(BlueprintPure, Category = "RuntimeInspector|Automation")
+    FString GetActorFooterDebugSummaryForAutomation() const;
+    UFUNCTION(BlueprintPure, Category = "RuntimeInspector|Automation")
+    FString GetContextLabelAnchorChainsForAutomation() const;
+    UFUNCTION(BlueprintPure, Category = "RuntimeInspector|Automation")
     FString GetPanelHostWindowDebugSummaryForAutomation() const;
+    UFUNCTION(BlueprintPure, Category = "RuntimeInspector|Automation")
+    FString GetLastPickDebugSummaryForAutomation() const;
     void ClearActivityLog();
     void AppendActivityLog(ERIToastType Severity, const FString& Category, const FString& Message);
     bool HandlePanelMouseButtonDown(const FPointerEvent& MouseEvent);
@@ -681,7 +718,7 @@ public:
     bool HandlePanelMouseButtonUp(const FPointerEvent& MouseEvent);
 
     UFUNCTION(BlueprintCallable, Category = "RuntimeInspector")
-    void PickActorInView(); // F2: �ӽ���������ѡ��
+    void PickActorInView(); // Legacy wrapper: current behavior is cursor-based actor pick.
 
 
     UFUNCTION(BlueprintPure, Category = "RuntimeInspector")
@@ -726,6 +763,11 @@ public:
 
     UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Groups")
     bool GetGroupExpanded(const FString& GroupKey, bool bDefault = true) const;
+
+    bool GetPropertyCategoryExpanded(const UObject* TargetObject, const FString& PrimaryCategory, bool bDefault = true) const;
+    void SetPropertyCategoryExpanded(const UObject* TargetObject, const FString& PrimaryCategory, bool bExpanded);
+    FString BuildPropertyCategoryStateKey(const UObject* TargetObject, const FString& PrimaryCategory) const;
+    void GetActorWorldTransformPropertyItems(TArray<UInspectorPropertyItem*>& OutItems);
 
     UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|UI")
     void RequestActorPageRefresh();
@@ -969,11 +1011,19 @@ public:
     UFUNCTION(BlueprintPure, Category = "RuntimeInspector")
     FString GetCurrentActorSearchText() const { return CurrentActorSearchText; }
 
+    UFUNCTION(BlueprintPure, Category = "RuntimeInspector")
+    FString GetSelectedGroupKeyForAutomation() const { return SelectedGroupKey; }
+
+    UFUNCTION(BlueprintPure, Category = "RuntimeInspector")
+    ERIPropertyViewMode GetPropertyViewModeForAutomation() const { return PropertyViewMode; }
+
     UFUNCTION(BlueprintCallable, Category = "RuntimeInspector")
     void GetFunctionItemsForSelected(const FString& SearchText, TArray<UInspectorFunctionItem*>& OutItems);
 
     UFUNCTION(BlueprintCallable, Category = "RuntimeInspector")
     bool InvokeFunctionItem(UInspectorFunctionItem* Item, const TArray<FString>& InArgTexts, FString& OutError);
+
+    void RefreshActorPropertyValue(UObject* TargetObject, FName PropertyName, bool bAllowSectionFallback = true);
 
     UFUNCTION()
     void HandleActorSearchTextChanged(const FText& InText);
@@ -983,7 +1033,13 @@ private:
     APlayerController* GetLocalPC() const;
     FRIRuntimeActorRoleSummary BuildActorRoleSummary(AActor* InActor) const;
     bool ApplyChange(const FInspectorChange& Change, bool bUseNewValue);
+    UInspectorFilePageWidget* CreateFilePageWidgetInstance();
+    UInspectorSettingsPageWidget* CreateSettingsPageWidgetInstance();
+    UInspectorTestPageWidget* CreateTestPageWidgetInstance();
+    void OpenToPage(ERIVisiblePage InitialPage);
     void EnsurePanelWidget();
+    void ResetPanelWidgetRuntimeState();
+    void ReleasePanelWidgetForRecreate();
     void EnsureFilePageInjected();
     void EnsureSettingsPageInjected();
     void EnsureTestPageInjected();
@@ -994,7 +1050,11 @@ private:
     void ShowTestPage();
     void HideSettingsPage();
     void EnsureSharedContextStripInjected();
+    void HideSharedContextStripForActorPage();
     void UpdateSharedContextStrip();
+    void EnsureActorTopContextStripInjected();
+    void UpdateActorTopContextStrip();
+    void BuildContextStripDisplayState(FString& OutActorLabel, FString& OutActorClass, FString& OutSourcePath, FString& OutStagedState, bool& bOutActorMissing, bool& bOutHasStagedPatch) const;
     UWidgetSwitcher* FindContentSwitcher() const;
     UPanelWidget* FindFileHostPanel() const;
     UPanelWidget* FindSettingsHostPanel() const;
@@ -1014,12 +1074,26 @@ private:
     void MaybePrecreateFilePageWidget();
     void MaybePrecreateSettingsPageWidget();
     void EnsureActorWorkbenchBodyInjected();
+    void PrepareActorPageForPresentation(bool bForceSlateLayout);
+    void MarkActorPageStructureDirty();
+    FString BuildActorPageStructureKey() const;
+    bool IsActorOnlyModifiedFilterEnabled() const;
+    void PrimeActorPageForInitialOpen();
+    void EnsureActorSplitSidebarPanelInjected();
+    void RestoreActorSinglePanelBodyLayout();
+    bool ShouldUseActorSplitPresentation(float& OutLeftWidth, float& OutRightWidth, float& OutCenterClear) const;
+    void ApplyActorSplitPresentation();
     void EnsureActorGroupsSectionInjected();
     void RefreshActorGroupsSection();
+    void ApplySelectedActorRootState(AActor* ActorPtr = nullptr);
+    void FocusSelectedActorRoot(EInspectorRefreshReason Reason = EInspectorRefreshReason::StructureChanged);
+    bool IsActorRootSelectionActive() const;
+    void UpdateActorGroupsHeaderState();
     void EnsureActorWorkspaceSelectionBandInjected();
     void UpdateActorWorkspaceSelectionBand();
     void EnsureActorPropertiesSectionInjected();
-    void RefreshActorPropertiesSection();
+    void RefreshActorPropertiesSection(bool bRebuildRows = true);
+    void RefreshActorValuePresentation();
     void EnsureActorFunctionsSectionInjected();
     void RefreshActorFunctionsSection();
     void CacheActorPageSearchTextFromPanel();
@@ -1031,7 +1105,54 @@ private:
     bool IsSelfTestPIEAvailable() const;
     FString BuildSelfTestSummary(const FString& FullReport) const;
     FRISelfTestResult MakeSelfTestResult(const FRISelfTestDefinition& Definition, bool bPassed, const FString& FullReport, int32 DurationMs) const;
+    void LogToolsDefinitionIssue(const FString& Message) const;
+    TArray<FRISelfTestTableRow> LoadConfiguredSelfTestRows() const;
+    TArray<FRIWorkflowTableRow> LoadConfiguredWorkflowRows() const;
+    FRISelfTestDefinition MakeSelfTestDefinitionFromTableRow(const FRISelfTestTableRow& Row, bool bPIEAvailable) const;
+    FRIWorkflowDefinition MakeWorkflowDefinitionFromTableRow(const FRIWorkflowTableRow& Row) const;
+    const FRISelfTestTableRow* FindConfiguredSelfTestRow(FName TestId, const TArray<FRISelfTestTableRow>& Rows) const;
+    const FRIWorkflowTableRow* FindConfiguredWorkflowRow(FName WorkflowId, const TArray<FRIWorkflowTableRow>& Rows) const;
+    bool ExecuteToolAction(
+        const FRIToolActionDefinition& Action,
+        const TArray<FRISelfTestTableRow>& SelfTestRows,
+        const TArray<FRIWorkflowTableRow>& WorkflowRows,
+        bool& bOutPassed,
+        bool& bOutBlocked,
+        FString& OutSummary,
+        FRIWorkflowRunResult* OutWorkflowResult = nullptr,
+        TArray<FRIVerificationRunResult>* OutVerificationResults = nullptr,
+        TArray<FRISelfTestResult>* OutSelfTestResults = nullptr,
+        TArray<FName>* OutExecutedChildWorkflowIds = nullptr,
+        TArray<FString>* OutExecutedChildWorkflowSummaries = nullptr);
+    bool ExecuteToolActionSequence(
+        const TArray<FRIToolActionDefinition>& Actions,
+        const TArray<FRISelfTestTableRow>& SelfTestRows,
+        const TArray<FRIWorkflowTableRow>& WorkflowRows,
+        int32& OutPassedStepCount,
+        int32& OutFailedStepCount,
+        bool& bOutBlocked,
+        TArray<FString>& OutReportSections,
+        FRIWorkflowRunResult* OutWorkflowResult = nullptr,
+        TArray<FRIVerificationRunResult>* OutVerificationResults = nullptr,
+        TArray<FRISelfTestResult>* OutSelfTestResults = nullptr,
+        TArray<FName>* OutExecutedChildWorkflowIds = nullptr,
+        TArray<FString>* OutExecutedChildWorkflowSummaries = nullptr);
+    bool ExecuteLegacyToolNativeBridgeAction(FName BridgeId, FString& OutReport, bool& bOutPassed);
     bool ExecuteSelfTestByIdInternal(FName TestId, FString& OutReport, bool& bOutPassed);
+    bool RunChangesFirstOpenValidationCapture(FRIValidationCaptureReport& OutReport);
+    void BeginValidationCapture(FName ScenarioId);
+    void CaptureValidationStateSnapshot(FRIValidationCaptureReport& OutReport) const;
+    bool CaptureValidationScreenshot(const FString& ScreenshotBaseName, FString& OutPath, FString& OutError);
+    bool SaveValidationCaptureReport(FRIValidationCaptureReport& InOutReport, FString& OutError) const;
+    FString BuildValidationCaptureSummaryText(const FRIValidationCaptureReport& Report) const;
+    FString GetValidationCaptureRootDir() const;
+    FString GetValidationCaptureScenarioDir(const FString& CaptureId) const;
+    FString GetTransformSourcePersistenceRootDir() const;
+    FString GetTransformSourcePersistencePendingPath() const;
+    FString GetTransformSourcePersistenceScenarioDir(const FString& CaptureId) const;
+    bool SaveTransformSourcePersistenceCheckpoint(const FRITransformSourcePersistenceCheckpoint& InCheckpoint, FString& OutPath, FString& OutError) const;
+    bool LoadTransformSourcePersistenceCheckpoint(FRITransformSourcePersistenceCheckpoint& OutCheckpoint, FString& OutPath, FString& OutError) const;
+    bool SaveTransformSourcePersistenceReport(FRITransformSourcePersistenceReport& InOutReport, FString& OutError) const;
     bool ApplyFabScreenshotFoundationState(FString& OutSummary, FString& OutError);
     bool ApplyFabRemoteSessionScreenshotState(FString& OutSummary, FString& OutError);
     bool ApplyFabPromoteOrAuditScreenshotState(FString& OutSummary, FString& OutError);
@@ -1069,6 +1190,9 @@ private:
     void HandleConfirmDialogHexTextChanged(const FText& InText);
 
     UFUNCTION()
+    void HandleActorComponentsHeaderClicked();
+
+    UFUNCTION()
     void HandleActiveConfirmDialogAccepted();
 
     UFUNCTION()
@@ -1078,6 +1202,7 @@ private:
     // <<< ADD���۵�״̬����
     UPROPERTY()
     TMap<FString, bool> GroupExpandedMap;
+    TMap<FString, bool> PropertyCategoryExpandedMap;
 
 private:
     bool bOpen = false;
@@ -1095,6 +1220,14 @@ private:
     void UnregisterInputProcessor();
 
     TWeakObjectPtr<AActor> SelectedActor;
+    FString SelectedActorRecoveryPath;
+    FString SelectedActorRecoveryBaseName;
+    FString SelectedActorRecoveryClassPath;
+    FString SelectedActorRecoveryDisplayLabel;
+    FString SelectedActorRecoveryClassDisplayLabel;
+    FString LastPickDebugSummary = TEXT("Source=None Hit=0 Actor=None Component=None Reason=Uninitialized");
+    bool bSelectedActorRecoveryPending = false;
+    float SelectedActorRecoveryWaitSeconds = 0.f;
 
     UPROPERTY(Transient)
     TObjectPtr<UUserWidget> PanelWidgetStrong = nullptr;
@@ -1114,6 +1247,15 @@ private:
 
     UPROPERTY()
     TSoftClassPtr<UUserWidget> ConfirmDialogWidgetClass;
+
+    UPROPERTY()
+    TSoftClassPtr<UInspectorFilePageWidget> FilePageWidgetClass;
+
+    UPROPERTY()
+    TSoftClassPtr<UInspectorSettingsPageWidget> SettingsPageWidgetClass;
+
+    UPROPERTY()
+    TSoftClassPtr<UInspectorTestPageWidget> TestPageWidgetClass;
 
     float ConfirmDialogBindAccum = 0.f;
     float ConfirmDialogPreviewAccum = 0.f;
@@ -1138,7 +1280,7 @@ private:
 
     bool ApplyChangeValue(UObject* Target, FName PropName, const FString& TextValue);
 
-	
+
 
     // >>> ADD������������ Key / ������ / �ռ�����
     static FString MakeComponentKey(const AActor* Actor, const UActorComponent* Comp);
@@ -1365,6 +1507,10 @@ private:
         FString MakeMaterialSnapshotKey(UPrimitiveComponent* Comp, int32 SlotIndex, EInspectorMatParamType Type, FName ParamName) const;
         AActor* ResolveRuntimeActorTarget(const FString& ActorPath, const FString& ActorClass, const FString& ActorBaseName) const;
         UActorComponent* ResolveRuntimeComponentTarget(AActor* Owner, const FString& ActorPathForRemap, const FString& ComponentPath, const FString& ComponentName, const FString& ComponentClass) const;
+        void RememberSelectedActorRecoveryIdentity(AActor* Actor);
+        void ClearSelectedActorRecoveryState();
+        void BeginSelectedActorRecovery(AActor* PreviousActor);
+        bool TryRecoverSelectedActorFromIdentity();
         bool TryBuildPatchOperationFromModifiedKey(const FString& Key, const FString& PatchedValue, const FString* BaselineValuePtr, FRIPatchOperation& OutOperation) const;
         void SortPatchOperationsForApply(TArray<FRIPatchOperation>& InOutOperations) const;
         void FinalizePatchApplyResult(FRIApplyResult& OutResult, const TCHAR* SummaryPrefix) const;
@@ -1429,7 +1575,8 @@ private:
                     PropertyViewMode = ERIPropertyViewMode::MaterialOnly;
                     ViewMeshComp = InComp;
                     ViewMaterialSlot = InSlot;
-                    RefreshPanel(); // �������� OnInspectorRefreshEx�������Ǹ�
+                    MarkActorPageStructureDirty();
+                    RefreshPanel(EInspectorRefreshReason::StructureChanged);
         #endif
                 }
 
@@ -1440,12 +1587,13 @@ private:
                     PropertyViewMode = ERIPropertyViewMode::Full;
                     ViewMeshComp = nullptr;
                     ViewMaterialSlot = INDEX_NONE;
-                    RefreshPanel();
+                    MarkActorPageStructureDirty();
+                    RefreshPanel(EInspectorRefreshReason::StructureChanged);
         #endif
         }
         UFUNCTION(BlueprintCallable, Category = "RuntimeInspector")
         void ToggleFavoriteForAnyItem(UObject* Item);
-        
+
     private:
         ERIPropertyViewMode PropertyViewMode = ERIPropertyViewMode::Full;
 
@@ -1511,7 +1659,10 @@ private:
     public:
         UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Selection")
         bool PickActorUnderCursor();
+        bool HandleRightMousePickInput(bool bCtrlDown, bool bShiftDown);
     private:
+        bool PickActorAtMousePositionInternal(const TCHAR* SourceTag);
+        void UpdateLastPickDebugSummary(const TCHAR* SourceTag, bool bHit, const FString& ActorPath, const FString& ComponentName, const TCHAR* Reason);
         void EnsureInspectorInputComponent();
         void ReleaseInspectorInputComponent();
         void RebindInspectorKeys();
@@ -1534,6 +1685,7 @@ private:
         TWeakObjectPtr<UPanelWidget> SettingsHostPanel;
         TWeakObjectPtr<UPanelWidget> TestHostPanel;
         TWeakObjectPtr<UPanelWidget> SharedContextStripHostPanel;
+        TWeakObjectPtr<UBorder> SharedContextStripBorder;
         TWeakObjectPtr<UWidget> PanelTitleBarWidget;
         TWeakObjectPtr<UWidget> PanelRootContentWidget;
         TWeakObjectPtr<class UCanvasPanelSlot> PanelRootCanvasSlot;
@@ -1547,6 +1699,17 @@ private:
         TObjectPtr<UTextBlock> SharedContextSourceText = nullptr;
         UPROPERTY(Transient)
         TObjectPtr<UTextBlock> SharedContextStagedText = nullptr;
+        TWeakObjectPtr<UWidget> ActorTopContextActorCell;
+        UPROPERTY(Transient)
+        TObjectPtr<UBorder> ActorTopContextStripStrong = nullptr;
+        UPROPERTY(Transient)
+        TObjectPtr<UTextBlock> ActorTopContextActorTextStrong = nullptr;
+        UPROPERTY(Transient)
+        TObjectPtr<UTextBlock> ActorTopContextClassTextStrong = nullptr;
+        UPROPERTY(Transient)
+        TObjectPtr<UTextBlock> ActorTopContextSourceTextStrong = nullptr;
+        UPROPERTY(Transient)
+        TObjectPtr<UTextBlock> ActorTopContextStagedTextStrong = nullptr;
         UPROPERTY(Transient)
         TObjectPtr<UInspectorFilePageWidget> FilePageWidgetStrong = nullptr;
 
@@ -1569,7 +1732,19 @@ private:
         TObjectPtr<UVerticalBox> ActorGroupsEntriesBoxStrong = nullptr;
 
         UPROPERTY(Transient)
+        TObjectPtr<UScrollBox> ActorPinnedScrollBoxStrong = nullptr;
+
+        UPROPERTY(Transient)
         TObjectPtr<UVerticalBox> ActorPinnedEntriesBoxStrong = nullptr;
+
+        UPROPERTY(Transient)
+        TObjectPtr<UButton> ActorGroupsHeaderButtonStrong = nullptr;
+
+        UPROPERTY(Transient)
+        TObjectPtr<UBorder> ActorGroupsHeaderBorderStrong = nullptr;
+
+        UPROPERTY(Transient)
+        TObjectPtr<UTextBlock> ActorGroupsHeaderTextStrong = nullptr;
 
         UPROPERTY(Transient)
         TArray<TObjectPtr<UInspectorGroupButtonProxy>> ActorGroupsClickProxies;
@@ -1610,14 +1785,28 @@ private:
         UPROPERTY(Transient)
         TObjectPtr<UVerticalBox> ActorWorkbenchContentHostStrong = nullptr;
 
+        UPROPERTY(Transient)
+        TObjectPtr<USizeBox> ActorSplitSidebarSizeBoxStrong = nullptr;
+
+        UPROPERTY(Transient)
+        TObjectPtr<UBorder> ActorSplitSidebarBorderStrong = nullptr;
+
         TWeakObjectPtr<UInspectorFilePageWidget> FilePageWidget;
         TWeakObjectPtr<UInspectorSettingsPageWidget> SettingsPageWidget;
         TWeakObjectPtr<UInspectorTestPageWidget> TestPageWidget;
         TWeakObjectPtr<UInspectorGroupsSectionWidget> ActorGroupsSectionWidget;
         TWeakObjectPtr<USizeBox> ActorGroupsSectionHostBox;
+        TWeakObjectPtr<UButton> ActorGroupsHeaderButton;
+        TWeakObjectPtr<UBorder> ActorGroupsHeaderBorder;
+        TWeakObjectPtr<UTextBlock> ActorGroupsHeaderText;
         TWeakObjectPtr<UVerticalBox> ActorPinnedEntriesBox;
         TWeakObjectPtr<UInspectorPropertiesSectionWidget> ActorPropertiesSectionWidget;
         TWeakObjectPtr<UInspectorFunctionsSectionWidget> ActorFunctionsSectionWidget;
+        TWeakObjectPtr<UBorder> ActorTopContextStrip;
+        TWeakObjectPtr<UTextBlock> ActorTopContextActorText;
+        TWeakObjectPtr<UTextBlock> ActorTopContextClassText;
+        TWeakObjectPtr<UTextBlock> ActorTopContextSourceText;
+        TWeakObjectPtr<UTextBlock> ActorTopContextStagedText;
         TWeakObjectPtr<UBorder> ActorWorkspaceSelectionBand;
         TWeakObjectPtr<UTextBlock> ActorWorkspaceSelectionActorText;
         TWeakObjectPtr<UTextBlock> ActorWorkspaceSelectionSourceText;
@@ -1627,6 +1816,9 @@ private:
         TWeakObjectPtr<UVerticalBox> ActorWorkbenchPageStackHost;
         TWeakObjectPtr<UVerticalBox> ActorWorkbenchSidebarHost;
         TWeakObjectPtr<UVerticalBox> ActorWorkbenchContentHost;
+        TWeakObjectPtr<USizeBox> ActorSplitSidebarSizeBox;
+        TWeakObjectPtr<UBorder> ActorSplitSidebarBorder;
+        TWeakObjectPtr<class UCanvasPanelSlot> ActorSplitSidebarCanvasSlot;
         TArray<FRIHostPanelMountState> HostPanelMountStates;
         int32 SettingsPageIndex = INDEX_NONE;
         int32 TestPageIndex = INDEX_NONE;
@@ -1634,10 +1826,12 @@ private:
         bool bDeferredOpenActorRefreshScheduled = false;
         bool bDeferredOpenActorRefreshNeedsBaseline = false;
         bool bHasCompletedInitialActorPanelRefresh = false;
+        bool bActorPageStructureDirty = true;
         bool bPanelWidgetPrecreated = false;
         bool bThemePreviewRefreshScheduled = false;
         ERIVisiblePage PendingThemePreviewPage = ERIVisiblePage::Actor;
         FString CurrentActorSearchText;
+        FString LastActorPageStructureKey;
         FTimerHandle DeferredOpenActorRefreshTimerHandle;
         FTimerHandle ThemePreviewRefreshTimerHandle;
         bool bFabScreenshotApplicationScaleCaptured = false;
@@ -1694,6 +1888,14 @@ private:
 
         UPROPERTY(Transient)
         TArray<FRISelfTestResult> LastSelfTestResults;
+        FRIValidationCaptureReport LastValidationCaptureReport;
+        bool bValidationCaptureActive = false;
+        double ValidationCaptureStartedSeconds = 0.0;
+        FName ActiveValidationCaptureScenarioId = NAME_None;
+        FRIValidationCaptureReport ActiveValidationCaptureReport;
+
+        TSet<FString> ActiveToolExecutionKeys;
+        int32 ActiveToolExecutionDepth = 0;
 
         // 记录相机原本的 PostProcessBlendWeight，关闭时恢复
         float SavedCamPPBlendWeight = 0.0f;

@@ -29,6 +29,7 @@ public:
 
     bool HasFunctionsSection() const { return FunctionsSectionBorder != nullptr; }
     bool HasFunctionScrollRoot() const { return FunctionsScrollBox != nullptr; }
+    bool HasTouchScrollSupportForAutomation() const;
     bool HasFocusSummary() const { return FocusSummaryText != nullptr; }
 
 protected:

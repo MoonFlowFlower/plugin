@@ -143,6 +143,43 @@ function Invoke-BridgeRequest {
     }
 }
 
+function Get-BridgeFieldValue {
+    param(
+        [object]$BridgeResult,
+        [string]$FieldName
+    )
+
+    if ($null -eq $BridgeResult -or [string]::IsNullOrWhiteSpace($FieldName)) {
+        return $null
+    }
+
+    $RawValue = $BridgeResult.$FieldName
+    if ($null -eq $RawValue) {
+        return $null
+    }
+
+    if ($RawValue -is [System.Array]) {
+        foreach ($Entry in $RawValue) {
+            if ($null -eq $Entry) {
+                continue
+            }
+
+            if ($Entry -is [string]) {
+                if (-not [string]::IsNullOrWhiteSpace($Entry)) {
+                    return $Entry
+                }
+                continue
+            }
+
+            return $Entry
+        }
+
+        return $null
+    }
+
+    return $RawValue
+}
+
 function Ensure-EditorReady {
     $State = Get-BridgeState
     if ($State -and $State.active -and $State.port -and (Test-TcpPort -Port ([int]$State.port))) {
@@ -215,21 +252,49 @@ function Get-FabCaptureSelfTestId {
     }
 }
 
-function Get-InspectorHostWindowTitle {
-    param(
-        [object]$BridgeState
-    )
+function Get-WindowTitleFromSummary {
+    param([string]$Summary)
 
-    $Summary = Invoke-BridgeRequest -BridgeState $BridgeState -Method "get_runtime_inspector_automation_summary" -TimeoutSeconds 30
-    $RawDebug = if ($Summary.PSObject.Properties.Match("panelHostWindowDebug").Count -gt 0) { [string]$Summary.panelHostWindowDebug } else { "" }
-    if (-not [string]::IsNullOrWhiteSpace($RawDebug)) {
-        $Match = [regex]::Match($RawDebug, '^Title=(.+?)\s+\|')
-        if ($Match.Success -and -not [string]::IsNullOrWhiteSpace($Match.Groups[1].Value)) {
-            return $Match.Groups[1].Value.Trim()
+    if ([string]::IsNullOrWhiteSpace($Summary)) {
+        return $null
+    }
+
+    if ($Summary.StartsWith("Title=")) {
+        $WithoutPrefix = $Summary.Substring(6)
+        $Parts = $WithoutPrefix -split " \| ", 2
+        if ($Parts.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($Parts[0])) {
+            return $Parts[0].Trim()
         }
     }
 
-    return "Preview"
+    $LooseMatch = [regex]::Match($Summary, "Title=(.*?)( \\| |$)")
+    if ($LooseMatch.Success) {
+        return $LooseMatch.Groups[1].Value.Trim()
+    }
+
+    return $null
+}
+
+function Get-InspectorAutomationSummary {
+    param(
+        [object]$BridgeState,
+        [int]$AttemptCount = 24
+    )
+
+    $LastSummary = $null
+    for ($Attempt = 1; $Attempt -le $AttemptCount; $Attempt++) {
+        $LastSummary = Invoke-BridgeRequest -BridgeState $BridgeState -Method "get_runtime_inspector_automation_summary" -TimeoutSeconds 30
+        $SummarySucceeded = [bool](Get-BridgeFieldValue -BridgeResult $LastSummary -FieldName "success")
+        $RawDebug = [string](Get-BridgeFieldValue -BridgeResult $LastSummary -FieldName "panelHostWindowDebug")
+        $WindowTitle = Get-WindowTitleFromSummary -Summary $RawDebug
+        if ($SummarySucceeded -and -not [string]::IsNullOrWhiteSpace($WindowTitle)) {
+            return $LastSummary
+        }
+
+        Start-Sleep -Milliseconds 500
+    }
+
+    return $LastSummary
 }
 
 function Invoke-FabCaptureSelfTest {
@@ -262,26 +327,36 @@ function Capture-InspectorShot {
     )
 
     Invoke-FabCaptureSelfTest -ShotName $ShotName -PageName $PageName
-    $HostWindowTitle = Get-InspectorHostWindowTitle -BridgeState $BridgeState
+    [void](Invoke-BridgeRequest -BridgeState $BridgeState -Method "control_runtime_inspector" -Params @{ action = "open" } -TimeoutSeconds 30)
+    [void](Invoke-BridgeRequest -BridgeState $BridgeState -Method "control_runtime_inspector" -Params @{ action = "show_page"; page = $PageName } -TimeoutSeconds 30)
+    Start-Sleep -Milliseconds 750
+    $AutomationSummary = Get-InspectorAutomationSummary -BridgeState $BridgeState -AttemptCount 24
+    $RawHostDebug = [string](Get-BridgeFieldValue -BridgeResult $AutomationSummary -FieldName "panelHostWindowDebug")
+    $HostWindowTitle = Get-WindowTitleFromSummary -Summary $RawHostDebug
+    if ([string]::IsNullOrWhiteSpace($HostWindowTitle)) {
+        $SummarySuccess = [string][bool](Get-BridgeFieldValue -BridgeResult $AutomationSummary -FieldName "success")
+        $SummaryError = [string](Get-BridgeFieldValue -BridgeResult $AutomationSummary -FieldName "error")
+        $RoutingDebug = [string](Get-BridgeFieldValue -BridgeResult $AutomationSummary -FieldName "pageRoutingDebug")
+        $PresentationDebug = [string](Get-BridgeFieldValue -BridgeResult $AutomationSummary -FieldName "panelPresentationDebug")
+        throw "Failed to resolve RuntimeInspector host window title before capturing $FileName | success=$SummarySuccess | error=$SummaryError | panelHostWindowDebug=$RawHostDebug | pageRoutingDebug=$RoutingDebug | panelPresentationDebug=$PresentationDebug"
+    }
 
     $TargetPath = Join-Path $OutputRoot $FileName
-    if ($HostWindowTitle -like "*Preview*") {
-        $CaptureResult = Invoke-BridgeRequest -BridgeState $BridgeState -Method "capture_screenshot" -Params @{
-            filename = $TargetPath
-            showUI = $true
-        } -TimeoutSeconds 30
-    } else {
-        $CaptureResult = Invoke-BridgeRequest -BridgeState $BridgeState -Method "capture_window_screenshot" -Params @{
-            filename = $TargetPath
-            windowTitleContains = $HostWindowTitle
-        } -TimeoutSeconds 30
-    }
-    if (-not $CaptureResult.success) {
+    $CaptureResult = Invoke-BridgeRequest -BridgeState $BridgeState -Method "capture_window_screenshot" -Params @{
+        filename = $TargetPath
+        showUI = $true
+        windowTitleContains = $HostWindowTitle
+    } -TimeoutSeconds 30
+    if (-not [bool](Get-BridgeFieldValue -BridgeResult $CaptureResult -FieldName "success")) {
         throw "capture_window_screenshot failed for $FileName"
     }
+    if ([string](Get-BridgeFieldValue -BridgeResult $CaptureResult -FieldName "captureMode") -ne "window") {
+        throw "capture_window_screenshot did not use host window mode for $FileName"
+    }
 
-    $ResolvedPath = if ($CaptureResult.PSObject.Properties.Match("filename").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($CaptureResult.filename)) {
-        [string]$CaptureResult.filename
+    $CaptureFilename = [string](Get-BridgeFieldValue -BridgeResult $CaptureResult -FieldName "filename")
+    $ResolvedPath = if (-not [string]::IsNullOrWhiteSpace($CaptureFilename)) {
+        $CaptureFilename
     } else {
         $TargetPath
     }

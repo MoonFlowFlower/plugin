@@ -71,6 +71,7 @@ public:
     FString GetRemoteSessionTargetQueryValue() const { return RemoteSessionTargetQueryBox.Get() ? RemoteSessionTargetQueryBox.Get()->GetText().ToString() : FString(); }
     FString GetRemoteSessionWorkflowValue() const { return RemoteSessionWorkflowBox.Get() ? RemoteSessionWorkflowBox.Get()->GetText().ToString() : FString(); }
     bool HasPageScrollRoot() const { return WidgetTree && WidgetTree->FindWidget(TEXT("RI_FilePageScroll")) != nullptr; }
+    bool HasTouchScrollSupportForAutomation() const;
     bool HasDiagnosticsSection() const { return WidgetTree && WidgetTree->FindWidget(TEXT("RI_FileDiagnosticsSectionBody")) != nullptr; }
     bool HasEmbeddedSettingsSection() const
     {
@@ -220,229 +221,229 @@ private:
 private:
     TWeakObjectPtr<UInspectorWorldSubsystem> Subsystem;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> SnapshotCountText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> PatchCountText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> PresetCountText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> AuditCountText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> StagedPatchText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> NextStepText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> ActionGuideText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> RuntimeSessionText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> SelectedRoleText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> SelectedActorSummaryText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> SelectedActorClassText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> SelectedActorSourcePathText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> PatchApplyText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> PromotePreviewText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> PromoteResultText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> AuditSummaryText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> RemoteSessionCompareStatusText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> RemoteSessionSummaryText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> RemoteSessionSelectionText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> RemoteSessionTargetQueryText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> RemoteSessionWorkflowText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> AuditCacheText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> AuditModeText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> AuditPairText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> AuditStatsText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> AuditFirstFieldText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> AuditPreviewText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UVerticalBox> AuditLinesBox = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> RoleCompareSummaryText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> RoleCompareAvailableRoleText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> RoleCompareStatsText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> RoleComparePreviewText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UVerticalBox> RoleCompareLinesBox = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> RemoteSessionCompareSummaryText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> RemoteSessionCompareSessionsText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> RemoteSessionCompareStatsText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> RemoteSessionComparePreviewText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UVerticalBox> RemoteSessionCompareLinesBox = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> LatestSnapshotText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> LatestPatchFileText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> LatestPresetText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> LatestAuditFileText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> StatusText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UScrollBox> PageScrollBox = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UVerticalBox> AuditsSectionBody = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UVerticalBox> PresetsSectionBody = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UVerticalBox> DiagnosticsSectionBody = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> AuditsSectionToggleText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> PresetsSectionToggleText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> DiagnosticsSectionToggleText = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UButton> RefreshButton = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UComboBoxString> RemoteSessionComboBox = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UEditableTextBox> RemoteSessionTargetQueryBox = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UEditableTextBox> RemoteSessionWorkflowBox = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UButton> RemoteSessionRefreshButton = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UButton> RemoteSessionConnectButton = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UButton> RemoteSessionPullPatchButton = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UButton> RemoteSessionRunWorkflowButton = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UButton> StagePatchButton = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UButton> ExportPatchButton = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UButton> SavePresetButton = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UButton> ApplyLatestPresetButton = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UButton> BuildBaselineAuditButton = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UButton> BuildAuditButton = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UButton> BuildPatchVsSourceAuditButton = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UButton> BuildAppliedAuditButton = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UButton> BuildRuntimeRoleCompareButton = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UButton> BuildRemoteSessionCompareButton = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UButton> ViewBaselineButton = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UButton> ViewCurrentPatchButton = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UButton> ViewPatchSourceButton = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UButton> ViewAppliedButton = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UButton> PreviewPromoteButton = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UButton> PromoteApplyButton = nullptr;
 
-    UPROPERTY(Transient)
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
     TObjectPtr<UButton> ClearStagedButton = nullptr;
 
     int32 RenderedAuditLineCount = 0;

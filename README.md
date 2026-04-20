@@ -2,7 +2,7 @@
 
 This file is a user and maintainer overview, not the agent development authority.
 
-For RuntimeInspector implementation rules, validation boundaries, and the current development workflow, use `Docs/AGENT_DEVELOPMENT.md`.
+For RuntimeInspector implementation rules, validation boundaries, and the current development workflow, use `docs/AGENT_DEVELOPMENT.md`.
 
 Runtime Inspector is an Unreal Engine 5.5 plugin for inspecting live actors and editable properties, capturing runtime changes as patch bundles, comparing runtime state against source defaults, and running editor-side audit and promote workflows.
 
@@ -10,8 +10,11 @@ Runtime Inspector is an Unreal Engine 5.5 plugin for inspecting live actors and 
 
 - User overview: `README.md`
 - Chinese product guide: `USER_GUIDE_zh-CN.md`
-- Agent development authority: `Docs/AGENT_DEVELOPMENT.md`
-- UI appendix: `Docs/UI_GUARDRAILS.md`
+- Program state (structured): `docs/PROGRAM_STATE_UNIFIED.yaml`
+- Current status: `docs/STATUS.md`
+- Task lanes: `docs/codex/tasks/TASK_LANE_INDEX.md`
+- Agent development authority: `docs/AGENT_DEVELOPMENT.md`
+- UI appendix: `docs/UI_GUARDRAILS.md`
 
 ## Release Scope
 
@@ -49,7 +52,7 @@ Runtime Inspector is an Unreal Engine 5.5 plugin for inspecting live actors and 
 
 1. Start PIE.
 2. Press `O` to toggle the inspector panel.
-3. Press `P` to pick the actor in view, or use `Ctrl + Right Mouse Button` if right-click pick is enabled.
+3. Hover the mouse over the target actor and press `P`, or use `Ctrl + Right Mouse Button` to pick the actor currently hit under the mouse. Picking uses object queries, so both player characters and scene actors can be selected when they are under the cursor.
 4. Use the actor/property panel to inspect or edit supported values.
 5. Use the `Changes` page for staged patch, preset, audit, compare, and promote workflows.
 6. Use the `Settings` page to rebind hotkeys, switch theme preset, and adjust outline/apply behavior.

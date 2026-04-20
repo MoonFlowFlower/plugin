@@ -5,3 +5,8 @@ Saved/
 .vs/
 .idea/
 .vscode/
+.tmp_inspect_runtimeinspector_assets.*
+FabMedia/capture_fab_media.log
+FabMedia/capture_manifest.txt
+*fab_release_cmd.log
+Content/UI/*_corrupt_*.uasset

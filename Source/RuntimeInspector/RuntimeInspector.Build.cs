@@ -9,44 +9,46 @@ public class RuntimeInspector : ModuleRules
 	{
         PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
         PrecompileForTargets = PrecompileTargetsType.Any;
-        
+
         PublicIncludePaths.AddRange(
 			new string[] {
 				// ... add public include paths required here ...
 			}
 			);
-				
-		
+
+
 		PrivateIncludePaths.AddRange(
 			new string[] {
 				// ... add other private include paths required here ...
 			}
 			);
-			
-		
+
+
 		PublicDependencyModuleNames.AddRange(
 			new string[]
 			{
-                "Core", 
-				"CoreUObject", 
+                "Core",
+				"CoreUObject",
 				"Engine",
 				"InputCore",
-				"UMG", 
-				"Slate", 
+				"UMG",
+				"Slate",
 				"SlateCore",
-				"Json", 
+				"Json",
 				"JsonUtilities",
                 "InputCore",
 				"DeveloperSettings"
             }
 		);
-			
-		
+
+
 		PrivateDependencyModuleNames.AddRange(
 			new string[]
 			{
                 "ApplicationCore",
+                "ImageCore",
                 "Networking",
+                "RenderCore",
                 "Sockets"
             }
 		);
@@ -56,12 +58,13 @@ public class RuntimeInspector : ModuleRules
             PrivateDependencyModuleNames.AddRange(
                 new string[]
                 {
-                    "UnrealEd"
+                    "UnrealEd",
+                    "UMGEditor"
                 }
             );
         }
-		
-		
+
+
 		DynamicallyLoadedModuleNames.AddRange(
 			new string[]
 			{

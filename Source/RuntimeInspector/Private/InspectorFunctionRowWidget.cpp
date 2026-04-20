@@ -7,11 +7,13 @@
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
 #include "Components/Button.h"
+#include "Components/ButtonSlot.h"
 #include "Components/CheckBox.h"
 #include "Components/ComboBoxString.h"
 #include "Components/EditableTextBox.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
+#include "Components/Image.h"
 #include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
@@ -172,12 +174,24 @@ void UInspectorFunctionRowWidget::BuildWidgetTree()
     FavoriteButton->OnClicked.AddDynamic(this, &UInspectorFunctionRowWidget::HandleFavoriteClicked);
     FavoriteSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_FunctionRowFavoriteSize"));
     const float FavoriteButtonSize = FMath::Max(18.f, RICompactUI::GetInputHeight() - 4.f);
+    const float FavoriteIconSize = FavoriteButtonSize * 0.58f;
     FavoriteSizeBox->SetWidthOverride(FavoriteButtonSize);
     FavoriteSizeBox->SetHeightOverride(FavoriteButtonSize);
-    FavoriteText = RICompactUI::MakeText(WidgetTree, TEXT("☆"), RICompactUI::GetValueFontSize(), true, RI_FunctionRowMutedColor(), false);
-    FavoriteText->SetJustification(ETextJustify::Center);
-    FavoriteSizeBox->SetContent(FavoriteText);
+    FavoriteIcon = RICompactUI::MakeFavoriteIcon(
+        WidgetTree,
+        TEXT("RI_FunctionRowFavoriteIcon"),
+        FavoriteIconSize,
+        false,
+        RI_FunctionFavoriteActiveColor(),
+        RI_FunctionRowMutedColor());
+    FavoriteSizeBox->SetContent(FavoriteIcon);
     FavoriteButton->AddChild(FavoriteSizeBox);
+    if (UButtonSlot* FavoriteButtonSlot = Cast<UButtonSlot>(FavoriteButton->GetContentSlot()))
+    {
+        FavoriteButtonSlot->SetHorizontalAlignment(HAlign_Center);
+        FavoriteButtonSlot->SetVerticalAlignment(VAlign_Center);
+        FavoriteButtonSlot->SetPadding(FMargin(0.f));
+    }
     if (UHorizontalBoxSlot* FavoriteSlot = HeaderRow->AddChildToHorizontalBox(FavoriteButton))
     {
         FavoriteSlot->SetVerticalAlignment(VAlign_Center);
@@ -186,9 +200,33 @@ void UInspectorFunctionRowWidget::BuildWidgetTree()
 
     TitleButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("RI_FunctionRowTitleButton"));
     RICompactUI::ConfigureButton(TitleButton, RICompactUI::ERIButtonVisualStyle::Subtle, false);
+    {
+        PRAGMA_DISABLE_DEPRECATION_WARNINGS
+        FButtonStyle TitleButtonStyle = TitleButton->WidgetStyle;
+        const FSlateColor TransparentTint(FLinearColor::Transparent);
+        TitleButtonStyle.Normal.TintColor = TransparentTint;
+        TitleButtonStyle.Hovered.TintColor = TransparentTint;
+        TitleButtonStyle.Pressed.TintColor = TransparentTint;
+        TitleButtonStyle.Disabled.TintColor = TransparentTint;
+        TitleButtonStyle.Normal.OutlineSettings.Width = 0.0f;
+        TitleButtonStyle.Hovered.OutlineSettings.Width = 0.0f;
+        TitleButtonStyle.Pressed.OutlineSettings.Width = 0.0f;
+        TitleButtonStyle.Disabled.OutlineSettings.Width = 0.0f;
+        TitleButtonStyle.NormalPadding = FMargin(0.f);
+        TitleButtonStyle.PressedPadding = FMargin(0.f);
+        TitleButton->WidgetStyle = TitleButtonStyle;
+        PRAGMA_ENABLE_DEPRECATION_WARNINGS
+    }
+    TitleButton->SetBackgroundColor(FLinearColor::Transparent);
     TitleButton->OnClicked.AddDynamic(this, &UInspectorFunctionRowWidget::HandleTitleClicked);
     TitleText = RICompactUI::MakeText(WidgetTree, TEXT("Function"), RICompactUI::GetLabelFontSize(), true, RI_FunctionRowTextColor(), false);
     TitleButton->AddChild(TitleText);
+    if (UButtonSlot* TitleButtonSlot = Cast<UButtonSlot>(TitleButton->GetContentSlot()))
+    {
+        TitleButtonSlot->SetHorizontalAlignment(HAlign_Left);
+        TitleButtonSlot->SetVerticalAlignment(VAlign_Center);
+        TitleButtonSlot->SetPadding(FMargin(0.f));
+    }
     if (UHorizontalBoxSlot* TitleSlot = HeaderRow->AddChildToHorizontalBox(TitleButton))
     {
         TitleSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
@@ -478,10 +516,14 @@ UWidget* UInspectorFunctionRowWidget::HandleGenerateParameterComboItem(FString I
 void UInspectorFunctionRowWidget::UpdateCachedDisplayState(bool bFavorited)
 {
     bCachedFavorited = bFavorited;
-    if (FavoriteText)
+    if (FavoriteIcon)
     {
-        FavoriteText->SetText(FText::FromString(bFavorited ? TEXT("★") : TEXT("☆")));
-        FavoriteText->SetColorAndOpacity(bFavorited ? RI_FunctionFavoriteActiveColor() : RI_FunctionRowMutedColor());
+        RICompactUI::SetFavoriteIconState(
+            FavoriteIcon,
+            bFavorited,
+            FavoriteSizeBox ? FavoriteSizeBox->GetWidthOverride() * 0.58f : 0.f,
+            RI_FunctionFavoriteActiveColor(),
+            RI_FunctionRowMutedColor());
     }
 }
 

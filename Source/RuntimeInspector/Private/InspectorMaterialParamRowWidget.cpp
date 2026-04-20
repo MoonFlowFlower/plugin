@@ -7,9 +7,11 @@
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
 #include "Components/Button.h"
+#include "Components/ButtonSlot.h"
 #include "Components/EditableTextBox.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
+#include "Components/Image.h"
 #include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
 
@@ -76,9 +78,11 @@ void UInspectorMaterialParamRowWidget::RefreshDisplay()
 void UInspectorMaterialParamRowWidget::SetAllowNavigation(bool bInAllowNavigation)
 {
     bAllowNavigation = bInAllowNavigation;
-    if (NameButton)
+    if (RootBorder)
     {
-        NameButton->SetIsEnabled(bAllowNavigation);
+        RootBorder->SetToolTipText(bAllowNavigation
+            ? FText::FromString(TEXT("Click the row background to navigate to this material parameter."))
+            : FText::GetEmpty());
     }
 }
 
@@ -204,6 +208,17 @@ void UInspectorMaterialParamRowWidget::NativeConstruct()
     RefreshRow();
 }
 
+FReply UInspectorMaterialParamRowWidget::NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
+{
+    if (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton && bAllowNavigation)
+    {
+        HandleNameClicked();
+        return FReply::Handled();
+    }
+
+    return Super::NativeOnMouseButtonDown(InGeometry, InMouseEvent);
+}
+
 void UInspectorMaterialParamRowWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
     Super::NativeTick(MyGeometry, InDeltaTime);
@@ -261,12 +276,24 @@ void UInspectorMaterialParamRowWidget::BuildWidgetTree()
     RICompactUI::ConfigureButton(FavoriteButton, RICompactUI::ERIButtonVisualStyle::Secondary, false);
     FavoriteSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_MaterialParamFavoriteSize"));
     const float FavoriteButtonSize = FMath::Max(18.f, RICompactUI::GetInputHeight() - 4.f);
+    const float FavoriteIconSize = FavoriteButtonSize * 0.58f;
     FavoriteSizeBox->SetWidthOverride(FavoriteButtonSize);
     FavoriteSizeBox->SetHeightOverride(FavoriteButtonSize);
-    FavoriteText = RICompactUI::MakeText(WidgetTree, TEXT("☆"), RICompactUI::GetValueFontSize(), true, RI_MaterialMutedColor(), false);
-    FavoriteText->SetJustification(ETextJustify::Center);
-    FavoriteSizeBox->SetContent(FavoriteText);
+    FavoriteIcon = RICompactUI::MakeFavoriteIcon(
+        WidgetTree,
+        TEXT("RI_MaterialParamFavoriteIcon"),
+        FavoriteIconSize,
+        false,
+        RI_MaterialFavoriteActiveColor(),
+        RI_MaterialMutedColor());
+    FavoriteSizeBox->SetContent(FavoriteIcon);
     FavoriteButton->AddChild(FavoriteSizeBox);
+    if (UButtonSlot* FavoriteButtonSlot = Cast<UButtonSlot>(FavoriteButton->GetContentSlot()))
+    {
+        FavoriteButtonSlot->SetHorizontalAlignment(HAlign_Center);
+        FavoriteButtonSlot->SetVerticalAlignment(VAlign_Center);
+        FavoriteButtonSlot->SetPadding(FMargin(0.f));
+    }
     FavoriteButton->OnClicked.AddDynamic(this, &UInspectorMaterialParamRowWidget::HandleFavoriteClicked);
     if (UHorizontalBoxSlot* FavoriteSlot = RootBox->AddChildToHorizontalBox(FavoriteButton))
     {
@@ -274,50 +301,48 @@ void UInspectorMaterialParamRowWidget::BuildWidgetTree()
         FavoriteSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
     }
 
-    NameButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("RI_MaterialParamNameButton"));
-    RICompactUI::ConfigureButton(NameButton, RICompactUI::ERIButtonVisualStyle::Subtle, false);
-    NameButton->OnClicked.AddDynamic(this, &UInspectorMaterialParamRowWidget::HandleNameClicked);
     NameText = RICompactUI::MakeText(WidgetTree, TEXT("Material Parameter"), RICompactUI::GetLabelFontSize(), true, RI_MaterialTextColor(), false);
-    NameButton->AddChild(NameText);
-    if (UHorizontalBoxSlot* NameSlot = RootBox->AddChildToHorizontalBox(NameButton))
+    NameText->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+    if (UHorizontalBoxSlot* NameSlot = RootBox->AddChildToHorizontalBox(NameText))
     {
         FSlateChildSize SizeRule(ESlateSizeRule::Fill);
-        SizeRule.Value = 0.90f;
+        SizeRule.Value = 1.0f;
         NameSlot->SetSize(SizeRule);
         NameSlot->SetVerticalAlignment(VAlign_Center);
         NameSlot->SetPadding(FMargin(0.f, 0.f, 6.f, 0.f));
     }
 
     ReadOnlyValueText = RICompactUI::MakeText(WidgetTree, TEXT(""), RICompactUI::GetValueFontSize(), false, RI_MaterialMutedColor(), true);
-    ReadOnlyValueSizeBox = RICompactUI::WrapValueControl(WidgetTree, ReadOnlyValueText, 120.f);
+    ReadOnlyValueText->SetJustification(ETextJustify::Right);
+    ReadOnlyValueText->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+    ReadOnlyValueSizeBox = RICompactUI::WrapValueControl(WidgetTree, ReadOnlyValueText, 132.f);
     if (UHorizontalBoxSlot* ValueSlot = RootBox->AddChildToHorizontalBox(ReadOnlyValueSizeBox))
     {
-        FSlateChildSize SizeRule(ESlateSizeRule::Fill);
-        SizeRule.Value = 1.10f;
-        ValueSlot->SetSize(SizeRule);
+        ValueSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
+        ValueSlot->SetHorizontalAlignment(HAlign_Right);
         ValueSlot->SetVerticalAlignment(VAlign_Center);
     }
 
     ScalarValueTextBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("RI_MaterialParamScalarTextBox"));
     RICompactUI::ConfigureEditableTextBox(ScalarValueTextBox, RI_MaterialTextColor());
+    ScalarValueTextBox->SetJustification(ETextJustify::Right);
     ScalarValueTextBox->OnTextCommitted.AddDynamic(this, &UInspectorMaterialParamRowWidget::HandleScalarCommitted);
-    ScalarValueTextBoxSizeBox = RICompactUI::WrapValueControl(WidgetTree, ScalarValueTextBox, 120.f);
+    ScalarValueTextBoxSizeBox = RICompactUI::WrapValueControl(WidgetTree, ScalarValueTextBox, 132.f);
     if (UHorizontalBoxSlot* ValueSlot = RootBox->AddChildToHorizontalBox(ScalarValueTextBoxSizeBox))
     {
-        FSlateChildSize SizeRule(ESlateSizeRule::Fill);
-        SizeRule.Value = 1.10f;
-        ValueSlot->SetSize(SizeRule);
+        ValueSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
+        ValueSlot->SetHorizontalAlignment(HAlign_Right);
         ValueSlot->SetVerticalAlignment(VAlign_Center);
     }
 
     ColorButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("RI_MaterialParamColorButton"));
-    RICompactUI::ConfigureButton(ColorButton, RICompactUI::ERIButtonVisualStyle::Subtle, false);
+    RICompactUI::ConfigureSwatchButton(ColorButton);
     ColorButton->OnClicked.AddDynamic(this, &UInspectorMaterialParamRowWidget::HandleColorClicked);
     ColorSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_MaterialParamColorSize"));
     ColorSizeBox->SetWidthOverride(30.f);
     ColorSizeBox->SetHeightOverride(RICompactUI::GetInputHeight());
     ColorSwatch = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("RI_MaterialParamColorSwatch"));
-    ColorSwatch->SetPadding(FMargin(0.f, 2.f));
+    ColorSwatch->SetPadding(FMargin(0.f));
     ColorSwatch->SetBrushColor(FLinearColor::Black);
     ColorSizeBox->SetContent(ColorSwatch);
     ColorButton->AddChild(ColorSizeBox);
@@ -367,26 +392,22 @@ void UInspectorMaterialParamRowWidget::RefreshRow()
     {
         FavoriteButton->SetVisibility(ESlateVisibility::Visible);
     }
-    if (FavoriteText)
+    if (FavoriteIcon)
     {
         const bool bFavorited = Subsystem.IsValid() && Subsystem->IsFavoriteForAnyItem(Item);
         bCachedFavorited = bFavorited;
-        FavoriteText->SetText(FText::FromString(bFavorited ? TEXT("★") : TEXT("☆")));
-        FavoriteText->SetColorAndOpacity(bFavorited ? RI_MaterialFavoriteActiveColor() : RI_MaterialMutedColor());
+        RICompactUI::SetFavoriteIconState(
+            FavoriteIcon,
+            bFavorited,
+            FavoriteSizeBox ? FavoriteSizeBox->GetWidthOverride() * 0.58f : 0.f,
+            RI_MaterialFavoriteActiveColor(),
+            RI_MaterialMutedColor());
     }
 
     if (NameText)
     {
         NameText->SetText(FText::FromString(Item->GetPropertyName()));
     }
-    if (NameButton)
-    {
-        NameButton->SetIsEnabled(bAllowNavigation);
-        NameButton->SetToolTipText(bAllowNavigation
-            ? FText::FromString(TEXT("Navigate to this material parameter."))
-            : FText::GetEmpty());
-    }
-
     if (ReadOnlyValueText)
     {
         ReadOnlyValueText->SetVisibility(ESlateVisibility::Collapsed);

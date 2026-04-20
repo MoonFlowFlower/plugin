@@ -2,7 +2,7 @@
 
 This file is Fab listing copy, not the RuntimeInspector agent development authority.
 
-For implementation rules and development workflow authority, use `Docs/AGENT_DEVELOPMENT.md`.
+For implementation rules and development workflow authority, use `docs/AGENT_DEVELOPMENT.md`.
 
 ## Product Title
 

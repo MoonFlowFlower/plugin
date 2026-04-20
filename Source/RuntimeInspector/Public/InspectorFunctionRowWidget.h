@@ -10,6 +10,7 @@ class UBorder;
 class UCheckBox;
 class UComboBoxString;
 class UEditableTextBox;
+class UImage;
 class UInspectorFunctionItem;
 class UInspectorWorldSubsystem;
 class UHorizontalBox;
@@ -89,7 +90,7 @@ private:
     UButton* FavoriteButton = nullptr;
 
     UPROPERTY(Transient)
-    UTextBlock* FavoriteText = nullptr;
+    UImage* FavoriteIcon = nullptr;
 
     UPROPERTY(Transient)
     USizeBox* FavoriteSizeBox = nullptr;

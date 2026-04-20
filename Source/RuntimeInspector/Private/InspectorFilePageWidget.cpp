@@ -1,6 +1,7 @@
 #include "InspectorFilePageWidget.h"
 
 #include "InspectorCompactWidgetUtils.h"
+#include "InspectorTouchScrollBox.h"
 #include "InspectorWorldSubsystem.h"
 
 #include "Blueprint/WidgetTree.h"
@@ -432,6 +433,16 @@ namespace
         const FString FirstTarget = Targets.Num() > 0 ? Targets[0].Summary : TEXT("No targets");
         return FString::Printf(TEXT("Query=%s | Targets=%d | %s"), *QueryText, Targets.Num(), *FirstTarget);
     }
+
+    static void RI_ConfigureNamedScrollBoxTouchSupport(UWidgetTree* WidgetTree, const FName& ScrollBoxName)
+    {
+        if (!WidgetTree)
+        {
+            return;
+        }
+
+        RIInspectorTouchScroll::Configure(Cast<UScrollBox>(WidgetTree->FindWidget(ScrollBoxName)));
+    }
 }
 
 UInspectorFilePageWidget::UInspectorFilePageWidget(const FObjectInitializer& ObjectInitializer)
@@ -444,6 +455,36 @@ void UInspectorFilePageWidget::SetInspectorSubsystem(UInspectorWorldSubsystem* I
 {
     CancelDeferredRefresh();
     Subsystem = InSubsystem;
+}
+
+bool UInspectorFilePageWidget::HasTouchScrollSupportForAutomation() const
+{
+    if (!WidgetTree)
+    {
+        return false;
+    }
+
+    const TArray<FName> ScrollNames = {
+        TEXT("RI_FilePageScroll"),
+        TEXT("RI_FileAuditLinesScroll"),
+        TEXT("RI_FileRoleCompareLinesScroll"),
+        TEXT("RI_FileRemoteSessionCompareLinesScroll")
+    };
+
+    bool bFoundAny = false;
+    for (const FName& ScrollName : ScrollNames)
+    {
+        if (UScrollBox* Scroll = Cast<UScrollBox>(WidgetTree->FindWidget(ScrollName)))
+        {
+            bFoundAny = true;
+            if (!RIInspectorTouchScroll::HasTouchSupport(Scroll))
+            {
+                return false;
+            }
+        }
+    }
+
+    return bFoundAny;
 }
 
 FString UInspectorFilePageWidget::GetCompareDebugSummary() const
@@ -460,7 +501,10 @@ FString UInspectorFilePageWidget::GetCompareDebugSummary() const
 
 TSharedRef<SWidget> UInspectorFilePageWidget::RebuildWidget()
 {
-    if (WidgetTree && !WidgetTree->RootWidget)
+    const bool bHasUsableBlueprintLayout = PageScrollBox
+        || (WidgetTree && WidgetTree->FindWidget(TEXT("RI_FilePageScroll")) != nullptr);
+
+    if (WidgetTree && (!WidgetTree->RootWidget || !bHasUsableBlueprintLayout))
     {
         BuildWidgetTree();
     }
@@ -471,6 +515,13 @@ TSharedRef<SWidget> UInspectorFilePageWidget::RebuildWidget()
 void UInspectorFilePageWidget::NativeConstruct()
 {
     Super::NativeConstruct();
+    if (WidgetTree)
+    {
+        RI_ConfigureNamedScrollBoxTouchSupport(WidgetTree, TEXT("RI_FilePageScroll"));
+        RI_ConfigureNamedScrollBoxTouchSupport(WidgetTree, TEXT("RI_FileAuditLinesScroll"));
+        RI_ConfigureNamedScrollBoxTouchSupport(WidgetTree, TEXT("RI_FileRoleCompareLinesScroll"));
+        RI_ConfigureNamedScrollBoxTouchSupport(WidgetTree, TEXT("RI_FileRemoteSessionCompareLinesScroll"));
+    }
 }
 
 void UInspectorFilePageWidget::NativeDestruct()
@@ -493,6 +544,7 @@ void UInspectorFilePageWidget::RefreshFastFromSubsystem()
     SetValueText(SelectedActorSummaryText, SelectedActor ? SelectedActor->GetName() : TEXT("No selected actor"), SelectedActor == nullptr);
     SetValueText(SelectedActorClassText, RI_BuildSelectedActorClassLabel(SelectedActor), SelectedActor == nullptr);
     SetValueText(SelectedActorSourcePathText, RI_BuildSelectedActorSourceLabel(SelectedActor), false);
+    const double ActorContextEndSeconds = FPlatformTime::Seconds();
 
     FRIFileManagementSummary CachedSummary;
     FString CachedSummaryError;
@@ -500,6 +552,7 @@ void UInspectorFilePageWidget::RefreshFastFromSubsystem()
     ApplyFileSummaryToWidgets(bHasCachedSummary ? &CachedSummary : nullptr);
     ApplyPrimaryActionGuidance(SelectedActor, bHasCachedSummary ? &CachedSummary : nullptr);
     ApplyPrimaryActionButtonStates(SelectedActor, bHasCachedSummary ? &CachedSummary : nullptr);
+    const double SummaryEndSeconds = FPlatformTime::Seconds();
 
     FRIAuditReport AuditReport;
     const bool bHasCachedActiveReport = InspectorSubsystem->GetCachedAuditReport(InspectorSubsystem->GetActiveFileAuditViewMode(), AuditReport);
@@ -530,7 +583,12 @@ void UInspectorFilePageWidget::RefreshFastFromSubsystem()
     }
     SetValueText(AuditFirstFieldText, bHasAuditReport ? RI_FindFirstDifferentField(AuditReport) : TEXT("No compare fields"));
     SetValueText(AuditPreviewText, bHasAuditReport ? RI_BuildAuditPreviewText(AuditReport) : TEXT("No audit preview"));
-    RebuildAuditLineCards(AuditReport);
+    const bool bAuditsExpanded = IsAuditsSectionExpanded();
+    if (bAuditsExpanded)
+    {
+        RebuildAuditLineCards(AuditReport);
+    }
+    const double AuditEndSeconds = FPlatformTime::Seconds();
 
     const FRIRuntimeRoleCompareReport RoleCompareReport = InspectorSubsystem->GetLastRuntimeRoleCompareReport();
     const bool bHasRoleCompare = !RoleCompareReport.Summary.IsEmpty() || RoleCompareReport.Lines.Num() > 0;
@@ -538,7 +596,6 @@ void UInspectorFilePageWidget::RefreshFastFromSubsystem()
     SetValueText(RoleCompareAvailableRoleText, bHasRoleCompare ? RoleCompareReport.AvailableRoleLabel : TEXT("No available role"));
     SetValueText(RoleCompareStatsText, bHasRoleCompare ? RI_BuildRoleCompareStatsText(RoleCompareReport) : TEXT("No role compare stats"));
     SetValueText(RoleComparePreviewText, bHasRoleCompare ? RI_BuildRoleComparePreviewText(RoleCompareReport) : TEXT("No runtime role compare preview"));
-    RebuildRoleCompareLineCards(RoleCompareReport);
 
     const FRIRuntimeSessionTargetSetCompareReport RemoteSessionCompareReport = InspectorSubsystem->GetLastRuntimeSessionTargetSetCompareReport();
     const bool bHasRemoteSessionCompare = !RemoteSessionCompareReport.Summary.IsEmpty() || RemoteSessionCompareReport.Lines.Num() > 0;
@@ -554,7 +611,13 @@ void UInspectorFilePageWidget::RefreshFastFromSubsystem()
     SetValueText(
         RemoteSessionComparePreviewText,
         bHasRemoteSessionCompare ? RI_BuildRemoteSessionComparePreviewText(RemoteSessionCompareReport) : TEXT("No remote session compare preview"));
-    RebuildRemoteSessionCompareLineCards(RemoteSessionCompareReport);
+    const bool bDiagnosticsExpanded = IsDiagnosticsSectionExpanded();
+    if (bDiagnosticsExpanded)
+    {
+        RebuildRoleCompareLineCards(RoleCompareReport);
+        RebuildRemoteSessionCompareLineCards(RemoteSessionCompareReport);
+    }
+    const double DiagnosticsEndSeconds = FPlatformTime::Seconds();
 
     if (!bHasCachedSummary)
     {
@@ -564,9 +627,34 @@ void UInspectorFilePageWidget::RefreshFastFromSubsystem()
     {
         SetValueText(StatusText, TEXT("Showing cached data"));
     }
+    const double StatusEndSeconds = FPlatformTime::Seconds();
 
     InspectorSubsystem->RefreshSharedContextStrip();
-    UE_LOG(LogRuntimeInspector, Log, TEXT("[RI][Perf] File FastRefresh %.2f ms"), (FPlatformTime::Seconds() - StartSeconds) * 1000.0);
+    const double EndSeconds = FPlatformTime::Seconds();
+    UE_LOG(LogRuntimeInspector, Log, TEXT("[RI][Perf] File FastRefresh %.2f ms"), (EndSeconds - StartSeconds) * 1000.0);
+    InspectorSubsystem->RecordValidationCaptureMetric(TEXT("FileFastRefresh"), (EndSeconds - StartSeconds) * 1000.0, TEXT("Changes"));
+    UE_LOG(
+        LogRuntimeInspector,
+        Log,
+        TEXT("[RI][Perf] File FastRefresh Detail %.2f ms | Actor=%.2f Summary=%.2f Audit=%.2f Diagnostics=%.2f Status=%.2f Shared=%.2f | Expanded=A%d D%d"),
+        (EndSeconds - StartSeconds) * 1000.0,
+        (ActorContextEndSeconds - StartSeconds) * 1000.0,
+        (SummaryEndSeconds - ActorContextEndSeconds) * 1000.0,
+        (AuditEndSeconds - SummaryEndSeconds) * 1000.0,
+        (DiagnosticsEndSeconds - AuditEndSeconds) * 1000.0,
+        (StatusEndSeconds - DiagnosticsEndSeconds) * 1000.0,
+        (EndSeconds - StatusEndSeconds) * 1000.0,
+        bAuditsExpanded ? 1 : 0,
+        bDiagnosticsExpanded ? 1 : 0);
+    InspectorSubsystem->RecordValidationCaptureMetric(TEXT("FileFastRefreshDetail.Actor"), (ActorContextEndSeconds - StartSeconds) * 1000.0);
+    InspectorSubsystem->RecordValidationCaptureMetric(TEXT("FileFastRefreshDetail.Summary"), (SummaryEndSeconds - ActorContextEndSeconds) * 1000.0);
+    InspectorSubsystem->RecordValidationCaptureMetric(TEXT("FileFastRefreshDetail.Audit"), (AuditEndSeconds - SummaryEndSeconds) * 1000.0);
+    InspectorSubsystem->RecordValidationCaptureMetric(TEXT("FileFastRefreshDetail.Diagnostics"), (DiagnosticsEndSeconds - AuditEndSeconds) * 1000.0);
+    InspectorSubsystem->RecordValidationCaptureMetric(TEXT("FileFastRefreshDetail.Status"), (StatusEndSeconds - DiagnosticsEndSeconds) * 1000.0);
+    InspectorSubsystem->RecordValidationCaptureMetric(
+        TEXT("FileFastRefreshDetail.Shared"),
+        (EndSeconds - StatusEndSeconds) * 1000.0,
+        FString::Printf(TEXT("Expanded=A%d D%d"), bAuditsExpanded ? 1 : 0, bDiagnosticsExpanded ? 1 : 0));
 }
 
 void UInspectorFilePageWidget::ScheduleDeferredRefresh(bool bForceSessionRefresh, bool bForceTargetQueryRefresh)
@@ -623,7 +711,8 @@ void UInspectorFilePageWidget::BuildWidgetTree()
     UVerticalBox* RootBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_FileRootBox"));
     RootBorder->SetContent(RootBox);
 
-    PageScrollBox = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("RI_FilePageScroll"));
+    PageScrollBox = WidgetTree->ConstructWidget<UInspectorTouchScrollBox>(UInspectorTouchScrollBox::StaticClass(), TEXT("RI_FilePageScroll"));
+    RIInspectorTouchScroll::Configure(PageScrollBox);
     if (UVerticalBoxSlot* VBoxSlot = RootBox->AddChildToVerticalBox(PageScrollBox))
     {
         VBoxSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
@@ -681,15 +770,13 @@ void UInspectorFilePageWidget::BuildWidgetTree()
         VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 0.f));
     }
 
-    UHorizontalBox* FooterRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_FileFooterRow"));
-    FooterBorder->SetContent(FooterRow);
+    UVerticalBox* FooterBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_FileFooterBox"));
+    FooterBorder->SetContent(FooterBox);
 
     StatusText = RI_MakeText(WidgetTree, TEXT("Changes ready"), 6, false, RI_FileMutedColor(), true);
-    if (UHorizontalBoxSlot* HSlot = FooterRow->AddChildToHorizontalBox(StatusText))
+    if (UVerticalBoxSlot* VBoxSlot = FooterBox->AddChildToVerticalBox(StatusText))
     {
-        HSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-        HSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
-        HSlot->SetVerticalAlignment(VAlign_Center);
+        VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
     }
 
     RefreshButton = RICompactUI::MakeLabeledButton(
@@ -697,9 +784,12 @@ void UInspectorFilePageWidget::BuildWidgetTree()
         TEXT("BTN_FileRefresh"),
         TEXT("Refresh"),
         RICompactUI::ERIButtonVisualStyle::Secondary,
-        56.f);
+        0.0f);
     RefreshButton->OnClicked.AddDynamic(this, &UInspectorFilePageWidget::HandleRefreshClicked);
-    FooterRow->AddChildToHorizontalBox(RefreshButton);
+    if (UVerticalBoxSlot* VBoxSlot = FooterBox->AddChildToVerticalBox(RefreshButton))
+    {
+        VBoxSlot->SetHorizontalAlignment(HAlign_Fill);
+    }
 
     WidgetTree->RootWidget = RootBorder;
 
@@ -869,18 +959,8 @@ UWidget* UInspectorFilePageWidget::CreateMainActionsSection()
         VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
     }
 
-    auto MakeRow = [this, Outer](const TCHAR* RowName) -> UHorizontalBox*
-    {
-        UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), RowName);
-        if (UVerticalBoxSlot* VBoxSlot = Outer->AddChildToVerticalBox(Row))
-        {
-            VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 3.f));
-        }
-        return Row;
-    };
-
     auto AddCard = [this](
-        UHorizontalBox* Row,
+        UVerticalBox* Parent,
         const FString& Step,
         const FString& Title,
         const FString& Description,
@@ -892,7 +972,7 @@ UWidget* UInspectorFilePageWidget::CreateMainActionsSection()
         RICompactUI::ERIButtonVisualStyle ButtonStyle,
         FSimpleDelegate Bind)
     {
-        if (!Row)
+        if (!Parent)
         {
             return;
         }
@@ -920,18 +1000,19 @@ UWidget* UInspectorFilePageWidget::CreateMainActionsSection()
         {
             Bind.ExecuteIfBound();
         }
-        CardBox->AddChildToVerticalBox(OutButton);
-
-        if (UHorizontalBoxSlot* HBoxSlot = Row->AddChildToHorizontalBox(CardBorder))
+        if (UVerticalBoxSlot* ButtonSlot = CardBox->AddChildToVerticalBox(OutButton))
         {
-            HBoxSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-            HBoxSlot->SetPadding(FMargin(0.f, 0.f, 4.f, 0.f));
+            ButtonSlot->SetHorizontalAlignment(HAlign_Fill);
+        }
+
+        if (UVerticalBoxSlot* VBoxSlot = Parent->AddChildToVerticalBox(CardBorder))
+        {
+            VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 3.f));
         }
     };
 
-    UHorizontalBox* RowA = MakeRow(TEXT("RI_FileActionRowA"));
     AddCard(
-        RowA,
+        Outer,
         TEXT("Step 1"),
         TEXT("Stage Runtime Edit"),
         TEXT("Capture the current runtime edits into a staged patch."),
@@ -947,7 +1028,7 @@ UWidget* UInspectorFilePageWidget::CreateMainActionsSection()
         }));
 
     AddCard(
-        RowA,
+        Outer,
         TEXT("Step 2"),
         TEXT("Review Source Diff"),
         TEXT("Preview source-side impact before writing anything back."),
@@ -962,9 +1043,8 @@ UWidget* UInspectorFilePageWidget::CreateMainActionsSection()
             PreviewPromoteButton->OnClicked.AddDynamic(this, &UInspectorFilePageWidget::HandlePreviewPromoteClicked);
         }));
 
-    UHorizontalBox* RowB = MakeRow(TEXT("RI_FileActionRowB"));
     AddCard(
-        RowB,
+        Outer,
         TEXT("Step 3"),
         TEXT("Apply To Source"),
         TEXT("Write the staged patch back to source when review is clear."),
@@ -979,9 +1059,8 @@ UWidget* UInspectorFilePageWidget::CreateMainActionsSection()
             PromoteApplyButton->OnClicked.AddDynamic(this, &UInspectorFilePageWidget::HandlePromoteApplyClicked);
         }));
 
-    UHorizontalBox* RowC = MakeRow(TEXT("RI_FileActionRowC"));
     AddCard(
-        RowC,
+        Outer,
         TEXT("Optional"),
         TEXT("Discard Staged Patch"),
         TEXT("Clear the staged patch without touching source content."),
@@ -1016,28 +1095,16 @@ UWidget* UInspectorFilePageWidget::CreateCountCell(const FString& Label, TObject
 
 UWidget* UInspectorFilePageWidget::CreateInfoRow(const FString& Label, TObjectPtr<UTextBlock>& OutValueText, bool bWrapValue, const FName& WidgetName)
 {
-    UBorder* Border = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), WidgetName);
-    Border->SetPadding(FMargin(5.f, 2.f));
-    Border->SetBrushColor(RI_FileRowColor());
-
-    UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
-    Border->SetContent(Row);
-
-    UTextBlock* LabelText = RI_MakeText(WidgetTree, Label, RICompactUI::GetLabelFontSize(), true, RI_FileMutedColor());
-    if (UHorizontalBoxSlot* HBoxSlot = Row->AddChildToHorizontalBox(LabelText))
-    {
-        HBoxSlot->SetPadding(FMargin(0.f, 0.f, 6.f, 0.f));
-        HBoxSlot->SetVerticalAlignment(VAlign_Center);
-    }
-
-    OutValueText = RI_MakeText(WidgetTree, TEXT("-"), RICompactUI::GetValueFontSize(), false, RI_FileTextColor(), bWrapValue);
-    if (UHorizontalBoxSlot* HBoxSlot = Row->AddChildToHorizontalBox(OutValueText))
-    {
-        HBoxSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-        HBoxSlot->SetVerticalAlignment(VAlign_Center);
-    }
-
-    return Border;
+    return RICompactUI::MakeStackedValueRow(
+        WidgetTree,
+        Label,
+        OutValueText,
+        RI_FileRowColor(),
+        RI_FileMutedColor(),
+        RI_FileTextColor(),
+        bWrapValue,
+        NAME_None,
+        WidgetName);
 }
 
 UWidget* UInspectorFilePageWidget::CreateStatusSection()
@@ -1057,20 +1124,19 @@ UWidget* UInspectorFilePageWidget::CreateStatusSection()
         VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
     }
 
-    UHorizontalBox* CountsRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_FileCountsRow"));
-    auto AddCountCell = [this, CountsRow](const FString& Label, TObjectPtr<UTextBlock>& OutValueText)
+    UVerticalBox* CountsBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_FileCountsBox"));
+    auto AddCountCell = [this, CountsBox](const FString& Label, TObjectPtr<UTextBlock>& OutValueText)
     {
-        if (UHorizontalBoxSlot* HBoxSlot = CountsRow->AddChildToHorizontalBox(CreateCountCell(Label, OutValueText)))
+        if (UVerticalBoxSlot* VBoxSlot = CountsBox->AddChildToVerticalBox(CreateCountCell(Label, OutValueText)))
         {
-            HBoxSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-            HBoxSlot->SetPadding(FMargin(0.f, 0.f, 4.f, 0.f));
+            VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 3.f));
         }
     };
     AddCountCell(TEXT("Snapshots"), SnapshotCountText);
     AddCountCell(TEXT("Patches"), PatchCountText);
     AddCountCell(TEXT("Presets"), PresetCountText);
     AddCountCell(TEXT("Audits"), AuditCountText);
-    if (UVerticalBoxSlot* VBoxSlot = Outer->AddChildToVerticalBox(CountsRow))
+    if (UVerticalBoxSlot* VBoxSlot = Outer->AddChildToVerticalBox(CountsBox))
     {
         VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
     }
@@ -1111,7 +1177,7 @@ UWidget* UInspectorFilePageWidget::CreateAuditsSection()
     AuditsSectionBody = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_FileAuditsSectionBody"));
     Outer->AddChildToVerticalBox(AuditsSectionBody);
 
-    UHorizontalBox* ActionRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_FileAuditActionRow"));
+    UVerticalBox* ActionRow = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_FileAuditActionRow"));
     if (UVerticalBoxSlot* VBoxSlot = AuditsSectionBody->AddChildToVerticalBox(ActionRow))
     {
         VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 3.f));
@@ -1122,9 +1188,10 @@ UWidget* UInspectorFilePageWidget::CreateAuditsSection()
         {
             return;
         }
-        if (UHorizontalBoxSlot* HBoxSlot = ActionRow->AddChildToHorizontalBox(Button))
+        if (UVerticalBoxSlot* VBoxSlot = ActionRow->AddChildToVerticalBox(Button))
         {
-            HBoxSlot->SetPadding(FMargin(0.f, 0.f, 4.f, 0.f));
+            VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 3.f));
+            VBoxSlot->SetHorizontalAlignment(HAlign_Fill);
         }
     };
 
@@ -1148,22 +1215,23 @@ UWidget* UInspectorFilePageWidget::CreateAuditsSection()
     ViewButtonsBorder->SetPadding(FMargin(4.f, 3.f));
     ViewButtonsBorder->SetBrushColor(RI_FileRowColor());
 
-    UHorizontalBox* ViewButtonsRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_FileCompareViewsRow"));
-    ViewButtonsBorder->SetContent(ViewButtonsRow);
+    UVerticalBox* ViewButtonsBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_FileCompareViewsRow"));
+    ViewButtonsBorder->SetContent(ViewButtonsBox);
 
-    auto AddViewButton = [this, ViewButtonsRow](const FString& Label, const FName& Name, TObjectPtr<UButton>& OutButton, const FMargin& InPadding)
+    auto AddViewButton = [this, ViewButtonsBox](const FString& Label, const FName& Name, TObjectPtr<UButton>& OutButton)
     {
-        OutButton = CreateActionButton(Label, Name, 74.f);
-        if (UHorizontalBoxSlot* HBoxSlot = ViewButtonsRow->AddChildToHorizontalBox(OutButton))
+        OutButton = CreateActionButton(Label, Name, 0.0f);
+        if (UVerticalBoxSlot* VBoxSlot = ViewButtonsBox->AddChildToVerticalBox(OutButton))
         {
-            HBoxSlot->SetPadding(InPadding);
+            VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 3.f));
+            VBoxSlot->SetHorizontalAlignment(HAlign_Fill);
         }
     };
 
-    AddViewButton(TEXT("View B/C"), TEXT("BTN_FileViewBaseline"), ViewBaselineButton, FMargin(0.f, 0.f, 4.f, 0.f));
-    AddViewButton(TEXT("View C/P"), TEXT("BTN_FileViewCurrentPatch"), ViewCurrentPatchButton, FMargin(0.f, 0.f, 4.f, 0.f));
-    AddViewButton(TEXT("View P/S"), TEXT("BTN_FileViewPatchSource"), ViewPatchSourceButton, FMargin(0.f, 0.f, 4.f, 0.f));
-    AddViewButton(TEXT("View Applied"), TEXT("BTN_FileViewApplied"), ViewAppliedButton, FMargin(0.f));
+    AddViewButton(TEXT("View B/C"), TEXT("BTN_FileViewBaseline"), ViewBaselineButton);
+    AddViewButton(TEXT("View C/P"), TEXT("BTN_FileViewCurrentPatch"), ViewCurrentPatchButton);
+    AddViewButton(TEXT("View P/S"), TEXT("BTN_FileViewPatchSource"), ViewPatchSourceButton);
+    AddViewButton(TEXT("View Applied"), TEXT("BTN_FileViewApplied"), ViewAppliedButton);
 
     if (ViewBaselineButton)
     {
@@ -1251,7 +1319,7 @@ UWidget* UInspectorFilePageWidget::CreatePresetsSection()
     PresetsSectionBody = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_FilePresetsSectionBody"));
     Outer->AddChildToVerticalBox(PresetsSectionBody);
 
-    UHorizontalBox* ActionRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_FilePresetActionRow"));
+    UVerticalBox* ActionRow = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_FilePresetActionRow"));
     if (UVerticalBoxSlot* VBoxSlot = PresetsSectionBody->AddChildToVerticalBox(ActionRow))
     {
         VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 3.f));
@@ -1263,21 +1331,22 @@ UWidget* UInspectorFilePageWidget::CreatePresetsSection()
         {
             return;
         }
-        if (UHorizontalBoxSlot* HBoxSlot = ActionRow->AddChildToHorizontalBox(Button))
+        if (UVerticalBoxSlot* VBoxSlot = ActionRow->AddChildToVerticalBox(Button))
         {
-            HBoxSlot->SetPadding(FMargin(0.f, 0.f, 4.f, 0.f));
+            VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 3.f));
+            VBoxSlot->SetHorizontalAlignment(HAlign_Fill);
         }
     };
 
-    ExportPatchButton = CreateActionButton(TEXT("Export Patch"), TEXT("BTN_FileExportPatch"), 84.f);
+    ExportPatchButton = CreateActionButton(TEXT("Export Patch"), TEXT("BTN_FileExportPatch"), 0.0f);
     ExportPatchButton->OnClicked.AddDynamic(this, &UInspectorFilePageWidget::HandleExportPatchClicked);
     AddButton(ExportPatchButton);
 
-    SavePresetButton = CreateActionButton(TEXT("Save Preset"), TEXT("BTN_FileSavePreset"), 84.f);
+    SavePresetButton = CreateActionButton(TEXT("Save Preset"), TEXT("BTN_FileSavePreset"), 0.0f);
     SavePresetButton->OnClicked.AddDynamic(this, &UInspectorFilePageWidget::HandleSavePresetClicked);
     AddButton(SavePresetButton);
 
-    ApplyLatestPresetButton = CreateActionButton(TEXT("Apply Preset"), TEXT("BTN_FileApplyLatestPreset"), 84.f);
+    ApplyLatestPresetButton = CreateActionButton(TEXT("Apply Preset"), TEXT("BTN_FileApplyLatestPreset"), 0.0f);
     ApplyLatestPresetButton->OnClicked.AddDynamic(this, &UInspectorFilePageWidget::HandleApplyLatestPresetClicked);
     AddButton(ApplyLatestPresetButton);
 
@@ -2100,6 +2169,10 @@ void UInspectorFilePageWidget::HandleToggleAuditsSectionClicked()
 {
     bAuditsSectionExpanded = !bAuditsSectionExpanded;
     SetSectionExpanded(AuditsSectionBody, AuditsSectionToggleText, bAuditsSectionExpanded, TEXT("Hide"), TEXT("Show"));
+    if (bAuditsSectionExpanded)
+    {
+        RefreshFastFromSubsystem();
+    }
 }
 
 void UInspectorFilePageWidget::HandleTogglePresetsSectionClicked()
@@ -2112,6 +2185,10 @@ void UInspectorFilePageWidget::HandleToggleDiagnosticsSectionClicked()
 {
     bDiagnosticsSectionExpanded = !bDiagnosticsSectionExpanded;
     SetSectionExpanded(DiagnosticsSectionBody, DiagnosticsSectionToggleText, bDiagnosticsSectionExpanded, TEXT("Hide"), TEXT("Show"));
+    if (bDiagnosticsSectionExpanded)
+    {
+        RefreshFastFromSubsystem();
+    }
 }
 
 void UInspectorFilePageWidget::HandleRemoteSessionSelectionChanged(FString SelectedItem, ESelectInfo::Type SelectionType)

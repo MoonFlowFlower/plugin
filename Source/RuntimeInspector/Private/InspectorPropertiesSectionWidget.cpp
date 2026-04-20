@@ -6,10 +6,13 @@
 #include "InspectorMaterialParamRowWidget.h"
 #include "InspectorPropertyItem.h"
 #include "InspectorPropertyRowWidget.h"
+#include "InspectorTouchScrollBox.h"
 #include "InspectorWorldSubsystem.h"
 
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
+#include "Components/Button.h"
+#include "Components/ButtonSlot.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
 #include "Components/ScrollBox.h"
@@ -31,65 +34,53 @@ namespace
         return RICompactUI::GetSectionSurfaceBackgroundColor();
     }
 
-    static UWidget* RI_CreateHeaderInfoCell(
-        UWidgetTree* WidgetTree,
-        const FString& Label,
-        TObjectPtr<UTextBlock>& OutValueText,
-        const FLinearColor& BackgroundColor)
+    static FString RI_SanitizeCategoryToken(const FString& InValue)
     {
-        if (!WidgetTree)
-        {
-            return nullptr;
-        }
-
-        UBorder* Border = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
-        Border->SetPadding(FMargin(6.f, 4.f));
-        Border->SetBrushColor(BackgroundColor);
-
-        UVerticalBox* Box = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
-        Border->SetContent(Box);
-
-        if (UVerticalBoxSlot* LabelSlot = Box->AddChildToVerticalBox(
-            RICompactUI::MakeText(WidgetTree, Label, RICompactUI::GetMutedFontSize(), true, RICompactUI::GetMutedTextColor())))
-        {
-            LabelSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 2.f));
-        }
-
-        OutValueText = RICompactUI::MakeText(WidgetTree, TEXT(""), RICompactUI::GetValueFontSize(), true, RICompactUI::GetStrongTextColor(), true);
-        Box->AddChildToVerticalBox(OutValueText);
-        return Border;
+        FString Sanitized = InValue;
+        Sanitized.ReplaceInline(TEXT(" "), TEXT("_"));
+        Sanitized.ReplaceInline(TEXT("/"), TEXT("_"));
+        Sanitized.ReplaceInline(TEXT("|"), TEXT("_"));
+        Sanitized.ReplaceInline(TEXT(":"), TEXT("_"));
+        Sanitized.ReplaceInline(TEXT("."), TEXT("_"));
+        return Sanitized;
     }
 
-    static UWidget* RI_CreateReadOnlyRow(UWidgetTree* WidgetTree, const FString& Name, const FString& Value)
+    static bool RI_CanCategorizePropertyItems(const TArray<UObject*>& Items)
     {
-        if (!WidgetTree)
+        if (Items.Num() == 0)
         {
-            return nullptr;
+            return false;
         }
 
-        UBorder* Border = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
-        Border->SetPadding(FMargin(6.f, 4.f));
-        Border->SetBrushColor(RICompactUI::GetRowSurfaceBackgroundColor());
-
-        UHorizontalBox* RowBox = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
-        Border->SetContent(RowBox);
-
-        UTextBlock* NameText = RICompactUI::MakeText(WidgetTree, Name, RICompactUI::GetLabelFontSize(), true, RICompactUI::GetStrongTextColor(), true);
-        if (UHorizontalBoxSlot* NameSlot = RowBox->AddChildToHorizontalBox(NameText))
+        for (UObject* ItemObject : Items)
         {
-            NameSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-            NameSlot->SetVerticalAlignment(VAlign_Center);
-            NameSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
+            if (!Cast<UInspectorPropertyItem>(ItemObject))
+            {
+                return false;
+            }
         }
 
-        UTextBlock* ValueText = RICompactUI::MakeText(WidgetTree, Value, RICompactUI::GetValueFontSize(), false, RICompactUI::GetMutedTextColor(), true);
-        if (UHorizontalBoxSlot* ValueSlot = RowBox->AddChildToHorizontalBox(ValueText))
-        {
-            ValueSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-            ValueSlot->SetVerticalAlignment(VAlign_Center);
-        }
+        return true;
+    }
+}
 
-        return Border;
+void UInspectorPropertyCategoryButtonProxy::Initialize(UInspectorPropertiesSectionWidget* InOwner, const FString& InCategoryStateKey, bool bInAllowToggle)
+{
+    Owner = InOwner;
+    CategoryStateKey = InCategoryStateKey;
+    bAllowToggle = bInAllowToggle;
+}
+
+void UInspectorPropertyCategoryButtonProxy::HandleClicked()
+{
+    if (!bAllowToggle)
+    {
+        return;
+    }
+
+    if (UInspectorPropertiesSectionWidget* OwnerWidget = Owner.Get())
+    {
+        OwnerWidget->HandleCategoryToggleRequested(CategoryStateKey);
     }
 }
 
@@ -111,7 +102,127 @@ void UInspectorPropertiesSectionWidget::SetOnlyModified(bool bInOnlyModified)
 
 int32 UInspectorPropertiesSectionWidget::GetEntryWidgetCountForAutomation() const
 {
-    return EntriesBox ? EntriesBox->GetChildrenCount() : INDEX_NONE;
+    return LastVisiblePropertyRowCount + LastVisibleMaterialRowCount;
+}
+
+bool UInspectorPropertiesSectionWidget::HasTouchScrollSupportForAutomation() const
+{
+    return RIInspectorTouchScroll::HasTouchSupport(ScrollBox);
+}
+
+bool UInspectorPropertiesSectionWidget::HasActorTransformBlockForAutomation() const
+{
+    return bActorTransformBlockVisible;
+}
+
+FString UInspectorPropertiesSectionWidget::GetActorTransformDebugSummaryForAutomation() const
+{
+    return LastActorTransformDebugSummary;
+}
+
+FString UInspectorPropertiesSectionWidget::GetCategoryDebugSummaryForAutomation() const
+{
+    if (LastCategoryOrder.Num() == 0)
+    {
+        return TEXT("None");
+    }
+
+    TArray<FString> Parts;
+    for (const FString& CategoryStateKey : LastCategoryOrder)
+    {
+        const UVerticalBox* CategoryBody = CategoryBodyByKey.FindRef(CategoryStateKey);
+        const UTextBlock* CategoryLabel = CategoryLabelTextByKey.FindRef(CategoryStateKey);
+        const bool bExpanded = CategoryBody && CategoryBody->GetVisibility() == ESlateVisibility::Visible;
+        const int32 ChildCount = CategoryBody ? CategoryBody->GetChildrenCount() : 0;
+        Parts.Add(FString::Printf(
+            TEXT("%s[%d|children=%d]"),
+            CategoryLabel ? *CategoryLabel->GetText().ToString() : *CategoryStateKey,
+            bExpanded ? 1 : 0,
+            ChildCount));
+    }
+
+    return FString::Join(Parts, TEXT(" | "));
+}
+
+FString UInspectorPropertiesSectionWidget::FindCategoryStateKeyByPrimaryName(const FString& PrimaryCategory) const
+{
+    for (const TPair<FString, FString>& Pair : CategoryPrimaryNameByKey)
+    {
+        if (Pair.Value.Equals(PrimaryCategory, ESearchCase::CaseSensitive))
+        {
+            return Pair.Key;
+        }
+    }
+
+    return FString();
+}
+
+bool UInspectorPropertiesSectionWidget::SetCategoryExpandedForAutomation(const FString& PrimaryCategory, bool bExpanded)
+{
+    const FString CategoryStateKey = FindCategoryStateKeyByPrimaryName(PrimaryCategory);
+    if (CategoryStateKey.IsEmpty())
+    {
+        return false;
+    }
+
+    SetCategoryExpandedVisual(CategoryStateKey, bExpanded);
+    if (UInspectorWorldSubsystem* InspectorSubsystem = Subsystem.Get())
+    {
+        const FString* StoredPrimaryCategory = CategoryPrimaryNameByKey.Find(CategoryStateKey);
+        const TWeakObjectPtr<UObject>* TargetObject = CategoryTargetObjectByKey.Find(CategoryStateKey);
+        InspectorSubsystem->SetPropertyCategoryExpanded(
+            TargetObject ? TargetObject->Get() : nullptr,
+            StoredPrimaryCategory ? *StoredPrimaryCategory : PrimaryCategory,
+            bExpanded);
+    }
+
+    return IsCategoryExpandedVisualForAutomation(PrimaryCategory) == bExpanded;
+}
+
+bool UInspectorPropertiesSectionWidget::IsCategoryExpandedVisualForAutomation(const FString& PrimaryCategory) const
+{
+    const FString CategoryStateKey = FindCategoryStateKeyByPrimaryName(PrimaryCategory);
+    if (CategoryStateKey.IsEmpty())
+    {
+        return false;
+    }
+
+    const UVerticalBox* CategoryBody = CategoryBodyByKey.FindRef(CategoryStateKey);
+    return CategoryBody && CategoryBody->GetVisibility() == ESlateVisibility::Visible;
+}
+
+FString UInspectorPropertiesSectionWidget::GetFirstCategoryNameForAutomation() const
+{
+    for (const FString& CategoryStateKey : LastCategoryOrder)
+    {
+        const FString* PrimaryCategory = CategoryPrimaryNameByKey.Find(CategoryStateKey);
+        if (PrimaryCategory && !PrimaryCategory->Equals(TEXT("Default"), ESearchCase::CaseSensitive))
+        {
+            return *PrimaryCategory;
+        }
+    }
+
+    for (const FString& CategoryStateKey : LastCategoryOrder)
+    {
+        if (const FString* PrimaryCategory = CategoryPrimaryNameByKey.Find(CategoryStateKey))
+        {
+            return *PrimaryCategory;
+        }
+    }
+
+    return FString();
+}
+
+FString UInspectorPropertiesSectionWidget::GetFirstPropertyNameInCategoryForAutomation(const FString& PrimaryCategory) const
+{
+    const FString CategoryStateKey = FindCategoryStateKeyByPrimaryName(PrimaryCategory);
+    if (CategoryStateKey.IsEmpty())
+    {
+        return FString();
+    }
+
+    const FString* PropertyName = CategoryFirstPropertyNameByKey.Find(CategoryStateKey);
+    return PropertyName ? *PropertyName : FString();
 }
 
 TSharedRef<SWidget> UInspectorPropertiesSectionWidget::RebuildWidget()
@@ -127,6 +238,17 @@ TSharedRef<SWidget> UInspectorPropertiesSectionWidget::RebuildWidget()
 void UInspectorPropertiesSectionWidget::NativeConstruct()
 {
     Super::NativeConstruct();
+
+    if (WidgetTree && WidgetTree->RootWidget && !EntriesBox)
+    {
+        RootBorder = Cast<UBorder>(WidgetTree->FindWidget(TEXT("RI_ActorPropertiesBorder")));
+        RootBox = Cast<UVerticalBox>(WidgetTree->FindWidget(TEXT("RI_ActorPropertiesRoot")));
+        HeaderBorder = Cast<UBorder>(WidgetTree->FindWidget(TEXT("RI_ActorPropertiesHeader")));
+        ScrollBox = Cast<UScrollBox>(WidgetTree->FindWidget(TEXT("RI_ActorPropertiesScroll")));
+        EntriesBox = Cast<UVerticalBox>(WidgetTree->FindWidget(TEXT("RI_ActorPropertiesEntries")));
+    }
+
+    RIInspectorTouchScroll::Configure(ScrollBox);
     RefreshFromSubsystem();
 }
 
@@ -154,17 +276,86 @@ void UInspectorPropertiesSectionWidget::BuildWidgetTree()
     BodyBorder->SetPadding(RICompactUI::GetSurfaceCardPadding(true));
     BodyBorder->SetBrushColor(RICompactUI::GetRowSurfaceBackgroundColor());
 
-    ScrollBox = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("RI_ActorPropertiesScroll"));
+    ScrollBox = WidgetTree->ConstructWidget<UInspectorTouchScrollBox>(UInspectorTouchScrollBox::StaticClass(), TEXT("RI_ActorPropertiesScroll"));
     EntriesBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ActorPropertiesEntries"));
     ScrollBox->AddChild(EntriesBox);
+    RIInspectorTouchScroll::Configure(ScrollBox);
     BodyBorder->SetContent(ScrollBox);
 
     if (UVerticalBoxSlot* BodySlot = RootBox->AddChildToVerticalBox(BodyBorder))
     {
         BodySlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-        BodySlot->SetPadding(FMargin(0.f, 0.f, 0.f, 0.f));
+        BodySlot->SetPadding(FMargin(0.f));
     }
+
     WidgetTree->RootWidget = RootBorder;
+}
+
+void UInspectorPropertiesSectionWidget::ResetEntryState()
+{
+    if (EntriesBox)
+    {
+        EntriesBox->ClearChildren();
+    }
+
+    CategoryToggleProxies.Reset();
+    CategoryBodyByKey.Reset();
+    CategoryToggleTextByKey.Reset();
+    CategoryLabelTextByKey.Reset();
+    CategoryPrimaryNameByKey.Reset();
+    CategoryFirstPropertyNameByKey.Reset();
+    CategoryTargetObjectByKey.Reset();
+    PropertyRowsByKey.Reset();
+    PropertyRowsByTrackingKey.Reset();
+    MaterialRowsByKey.Reset();
+    PropertyCategoryStateKeyByItemKey.Reset();
+    LastCategoryOrder.Reset();
+    bActorTransformBlockVisible = false;
+    LastActorTransformDebugSummary = TEXT("Hidden");
+    LastVisiblePropertyRowCount = 0;
+    LastVisibleMaterialRowCount = 0;
+    LastCategorySectionCount = 0;
+}
+
+FString UInspectorPropertiesSectionWidget::BuildPropertyItemKey(const UInspectorPropertyItem* Item) const
+{
+    if (!Item)
+    {
+        return FString();
+    }
+
+    return FString::Printf(
+        TEXT("PROP:%s:%s"),
+        *GetPathNameSafe(Item->GetTargetObject()),
+        *Item->GetPropertyFName().ToString());
+}
+
+FString UInspectorPropertiesSectionWidget::BuildPropertyTrackingKey(const UInspectorPropertyItem* Item) const
+{
+    if (!Item)
+    {
+        return FString();
+    }
+
+    return FString::Printf(
+        TEXT("PROP_TRACK:%s:%s"),
+        *GetPathNameSafe(Item->GetTrackingTargetObject()),
+        *Item->GetTrackingPropertyFName().ToString());
+}
+
+FString UInspectorPropertiesSectionWidget::BuildMaterialItemKey(const UInspectorMaterialParamItem* Item) const
+{
+    if (!Item)
+    {
+        return FString();
+    }
+
+    return FString::Printf(
+        TEXT("MAT:%s:%d:%d:%s"),
+        *GetPathNameSafe(Item->GetMeshComponent()),
+        Item->GetSlotIndex(),
+        static_cast<int32>(Item->GetParamType()),
+        *Item->GetParamName().ToString());
 }
 
 UWidget* UInspectorPropertiesSectionWidget::CreatePropertyRow(UObject* ItemObject)
@@ -194,6 +385,7 @@ UWidget* UInspectorPropertiesSectionWidget::CreatePropertyRow(UObject* ItemObjec
         Row->SetInspectorSubsystem(Subsystem.Get());
         Row->SetMaterialItem(MaterialItem);
         Row->TakeWidget();
+        MaterialRowsByKey.Add(BuildMaterialItemKey(MaterialItem), Row);
         return Row;
     }
 
@@ -219,9 +411,293 @@ UWidget* UInspectorPropertiesSectionWidget::CreatePropertyRow(UObject* ItemObjec
     }
 
     Row->SetInspectorSubsystem(Subsystem.Get());
+    Row->SetStripOwnerPrefixForDisplay(true);
     Row->SetPropertyItem(PropertyItem);
     Row->TakeWidget();
+    PropertyRowsByKey.Add(BuildPropertyItemKey(PropertyItem), Row);
+    const FString TrackingKey = BuildPropertyTrackingKey(PropertyItem);
+    if (!TrackingKey.IsEmpty())
+    {
+        PropertyRowsByTrackingKey.Add(TrackingKey, Row);
+    }
     return Row;
+}
+
+UWidget* UInspectorPropertiesSectionWidget::CreateActorTransformBlock(const TArray<UInspectorPropertyItem*>& TransformItems)
+{
+    if (!WidgetTree || TransformItems.Num() == 0)
+    {
+        return nullptr;
+    }
+
+    UBorder* BlockBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("RI_ActorTransformBlock"));
+    BlockBorder->SetPadding(FMargin(0.f));
+    BlockBorder->SetBrushColor(RICompactUI::GetRowSurfaceBackgroundColor());
+
+    UVerticalBox* BlockBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ActorTransformBlockBox"));
+    BlockBorder->SetContent(BlockBox);
+
+    if (UVerticalBoxSlot* TitleSlot = BlockBox->AddChildToVerticalBox(
+        RICompactUI::MakeSectionTitle(WidgetTree, TEXT("Actor Transform"), RICompactUI::ERISectionVisualStyle::Emphasis)))
+    {
+        TitleSlot->SetPadding(FMargin(0.f, 0.f, 0.f, RICompactUI::GetInlineGap()));
+    }
+
+    TArray<FString> SummaryParts;
+    for (UInspectorPropertyItem* TransformItem : TransformItems)
+    {
+        if (!TransformItem)
+        {
+            continue;
+        }
+
+        SummaryParts.Add(FString::Printf(
+            TEXT("%s->%s.%s"),
+            *TransformItem->GetPropertyNameWithoutOwnerPrefix(),
+            *GetNameSafe(TransformItem->GetTrackingTargetObject()),
+            *TransformItem->GetTrackingPropertyFName().ToString()));
+
+        if (UWidget* RowWidget = CreatePropertyRow(TransformItem))
+        {
+            if (UVerticalBoxSlot* RowSlot = BlockBox->AddChildToVerticalBox(RowWidget))
+            {
+                RowSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+            }
+            ++LastVisiblePropertyRowCount;
+        }
+    }
+
+    bActorTransformBlockVisible = SummaryParts.Num() > 0;
+    LastActorTransformDebugSummary = SummaryParts.Num() > 0
+        ? FString::Join(SummaryParts, TEXT(" | "))
+        : TEXT("Hidden");
+
+    return bActorTransformBlockVisible ? BlockBorder : nullptr;
+}
+
+UWidget* UInspectorPropertiesSectionWidget::CreatePropertySubcategoryHeader(const FString& SubcategoryLabel)
+{
+    UBorder* Border = WidgetTree->ConstructWidget<UBorder>(
+        UBorder::StaticClass(),
+        *FString::Printf(TEXT("RI_PropertySubcategory_%s"), *RI_SanitizeCategoryToken(SubcategoryLabel)));
+    Border->SetPadding(FMargin(6.f, 2.f, 6.f, 2.f));
+    Border->SetBrushColor(RICompactUI::GetCellSurfaceBackgroundColor());
+    Border->SetContent(RICompactUI::MakeText(
+        WidgetTree,
+        SubcategoryLabel,
+        RICompactUI::GetMutedFontSize(),
+        true,
+        RICompactUI::GetSecondaryTextColor(),
+        true));
+    return Border;
+}
+
+UWidget* UInspectorPropertiesSectionWidget::CreatePropertyCategoryHeader(const FPropertyCategoryViewData& CategoryData)
+{
+    const FString Token = RI_SanitizeCategoryToken(CategoryData.PrimaryCategory);
+    UButton* HeaderButton = WidgetTree->ConstructWidget<UButton>(
+        UButton::StaticClass(),
+        *FString::Printf(TEXT("RI_PropertyCategoryButton_%s"), *Token));
+    RICompactUI::ConfigureButton(HeaderButton, RICompactUI::ERIButtonVisualStyle::Header, false);
+
+    UHorizontalBox* RowBox = WidgetTree->ConstructWidget<UHorizontalBox>(
+        UHorizontalBox::StaticClass(),
+        *FString::Printf(TEXT("RI_PropertyCategoryRow_%s"), *Token));
+    HeaderButton->SetContent(RowBox);
+
+    UTextBlock* ToggleText = RICompactUI::MakeText(
+        WidgetTree,
+        CategoryData.bExpanded ? TEXT("v") : TEXT(">"),
+        RICompactUI::GetLabelFontSize(),
+        true,
+        RICompactUI::GetStrongTextColor());
+    if (UHorizontalBoxSlot* ToggleSlot = RowBox->AddChildToHorizontalBox(ToggleText))
+    {
+        ToggleSlot->SetPadding(FMargin(2.f, 0.f, 6.f, 0.f));
+        ToggleSlot->SetHorizontalAlignment(HAlign_Left);
+        ToggleSlot->SetVerticalAlignment(VAlign_Center);
+        ToggleSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
+    }
+
+    UTextBlock* LabelText = RICompactUI::MakeText(
+        WidgetTree,
+        CategoryData.PrimaryCategory,
+        RICompactUI::GetLabelFontSize(),
+        true,
+        RICompactUI::GetStrongTextColor(),
+        true);
+    if (UHorizontalBoxSlot* LabelSlot = RowBox->AddChildToHorizontalBox(LabelText))
+    {
+        LabelSlot->SetHorizontalAlignment(HAlign_Fill);
+        LabelSlot->SetVerticalAlignment(VAlign_Center);
+        LabelSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+    }
+
+    CategoryToggleTextByKey.Add(CategoryData.CategoryStateKey, ToggleText);
+    CategoryLabelTextByKey.Add(CategoryData.CategoryStateKey, LabelText);
+    CategoryPrimaryNameByKey.Add(CategoryData.CategoryStateKey, CategoryData.PrimaryCategory);
+    if (CategoryData.Properties.Num() > 0)
+    {
+        CategoryTargetObjectByKey.Add(CategoryData.CategoryStateKey, CategoryData.Properties[0]->GetTargetObject());
+    }
+
+    UInspectorPropertyCategoryButtonProxy* Proxy = NewObject<UInspectorPropertyCategoryButtonProxy>(this);
+    Proxy->Initialize(this, CategoryData.CategoryStateKey, !CategoryData.bForcedExpandedBySearch);
+    HeaderButton->OnClicked.AddDynamic(Proxy, &UInspectorPropertyCategoryButtonProxy::HandleClicked);
+    CategoryToggleProxies.Add(Proxy);
+
+    return HeaderButton;
+}
+
+void UInspectorPropertiesSectionWidget::AddPropertyRowsToCategoryBody(UVerticalBox* CategoryBody, const FPropertyCategoryViewData& CategoryData)
+{
+    if (!CategoryBody)
+    {
+        return;
+    }
+
+    TSet<FString> RenderedSubcategories;
+    for (UInspectorPropertyItem* PropertyItem : CategoryData.Properties)
+    {
+        if (!PropertyItem)
+        {
+            continue;
+        }
+
+        const FString SubcategoryPath = PropertyItem->GetSubcategoryPath();
+        if (!SubcategoryPath.IsEmpty() && !RenderedSubcategories.Contains(SubcategoryPath))
+        {
+            RenderedSubcategories.Add(SubcategoryPath);
+            if (UWidget* SubcategoryHeader = CreatePropertySubcategoryHeader(SubcategoryPath))
+            {
+                if (UVerticalBoxSlot* HeaderSlot = CategoryBody->AddChildToVerticalBox(SubcategoryHeader))
+                {
+                    HeaderSlot->SetPadding(FMargin(0.f, 2.f, 0.f, 3.f));
+                }
+            }
+        }
+
+        if (UWidget* RowWidget = CreatePropertyRow(PropertyItem))
+        {
+            if (UVerticalBoxSlot* EntrySlot = CategoryBody->AddChildToVerticalBox(RowWidget))
+            {
+                EntrySlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+            }
+            ++LastVisiblePropertyRowCount;
+        }
+    }
+}
+
+void UInspectorPropertiesSectionWidget::SetCategoryExpandedVisual(const FString& CategoryStateKey, bool bExpanded)
+{
+    if (UVerticalBox* CategoryBody = CategoryBodyByKey.FindRef(CategoryStateKey))
+    {
+        CategoryBody->SetVisibility(bExpanded ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+    }
+
+    if (UTextBlock* ToggleText = CategoryToggleTextByKey.FindRef(CategoryStateKey))
+    {
+        ToggleText->SetText(FText::FromString(bExpanded ? TEXT("v") : TEXT(">")));
+    }
+}
+
+void UInspectorPropertiesSectionWidget::HandleCategoryToggleRequested(const FString& CategoryStateKey)
+{
+    UInspectorWorldSubsystem* InspectorSubsystem = Subsystem.Get();
+    UVerticalBox* CategoryBody = CategoryBodyByKey.FindRef(CategoryStateKey);
+    if (!InspectorSubsystem || !CategoryBody)
+    {
+        return;
+    }
+
+    const bool bExpanded = CategoryBody->GetVisibility() == ESlateVisibility::Visible;
+    const bool bNewExpanded = !bExpanded;
+    SetCategoryExpandedVisual(CategoryStateKey, bNewExpanded);
+
+    const FString* PrimaryCategory = CategoryPrimaryNameByKey.Find(CategoryStateKey);
+    const TWeakObjectPtr<UObject>* TargetObject = CategoryTargetObjectByKey.Find(CategoryStateKey);
+    InspectorSubsystem->SetPropertyCategoryExpanded(
+        TargetObject ? TargetObject->Get() : nullptr,
+        PrimaryCategory ? *PrimaryCategory : FString(),
+        bNewExpanded);
+}
+
+void UInspectorPropertiesSectionWidget::BuildCategorizedPropertyRows(const TArray<UObject*>& Items, bool bSearchMode)
+{
+    UInspectorWorldSubsystem* InspectorSubsystem = Subsystem.Get();
+    if (!InspectorSubsystem || !WidgetTree || !EntriesBox)
+    {
+        return;
+    }
+
+    TMap<FString, FPropertyCategoryViewData> CategoryMap;
+    TArray<FString> CategoryOrder;
+
+    for (UObject* ItemObject : Items)
+    {
+        UInspectorPropertyItem* PropertyItem = Cast<UInspectorPropertyItem>(ItemObject);
+        if (!PropertyItem)
+        {
+            continue;
+        }
+
+        const FString PrimaryCategory = PropertyItem->GetPrimaryCategoryName();
+        const FString CategoryStateKey = InspectorSubsystem->BuildPropertyCategoryStateKey(PropertyItem->GetTargetObject(), PrimaryCategory);
+        FPropertyCategoryViewData* CategoryData = CategoryMap.Find(CategoryStateKey);
+        if (!CategoryData)
+        {
+            FPropertyCategoryViewData NewCategoryData;
+            NewCategoryData.PrimaryCategory = PrimaryCategory;
+            NewCategoryData.CategoryStateKey = CategoryStateKey;
+            NewCategoryData.bForcedExpandedBySearch = bSearchMode;
+            NewCategoryData.bExpanded = bSearchMode
+                ? true
+                : InspectorSubsystem->GetPropertyCategoryExpanded(PropertyItem->GetTargetObject(), PrimaryCategory, true);
+            CategoryOrder.Add(CategoryStateKey);
+            CategoryData = &CategoryMap.Add(CategoryStateKey, MoveTemp(NewCategoryData));
+        }
+
+        CategoryData->Properties.Add(PropertyItem);
+        if (!CategoryFirstPropertyNameByKey.Contains(CategoryStateKey))
+        {
+            CategoryFirstPropertyNameByKey.Add(CategoryStateKey, PropertyItem->GetPropertyName());
+        }
+        PropertyCategoryStateKeyByItemKey.Add(BuildPropertyItemKey(PropertyItem), CategoryStateKey);
+    }
+
+    LastCategoryOrder = CategoryOrder;
+    LastCategorySectionCount = CategoryOrder.Num();
+
+    for (const FString& CategoryStateKey : CategoryOrder)
+    {
+        const FPropertyCategoryViewData* CategoryData = CategoryMap.Find(CategoryStateKey);
+        if (!CategoryData)
+        {
+            continue;
+        }
+
+        if (UWidget* HeaderWidget = CreatePropertyCategoryHeader(*CategoryData))
+        {
+            if (UVerticalBoxSlot* HeaderSlot = EntriesBox->AddChildToVerticalBox(HeaderWidget))
+            {
+                HeaderSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 2.f));
+            }
+        }
+
+        UVerticalBox* CategoryBody = WidgetTree->ConstructWidget<UVerticalBox>(
+            UVerticalBox::StaticClass(),
+            *FString::Printf(TEXT("RI_PropertyCategoryBody_%s"), *RI_SanitizeCategoryToken(CategoryData->PrimaryCategory)));
+        CategoryBodyByKey.Add(CategoryStateKey, CategoryBody);
+
+        AddPropertyRowsToCategoryBody(CategoryBody, *CategoryData);
+
+        if (UVerticalBoxSlot* BodySlot = EntriesBox->AddChildToVerticalBox(CategoryBody))
+        {
+            BodySlot->SetPadding(FMargin(8.f, 0.f, 0.f, 6.f));
+        }
+
+        SetCategoryExpandedVisual(CategoryStateKey, CategoryData->bExpanded);
+    }
 }
 
 void UInspectorPropertiesSectionWidget::RefreshFromSubsystem()
@@ -231,7 +707,8 @@ void UInspectorPropertiesSectionWidget::RefreshFromSubsystem()
         return;
     }
 
-    EntriesBox->ClearChildren();
+    RIInspectorTouchScroll::Configure(ScrollBox);
+    ResetEntryState();
 
     UInspectorWorldSubsystem* InspectorSubsystem = Subsystem.Get();
     if (!InspectorSubsystem)
@@ -244,34 +721,81 @@ void UInspectorPropertiesSectionWidget::RefreshFromSubsystem()
 
     RefreshHeaderFromSubsystem();
 
-    TArray<UObject*> Items;
-    InspectorSubsystem->GetPropertyItemsForSelectedEx(InspectorSubsystem->GetCurrentActorSearchText(), bOnlyModified, Items);
-
-    int32 AddedRows = 0;
-    for (UObject* ItemObject : Items)
+    const FString SearchText = InspectorSubsystem->GetCurrentActorSearchText();
+    const bool bSearchMode = !SearchText.IsEmpty();
+    TArray<UInspectorPropertyItem*> ActorTransformItems;
+    InspectorSubsystem->GetActorWorldTransformPropertyItems(ActorTransformItems);
+    if (UWidget* TransformBlock = CreateActorTransformBlock(ActorTransformItems))
     {
-        if (UWidget* RowWidget = CreatePropertyRow(ItemObject))
+        if (UVerticalBoxSlot* TransformSlot = EntriesBox->AddChildToVerticalBox(TransformBlock))
         {
-            if (UVerticalBoxSlot* EntrySlot = EntriesBox->AddChildToVerticalBox(RowWidget))
-            {
-                EntrySlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
-            }
-            ++AddedRows;
+            TransformSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 8.f));
         }
     }
 
-    if (AddedRows == 0)
+    TArray<UObject*> Items;
+    InspectorSubsystem->GetPropertyItemsForSelectedEx(SearchText, bOnlyModified, Items);
+
+    if (RI_CanCategorizePropertyItems(Items))
+    {
+        BuildCategorizedPropertyRows(Items, bSearchMode);
+    }
+    else
+    {
+        for (UObject* ItemObject : Items)
+        {
+            if (UWidget* RowWidget = CreatePropertyRow(ItemObject))
+            {
+                if (UVerticalBoxSlot* EntrySlot = EntriesBox->AddChildToVerticalBox(RowWidget))
+                {
+                    EntrySlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+                }
+
+                if (Cast<UInspectorPropertyItem>(ItemObject))
+                {
+                    ++LastVisiblePropertyRowCount;
+                }
+                else if (Cast<UInspectorMaterialParamItem>(ItemObject))
+                {
+                    ++LastVisibleMaterialRowCount;
+                }
+            }
+        }
+    }
+
+    if ((LastVisiblePropertyRowCount + LastVisibleMaterialRowCount) == 0 && !bActorTransformBlockVisible)
     {
         EntriesBox->AddChildToVerticalBox(
             RICompactUI::MakeText(WidgetTree, TEXT("No visible properties match the current selection."), RICompactUI::GetMutedFontSize(), false, RI_PropertySectionMutedColor(), true));
     }
 }
 
-void UInspectorPropertiesSectionWidget::RefreshItemDisplay(UObject* ItemObject)
+void UInspectorPropertiesSectionWidget::RefreshValueDisplayFromSubsystem()
 {
-    if (!EntriesBox || !ItemObject)
+    RefreshHeaderFromSubsystem();
+
+    for (const TPair<FString, TObjectPtr<UInspectorPropertyRowWidget>>& Pair : PropertyRowsByKey)
     {
-        return;
+        if (Pair.Value)
+        {
+            Pair.Value->RefreshDisplay();
+        }
+    }
+
+    for (const TPair<FString, TObjectPtr<UInspectorMaterialParamRowWidget>>& Pair : MaterialRowsByKey)
+    {
+        if (Pair.Value)
+        {
+            Pair.Value->RefreshDisplay();
+        }
+    }
+}
+
+bool UInspectorPropertiesSectionWidget::RefreshItemDisplay(UObject* ItemObject)
+{
+    if (!ItemObject)
+    {
+        return false;
     }
 
     if (UInspectorMaterialParamItem* MaterialItem = Cast<UInspectorMaterialParamItem>(ItemObject))
@@ -279,66 +803,42 @@ void UInspectorPropertiesSectionWidget::RefreshItemDisplay(UObject* ItemObject)
         if (UInspectorMaterialParamRowWidget* Row = FindMaterialRowForAutomation(MaterialItem))
         {
             Row->RefreshDisplay();
+            return true;
         }
-        return;
+        return false;
     }
 
     if (UInspectorPropertyItem* PropertyItem = Cast<UInspectorPropertyItem>(ItemObject))
     {
-        for (int32 ChildIndex = 0; ChildIndex < EntriesBox->GetChildrenCount(); ++ChildIndex)
+        if (UInspectorPropertyRowWidget* Row = FindPropertyRowForAutomation(PropertyItem))
         {
-            if (UInspectorPropertyRowWidget* Row = Cast<UInspectorPropertyRowWidget>(EntriesBox->GetChildAt(ChildIndex)))
-            {
-                if (Row->IsDisplayingItem(PropertyItem))
-                {
-                    Row->RefreshDisplay();
-                    break;
-                }
-            }
+            Row->RefreshDisplay();
+            LastActorTransformDebugSummary = bActorTransformBlockVisible ? LastActorTransformDebugSummary : TEXT("Hidden");
+            return true;
         }
     }
+
+    return false;
 }
 
 UInspectorMaterialParamRowWidget* UInspectorPropertiesSectionWidget::FindMaterialRowForAutomation(const UInspectorMaterialParamItem* Item) const
 {
-    if (!EntriesBox || !Item)
-    {
-        return nullptr;
-    }
-
-    for (int32 ChildIndex = 0; ChildIndex < EntriesBox->GetChildrenCount(); ++ChildIndex)
-    {
-        if (UInspectorMaterialParamRowWidget* Row = Cast<UInspectorMaterialParamRowWidget>(EntriesBox->GetChildAt(ChildIndex)))
-        {
-            if (Row->IsDisplayingItem(Item))
-            {
-                return Row;
-            }
-        }
-    }
-
-    return nullptr;
+    return Item ? MaterialRowsByKey.FindRef(BuildMaterialItemKey(Item)) : nullptr;
 }
 
 UInspectorPropertyRowWidget* UInspectorPropertiesSectionWidget::FindPropertyRowForAutomation(const UInspectorPropertyItem* Item) const
 {
-    if (!EntriesBox || !Item)
+    if (!Item)
     {
         return nullptr;
     }
 
-    for (int32 ChildIndex = 0; ChildIndex < EntriesBox->GetChildrenCount(); ++ChildIndex)
+    if (UInspectorPropertyRowWidget* DirectRow = PropertyRowsByKey.FindRef(BuildPropertyItemKey(Item)))
     {
-        if (UInspectorPropertyRowWidget* Row = Cast<UInspectorPropertyRowWidget>(EntriesBox->GetChildAt(ChildIndex)))
-        {
-            if (Row->IsDisplayingItem(Item))
-            {
-                return Row;
-            }
-        }
+        return DirectRow;
     }
 
-    return nullptr;
+    return PropertyRowsByTrackingKey.FindRef(BuildPropertyTrackingKey(Item));
 }
 
 bool UInspectorPropertiesSectionWidget::ScrollToItemForAutomation(UObject* ItemObject)
@@ -350,6 +850,16 @@ bool UInspectorPropertiesSectionWidget::ScrollToItemForAutomation(UObject* ItemO
 
     if (UInspectorPropertyItem* PropertyItem = Cast<UInspectorPropertyItem>(ItemObject))
     {
+        const FString ItemKey = BuildPropertyItemKey(PropertyItem);
+        if (const FString* CategoryStateKey = PropertyCategoryStateKeyByItemKey.Find(ItemKey))
+        {
+            if (UInspectorWorldSubsystem* InspectorSubsystem = Subsystem.Get())
+            {
+                InspectorSubsystem->SetPropertyCategoryExpanded(PropertyItem->GetTargetObject(), PropertyItem->GetPrimaryCategoryName(), true);
+            }
+            SetCategoryExpandedVisual(*CategoryStateKey, true);
+        }
+
         if (UInspectorPropertyRowWidget* Row = FindPropertyRowForAutomation(PropertyItem))
         {
             ScrollBox->ScrollWidgetIntoView(Row, true, EDescendantScrollDestination::Center, 0.0f);

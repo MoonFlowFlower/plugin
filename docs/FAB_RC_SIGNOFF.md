@@ -2,7 +2,33 @@
 
 This file is the release-candidate signoff guide for the current Fab submission pass.
 
-It is not the development authority. For implementation rules, use `Docs/AGENT_DEVELOPMENT.md`.
+It is not the development authority. For implementation rules, use `docs/AGENT_DEVELOPMENT.md`.
+
+## Status Note
+
+- The RC baseline recorded below is stale and must not be treated as the final Fab submission candidate.
+- Transform source persistence is now validated on the local dirty baseline:
+  - `Saved/RuntimeInspector/Validation/TransformSourcePersistence/BC8B047E-400B-566E-1347-2DA5AA231920/prepare_report.json`
+  - `Saved/RuntimeInspector/Validation/TransformSourcePersistence/BC8B047E-400B-566E-1347-2DA5AA231920/verify_restore_report.json`
+  - acceptance target: `BP_TestVarsActor -> Cube (StaticMeshComponent)`
+- The previous actor-root scale false negative was not a source-promote failure:
+  - `BP_TestVarsActor` drives `SetActorScale3D(TestScale)` from `Event Tick`
+  - actor-root world scale on that test Blueprint is not the release-authoritative persistence target
+- Automated package regeneration and blank-project load validation were refreshed on `2026-04-16`:
+  - package root: `Saved/FabRelease/Package/RuntimeInspector_UE55/RuntimeInspector`
+  - blank host: `Saved/FabRelease/BlankProjectValidation/RuntimeInspectorBlank_UE55/RuntimeInspectorBlank/RuntimeInspectorBlank.uproject`
+  - load log: `Saved/fab_blank_project_validation.log`
+- Deterministic screenshot staging was also refreshed on `2026-04-16` on the current dirty local baseline:
+  - screenshot root: `Saved/RuntimeInspector/FabMediaCapture/`
+  - capture log: `Saved/RuntimeInspector/FabMediaCapture/capture_fab_media.log`
+  - capture manifest: `Saved/RuntimeInspector/FabMediaCapture/capture_manifest.txt`
+  - required current-UI shots spot-checked:
+    - `cover.png`
+    - `screenshot_01_actor_panel.png`
+    - `screenshot_02_changes_workflow.png`
+    - `screenshot_03_settings.png`
+    - `screenshot_04_tools.png`
+- Before final Fab signoff, freeze a new clean RC commit and then regenerate package, screenshot, demo, and manual-smoke evidence from that exact commit.
 
 ## RC Baseline
 
@@ -14,12 +40,20 @@ It is not the development authority. For implementation rules, use `Docs/AGENT_D
   - `Saved/FabRelease/BlankProjectValidation/RuntimeInspectorBlank_UE55/RuntimeInspectorBlank/RuntimeInspectorBlank.uproject`
 - Screenshot set:
   - `Saved/RuntimeInspector/FabMediaCapture/`
+- Current Actor-page runtime structure validation also still passes on the same dirty local baseline:
+  - `Saved/RuntimeInspector/Validation/actor_page_structure.png`
 
 All manual smoke notes, screenshots, and demo media must match this RC baseline. If code changes after this commit, regenerate package, validation evidence, and media before signoff.
 
 ## Manual Smoke
 
 Use the preserved blank-install host project. Do not use the main `PluginMaker` project for this signoff.
+
+Important boundary:
+
+- the preserved blank host contains the packaged `RuntimeInspector` plugin only
+- it does not include `UE_MCP_Bridge` or `control_runtime_inspector` automation hooks
+- this signoff step therefore remains human/manual, not bridge-driven
 
 ### Launch
 

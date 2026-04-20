@@ -1,0 +1,402 @@
+[
+  {
+    "WorkflowId": "mainline_safe_patch_core",
+    "DisplayName": "Mainline Safe Patch Core",
+    "Description": "Runs the stable patch, settings, and file compare workflow inside PIE.",
+    "Category": "Mainline",
+    "bRequiresPIE": true,
+    "bRequiresSelectedActor": false,
+    "bMutatesRuntime": true,
+    "bMutatesSource": false,
+    "bEnabled": true,
+    "Tags": ["safe-patch", "settings", "file"],
+    "ActionSequence": [
+      { "ActionType": "RunVerificationProfile", "RefId": "runtime_session_role" },
+      { "ActionType": "RunVerificationProfile", "RefId": "settings_preview_apply" },
+      { "ActionType": "RunVerificationProfile", "RefId": "settings_hotkey_rebind" },
+      { "ActionType": "RunVerificationProfile", "RefId": "file_compare_view" },
+      { "ActionType": "RunSelfTest", "RefId": "file_page_injection" },
+      { "ActionType": "RunSelfTest", "RefId": "file_workflow" }
+    ]
+  },
+  {
+    "WorkflowId": "mainline_promote_source_assets",
+    "DisplayName": "Mainline Promote Source Assets",
+    "Description": "Runs config, Blueprint, material, and File-page promote workflows with automatic restore.",
+    "Category": "Mainline",
+    "bRequiresPIE": true,
+    "bRequiresSelectedActor": false,
+    "bMutatesRuntime": true,
+    "bMutatesSource": true,
+    "bEnabled": true,
+    "Tags": ["promote", "source", "assets"],
+    "ActionSequence": [
+      { "ActionType": "RunVerificationProfile", "RefId": "promote_config_settings" },
+      { "ActionType": "RunVerificationProfile", "RefId": "promote_blueprint_apply" },
+      { "ActionType": "RunVerificationProfile", "RefId": "promote_material_apply" },
+      { "ActionType": "RunVerificationProfile", "RefId": "file_promote_config" }
+    ]
+  },
+  {
+    "WorkflowId": "mainline_actor_patch_roundtrip",
+    "DisplayName": "Mainline Actor Patch Roundtrip",
+    "Description": "Runs selected-actor patch preset, audit, and promote preview steps on a stable target actor.",
+    "Category": "Actor",
+    "bRequiresPIE": true,
+    "bRequiresSelectedActor": true,
+    "bMutatesRuntime": true,
+    "bMutatesSource": false,
+    "bEnabled": true,
+    "Tags": ["actor", "patch", "roundtrip"],
+    "ActionSequence": [
+      { "ActionType": "RunVerificationProfile", "RefId": "audit_report_current_vs_patch" },
+      { "ActionType": "RunVerificationProfile", "RefId": "promote_preview_blueprint" },
+      { "ActionType": "RunSelfTest", "RefId": "patch_preset_roundtrip" }
+    ]
+  },
+  {
+    "WorkflowId": "mainline_actor_promote_file_closure",
+    "DisplayName": "Mainline Actor Promote File Closure",
+    "Description": "Runs selected-actor apply, stage, promote preview/apply, applied audit, clear, and restore steps through the File workflow.",
+    "Category": "Actor",
+    "bRequiresPIE": true,
+    "bRequiresSelectedActor": true,
+    "bMutatesRuntime": true,
+    "bMutatesSource": true,
+    "bEnabled": true,
+    "Tags": ["actor", "promote", "file"],
+    "ActionSequence": [
+      { "ActionType": "RunVerificationProfile", "RefId": "runtime_session_role" },
+      { "ActionType": "RunVerificationProfile", "RefId": "actor_promote_file_workflow" },
+      { "ActionType": "RunSelfTest", "RefId": "file_page_injection" }
+    ]
+  },
+  {
+    "WorkflowId": "mainline_actor_apply_file_closure",
+    "DisplayName": "Mainline Actor Apply File Closure",
+    "Description": "Runs selected-actor apply, stage, compare, export, clear, and restore steps through the File workflow.",
+    "Category": "Actor",
+    "bRequiresPIE": true,
+    "bRequiresSelectedActor": true,
+    "bMutatesRuntime": true,
+    "bMutatesSource": false,
+    "bEnabled": true,
+    "Tags": ["actor", "apply", "file"],
+    "ActionSequence": [
+      { "ActionType": "RunVerificationProfile", "RefId": "runtime_session_role" },
+      { "ActionType": "RunVerificationProfile", "RefId": "actor_apply_file_workflow" },
+      { "ActionType": "RunSelfTest", "RefId": "file_page_injection" }
+    ]
+  },
+  {
+    "WorkflowId": "mainline_actor_end_to_end_closure",
+    "DisplayName": "Mainline Actor End-To-End",
+    "Description": "Runs selected-actor patch roundtrip, file apply/compare, and file promote/apply/restore as one curated actor-aware closure.",
+    "Category": "Mainline",
+    "bRequiresPIE": true,
+    "bRequiresSelectedActor": true,
+    "bMutatesRuntime": true,
+    "bMutatesSource": true,
+    "bEnabled": true,
+    "Tags": ["actor", "end-to-end", "promote", "file"],
+    "ActionSequence": [
+      { "ActionType": "RunWorkflow", "RefId": "mainline_actor_patch_roundtrip" },
+      { "ActionType": "RunWorkflow", "RefId": "mainline_actor_apply_file_closure" },
+      { "ActionType": "RunWorkflow", "RefId": "mainline_actor_promote_file_closure" }
+    ]
+  },
+  {
+    "WorkflowId": "mainline_remote_actor_end_to_end_closure",
+    "DisplayName": "Mainline Remote Actor End-To-End",
+    "Description": "Runs the remote-runtime foundation, remote compare matrix, role compare, and selected-actor end-to-end closure as one white-listed remote automation batch.",
+    "Category": "Mainline",
+    "bRequiresPIE": true,
+    "bRequiresSelectedActor": true,
+    "bMutatesRuntime": true,
+    "bMutatesSource": true,
+    "bEnabled": true,
+    "Tags": ["remote", "actor", "end-to-end", "batch", "white-listed", "orchestration"],
+    "ActionSequence": [
+      { "ActionType": "RunWorkflow", "RefId": "mainline_remote_runtime_foundation" },
+      { "ActionType": "RunWorkflow", "RefId": "mainline_remote_session_compare_matrix_foundation" },
+      { "ActionType": "RunWorkflow", "RefId": "mainline_role_compare_foundation" },
+      { "ActionType": "RunWorkflow", "RefId": "mainline_actor_end_to_end_closure" }
+    ]
+  },
+  {
+    "WorkflowId": "mainline_role_compare_foundation",
+    "DisplayName": "Mainline Role Compare Foundation",
+    "Description": "Stages a runtime patch and proves role-aware compare output, missing-role reporting, verification states, and File-page role compare rendering.",
+    "Category": "Phase3",
+    "bRequiresPIE": true,
+    "bRequiresSelectedActor": false,
+    "bMutatesRuntime": true,
+    "bMutatesSource": false,
+    "bEnabled": true,
+    "Tags": ["runtime", "role-aware", "compare"],
+    "ActionSequence": [
+      { "ActionType": "RunVerificationProfile", "RefId": "runtime_role_compare" },
+      { "ActionType": "RunVerificationProfile", "RefId": "file_role_compare_view" }
+    ]
+  },
+  {
+    "WorkflowId": "mainline_remote_runtime_foundation",
+    "DisplayName": "Mainline Remote Runtime Foundation",
+    "Description": "Verifies the local PIE runtime can be discovered as an explicit runtime session, connected, and enumerated into remote-runtime targets.",
+    "Category": "Phase3",
+    "bRequiresPIE": true,
+    "bRequiresSelectedActor": false,
+    "bMutatesRuntime": false,
+    "bMutatesSource": false,
+    "bEnabled": true,
+    "Tags": ["remote", "runtime", "session", "target"],
+    "ActionSequence": [
+      { "ActionType": "RunVerificationProfile", "RefId": "remote_runtime_foundation" }
+    ]
+  },
+  {
+    "WorkflowId": "mainline_remote_packaged_foundation",
+    "DisplayName": "Mainline Remote Packaged Foundation",
+    "Description": "Verifies an external packaged runtime can be discovered on loopback, connected, and enumerated into actor targets from the editor authority side.",
+    "Category": "Phase3",
+    "bRequiresPIE": false,
+    "bRequiresSelectedActor": false,
+    "bMutatesRuntime": false,
+    "bMutatesSource": false,
+    "bEnabled": true,
+    "Tags": ["remote", "packaged", "loopback", "foundation"],
+    "ActionSequence": [
+      { "ActionType": "RunVerificationProfile", "RefId": "remote_packaged_foundation" }
+    ]
+  },
+  {
+    "WorkflowId": "mainline_remote_packaged_patch_pull",
+    "DisplayName": "Mainline Remote Packaged Patch Pull",
+    "Description": "Applies a property mutation in an external packaged runtime, pulls the patch bundle into the editor, stages it, and restores the packaged runtime value.",
+    "Category": "Phase3",
+    "bRequiresPIE": false,
+    "bRequiresSelectedActor": false,
+    "bMutatesRuntime": true,
+    "bMutatesSource": false,
+    "bEnabled": true,
+    "Tags": ["remote", "packaged", "patch", "pull", "loopback"],
+    "ActionSequence": [
+      { "ActionType": "RunVerificationProfile", "RefId": "remote_packaged_patch_pull" }
+    ]
+  },
+  {
+    "WorkflowId": "mainline_remote_packaged_to_source_closure",
+    "DisplayName": "Mainline Remote Packaged To Source Closure",
+    "Description": "Runs the packaged runtime apply, patch pull, local stage, patch-vs-source audit, promote preview/apply, and source restore closure without requiring PIE.",
+    "Category": "Phase3",
+    "bRequiresPIE": false,
+    "bRequiresSelectedActor": false,
+    "bMutatesRuntime": true,
+    "bMutatesSource": true,
+    "bEnabled": true,
+    "Tags": ["remote", "packaged", "source", "closure", "loopback"],
+    "ActionSequence": [
+      { "ActionType": "RunVerificationProfile", "RefId": "remote_packaged_to_source_closure" }
+    ]
+  },
+  {
+    "WorkflowId": "fab_screenshot_foundation",
+    "DisplayName": "Fab Screenshot Foundation",
+    "Description": "Applies the clean RuntimeInspector presentation state used for Fab screenshots and first-screen capture.",
+    "Category": "Presentation",
+    "bRequiresPIE": true,
+    "bRequiresSelectedActor": false,
+    "bMutatesRuntime": false,
+    "bMutatesSource": false,
+    "bEnabled": true,
+    "Tags": ["fab", "presentation", "screenshot", "changes", "softcontrast"],
+    "ActionSequence": [
+      { "ActionType": "RunVerificationProfile", "RefId": "fab_screenshot_foundation" }
+    ]
+  },
+  {
+    "WorkflowId": "capture_changes_first_open_perf",
+    "DisplayName": "Capture Changes First Open Perf",
+    "Description": "Runs a structured validation capture for the first Changes-page open path and exports a report artifact.",
+    "Category": "Validation",
+    "bRequiresPIE": true,
+    "bRequiresSelectedActor": false,
+    "bMutatesRuntime": false,
+    "bMutatesSource": false,
+    "bEnabled": true,
+    "Tags": ["validation", "capture", "changes", "perf"],
+    "ActionSequence": [
+      { "ActionType": "RunSelfTest", "RefId": "capture_changes_first_open_perf" }
+    ]
+  },
+  {
+    "WorkflowId": "mainline_remote_session_compare_foundation",
+    "DisplayName": "Mainline Remote Session Compare",
+    "Description": "Verifies editor and PIE sessions can both be discovered and compared against the same actor query through the remote-runtime API.",
+    "Category": "Phase3",
+    "bRequiresPIE": true,
+    "bRequiresSelectedActor": false,
+    "bMutatesRuntime": false,
+    "bMutatesSource": false,
+    "bEnabled": true,
+    "Tags": ["remote", "session", "compare", "target"],
+    "ActionSequence": [
+      { "ActionType": "RunVerificationProfile", "RefId": "remote_session_compare" }
+    ]
+  },
+  {
+    "WorkflowId": "mainline_remote_session_target_set_compare_foundation",
+    "DisplayName": "Mainline Remote Session Target Set Compare",
+    "Description": "Verifies editor and PIE sessions can compare filtered target inventories and report shared, missing, and mismatched targets through the remote-runtime API.",
+    "Category": "Phase3",
+    "bRequiresPIE": true,
+    "bRequiresSelectedActor": false,
+    "bMutatesRuntime": false,
+    "bMutatesSource": false,
+    "bEnabled": true,
+    "Tags": ["remote", "session", "target-set", "compare", "supports-session-override", "supports-name-filter", "supports-class-filter"],
+    "ActionSequence": [
+      { "ActionType": "RunVerificationProfile", "RefId": "remote_session_target_set_compare" }
+    ]
+  },
+  {
+    "WorkflowId": "mainline_remote_session_compare_ui_foundation",
+    "DisplayName": "Mainline Remote Session Compare UI",
+    "Description": "Builds remote session target-set compare output and proves the File page renders session summary, preview, and compare rows from the shared cache.",
+    "Category": "Phase3",
+    "bRequiresPIE": true,
+    "bRequiresSelectedActor": false,
+    "bMutatesRuntime": false,
+    "bMutatesSource": false,
+    "bEnabled": true,
+    "Tags": ["remote", "session", "target-set", "file", "supports-session-override", "supports-name-filter", "supports-class-filter"],
+    "ActionSequence": [
+      { "ActionType": "RunVerificationProfile", "RefId": "file_remote_session_compare_view" }
+    ]
+  },
+  {
+    "WorkflowId": "mainline_remote_session_context_ui_foundation",
+    "DisplayName": "Mainline Remote Session Context UI",
+    "Description": "Verifies File and Test pages consume the same shared remote session, target query, and workflow context from the subsystem authority state.",
+    "Category": "Phase3",
+    "bRequiresPIE": true,
+    "bRequiresSelectedActor": false,
+    "bMutatesRuntime": false,
+    "bMutatesSource": false,
+    "bEnabled": true,
+    "Tags": ["remote", "session", "context", "ui", "file", "test", "packaged"],
+    "ActionSequence": [
+      { "ActionType": "RunVerificationProfile", "RefId": "remote_session_context_ui" }
+    ]
+  },
+  {
+    "WorkflowId": "mainline_remote_session_compare_scoped_ui_foundation",
+    "DisplayName": "Mainline Remote Session Compare Scoped UI",
+    "Description": "Runs the File-page remote session compare closure with explicit session pair and BP_TestVarsActor filters so orchestration can prove scoped compare output.",
+    "Category": "Phase3",
+    "bRequiresPIE": true,
+    "bRequiresSelectedActor": false,
+    "bMutatesRuntime": false,
+    "bMutatesSource": false,
+    "bEnabled": true,
+    "Tags": ["remote", "session", "target-set", "file", "scoped", "filter", "bp-testvarsactor", "supports-session-override", "supports-name-filter", "supports-class-filter"],
+    "ActionSequence": [
+      {
+        "ActionType": "SetRemoteSessionCompareOverride",
+        "RemoteSessionCompareRequest": {
+          "LeftSessionId": "local_editor_current",
+          "RightSessionId": "local_pie_current",
+          "NameFilter": "BP_TestVarsActor",
+          "ClassFilter": "BP_TestVarsActor"
+        }
+      },
+      { "ActionType": "RunVerificationProfile", "RefId": "file_remote_session_compare_view" },
+      { "ActionType": "RunVerificationProfile", "RefId": "remote_session_target_set_compare" },
+      { "ActionType": "ClearRemoteSessionCompareOverride" }
+    ]
+  },
+  {
+    "WorkflowId": "mainline_remote_session_compare_matrix_foundation",
+    "DisplayName": "Mainline Remote Session Compare Matrix",
+    "Description": "Runs a curated white-listed matrix of remote session target-set compare requests so automation can validate full-inventory and BP_TestVarsActor-scoped session pairs as one remote closure.",
+    "Category": "Phase3",
+    "bRequiresPIE": true,
+    "bRequiresSelectedActor": false,
+    "bMutatesRuntime": false,
+    "bMutatesSource": false,
+    "bEnabled": true,
+    "Tags": ["remote", "session", "target-set", "matrix", "white-listed", "supports-batch-orchestration"],
+    "ActionSequence": [
+      { "ActionType": "RunVerificationProfile", "RefId": "remote_session_target_set_compare_matrix" }
+    ]
+  },
+  {
+    "WorkflowId": "mainline_remote_workflow_matrix_foundation",
+    "DisplayName": "Mainline Remote Workflow Matrix",
+    "Description": "Runs a curated white-listed matrix of remote workflows so automation can validate remote foundations, compare matrices, and actor-aware apply/file closure as one stable batch.",
+    "Category": "Phase3",
+    "bRequiresPIE": true,
+    "bRequiresSelectedActor": false,
+    "bMutatesRuntime": true,
+    "bMutatesSource": false,
+    "bEnabled": true,
+    "Tags": ["remote", "workflow", "matrix", "batch", "white-listed", "supports-batch-orchestration"],
+    "ActionSequence": [
+      { "ActionType": "RunVerificationProfile", "RefId": "workflow_matrix" }
+    ]
+  },
+  {
+    "WorkflowId": "mainline_remote_packaged_matrix_default",
+    "DisplayName": "Mainline Remote Packaged Matrix",
+    "Description": "Runs the curated white-listed packaged runtime batch: session foundation, patch pull, and editor-side promote closure.",
+    "Category": "Phase3",
+    "bRequiresPIE": false,
+    "bRequiresSelectedActor": false,
+    "bMutatesRuntime": true,
+    "bMutatesSource": true,
+    "bEnabled": true,
+    "Tags": ["remote", "packaged", "matrix", "batch", "white-listed", "loopback"],
+    "ActionSequence": [
+      { "ActionType": "RunWorkflow", "RefId": "mainline_remote_packaged_foundation" },
+      { "ActionType": "RunWorkflow", "RefId": "mainline_remote_packaged_patch_pull" },
+      { "ActionType": "RunWorkflow", "RefId": "mainline_remote_packaged_to_source_closure" }
+    ]
+  },
+  {
+    "WorkflowId": "mainline_full_closure",
+    "DisplayName": "Mainline Full Closure",
+    "Description": "Runs the curated RuntimeInspector closure suite: UI, settings, patch, compare, and promote.",
+    "Category": "Mainline",
+    "bRequiresPIE": true,
+    "bRequiresSelectedActor": false,
+    "bMutatesRuntime": true,
+    "bMutatesSource": true,
+    "bEnabled": true,
+    "Tags": ["full", "closure", "file", "promote"],
+    "ActionSequence": [
+      { "ActionType": "RunVerificationProfile", "RefId": "color_runtime_edit" },
+      { "ActionType": "RunVerificationProfile", "RefId": "runtime_session_role" },
+      { "ActionType": "RunVerificationProfile", "RefId": "runtime_role_compare" },
+      { "ActionType": "RunVerificationProfile", "RefId": "remote_runtime_foundation" },
+      { "ActionType": "RunVerificationProfile", "RefId": "remote_session_compare" },
+      { "ActionType": "RunVerificationProfile", "RefId": "remote_session_target_set_compare" },
+      { "ActionType": "RunVerificationProfile", "RefId": "remote_session_context_ui" },
+      { "ActionType": "RunVerificationProfile", "RefId": "settings_preview_apply" },
+      { "ActionType": "RunVerificationProfile", "RefId": "settings_hotkey_rebind" },
+      { "ActionType": "RunVerificationProfile", "RefId": "settings_page_layout" },
+      { "ActionType": "RunVerificationProfile", "RefId": "theme_preset_preview" },
+      { "ActionType": "RunVerificationProfile", "RefId": "context_strip" },
+      { "ActionType": "RunVerificationProfile", "RefId": "promote_config_settings" },
+      { "ActionType": "RunVerificationProfile", "RefId": "promote_blueprint_apply" },
+      { "ActionType": "RunVerificationProfile", "RefId": "promote_material_apply" },
+      { "ActionType": "RunVerificationProfile", "RefId": "file_compare_view" },
+      { "ActionType": "RunVerificationProfile", "RefId": "file_role_compare_view" },
+      { "ActionType": "RunVerificationProfile", "RefId": "file_remote_session_compare_view" },
+      { "ActionType": "RunVerificationProfile", "RefId": "file_promote_config" },
+      { "ActionType": "RunVerificationProfile", "RefId": "workflow_page_view" },
+      { "ActionType": "RunVerificationProfile", "RefId": "test_page_layout" },
+      { "ActionType": "RunSelfTest", "RefId": "file_page_injection" },
+      { "ActionType": "RunSelfTest", "RefId": "file_workflow" }
+    ]
+  }
+]

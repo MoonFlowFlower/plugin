@@ -15,4 +15,7 @@ public:
 
     UFUNCTION(BlueprintCallable, Category = "RuntimeInspector")
     static void ToggleInspector(UObject* WorldContextObject);
+
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Editor")
+    static bool GenerateSettingsPageBlueprintLayout();
 };

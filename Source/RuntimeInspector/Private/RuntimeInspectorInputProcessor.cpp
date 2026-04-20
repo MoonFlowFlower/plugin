@@ -13,7 +13,7 @@ bool FRuntimeInspectorInputProcessor::HandleKeyDownEvent(FSlateApplication& Slat
 
     //if (!Sub->IsInspectorOpen()) return false;
     if (!Sub->IsOpen()) return false;
-    if (InKeyEvent.IsRepeat()) return true; 
+    if (InKeyEvent.IsRepeat()) return true;
 
     const bool bCtrl = InKeyEvent.IsControlDown();
     const bool bShift = InKeyEvent.IsShiftDown();
@@ -43,7 +43,7 @@ void FRuntimeInspectorInputProcessor::Tick(
     TSharedRef<ICursor, ESPMode::ThreadSafe> Cursor)
 {
     // no-op
-    
+
 }
 
 bool FRuntimeInspectorInputProcessor::HandleMouseButtonDownEvent(FSlateApplication& SlateApp, const FPointerEvent& MouseEvent)
@@ -58,16 +58,8 @@ bool FRuntimeInspectorInputProcessor::HandleMouseButtonDownEvent(FSlateApplicati
         return Sub->HandlePanelMouseButtonDown(MouseEvent);
     }
 
-    const URuntimeInspectorSettings* Settings = GetDefault<URuntimeInspectorSettings>();
-    if (!Settings || !Settings->bEnableRightMousePick) return false;
-
     if (MouseEvent.GetEffectingButton() != EKeys::RightMouseButton) return false;
-
-    if (Settings->bRightMousePickRequiresCtrl && !MouseEvent.IsControlDown()) return false;
-    if (Settings->bRightMousePickRequiresShift && !MouseEvent.IsShiftDown()) return false;
-
-    Sub->PickActorInView();
-    return true; // 吃掉事件，避免弹出右键菜单/传给游戏
+    return Sub->HandleRightMousePickInput(MouseEvent.IsControlDown(), MouseEvent.IsShiftDown());
 }
 
 bool FRuntimeInspectorInputProcessor::HandleMouseMoveEvent(FSlateApplication& SlateApp, const FPointerEvent& MouseEvent)
