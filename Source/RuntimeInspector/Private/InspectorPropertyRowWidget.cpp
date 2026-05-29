@@ -67,6 +67,10 @@ namespace
     }
 
     static constexpr float RI_StructuredPreviewDelaySeconds = 0.12f;
+    static constexpr float RI_RowFavoriteButtonSize = 16.0f;
+    static constexpr float RI_RowFavoriteIconSize = 10.5f;
+    static constexpr float RI_RowCheckBoxSize = 16.0f;
+    static constexpr float RI_RowValueWidth = 104.0f;
 }
 
 UInspectorPropertyRowWidget::UInspectorPropertyRowWidget(const FObjectInitializer& ObjectInitializer)
@@ -402,21 +406,20 @@ void UInspectorPropertyRowWidget::BuildWidgetTree()
     RootBorder->SetContent(RootBox);
 
     FavoriteButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("RI_PropertyRowFavoriteButton"));
-    RICompactUI::ConfigureButton(FavoriteButton, RICompactUI::ERIButtonVisualStyle::Secondary, false);
     FavoriteSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_PropertyRowFavoriteSize"));
-    const float FavoriteButtonSize = FMath::Max(18.f, RICompactUI::GetInputHeight() - 4.f);
-    const float FavoriteIconSize = FavoriteButtonSize * 0.58f;
-    FavoriteSizeBox->SetWidthOverride(FavoriteButtonSize);
-    FavoriteSizeBox->SetHeightOverride(FavoriteButtonSize);
+    FavoriteSizeBox->SetWidthOverride(RI_RowFavoriteButtonSize);
+    FavoriteSizeBox->SetHeightOverride(RI_RowFavoriteButtonSize);
     FavoriteIcon = RICompactUI::MakeFavoriteIcon(
         WidgetTree,
         TEXT("RI_PropertyRowFavoriteIcon"),
-        FavoriteIconSize,
+        RI_RowFavoriteIconSize,
         false,
         RI_PropertyFavoriteActiveColor(),
         RI_PropertyMutedColor());
     FavoriteSizeBox->SetContent(FavoriteIcon);
+    RICompactUI::CenterSizeBoxContent(FavoriteSizeBox);
     FavoriteButton->AddChild(FavoriteSizeBox);
+    RICompactUI::ConfigureGhostIconButton(FavoriteButton);
     if (UButtonSlot* FavoriteButtonSlot = Cast<UButtonSlot>(FavoriteButton->GetContentSlot()))
     {
         FavoriteButtonSlot->SetHorizontalAlignment(HAlign_Center);
@@ -427,7 +430,7 @@ void UInspectorPropertyRowWidget::BuildWidgetTree()
     if (UHorizontalBoxSlot* FavoriteSlot = RootBox->AddChildToHorizontalBox(FavoriteButton))
     {
         FavoriteSlot->SetVerticalAlignment(VAlign_Top);
-        FavoriteSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
+        FavoriteSlot->SetPadding(FMargin(0.f, 0.f, 5.f, 0.f));
     }
 
     ContentBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_PropertyRowContentBox"));
@@ -467,7 +470,7 @@ void UInspectorPropertyRowWidget::BuildWidgetTree()
     ReadOnlyValueText = RICompactUI::MakeText(WidgetTree, TEXT(""), RICompactUI::GetValueFontSize(), false, RI_PropertyMutedColor(), true);
     ReadOnlyValueText->SetJustification(ETextJustify::Right);
     ReadOnlyValueText->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
-    ReadOnlyValueSizeBox = RICompactUI::WrapValueControl(WidgetTree, ReadOnlyValueText, 132.f);
+    ReadOnlyValueSizeBox = RICompactUI::WrapValueControl(WidgetTree, ReadOnlyValueText, RI_RowValueWidth);
     if (UHorizontalBoxSlot* ValueSlot = SummaryRowBox->AddChildToHorizontalBox(ReadOnlyValueSizeBox))
     {
         ValueSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
@@ -479,7 +482,7 @@ void UInspectorPropertyRowWidget::BuildWidgetTree()
     RICompactUI::ConfigureEditableTextBox(ValueTextBox, RI_PropertyTextColor());
     ValueTextBox->SetJustification(ETextJustify::Right);
     ValueTextBox->OnTextCommitted.AddDynamic(this, &UInspectorPropertyRowWidget::HandleValueCommitted);
-    ValueTextBoxSizeBox = RICompactUI::WrapValueControl(WidgetTree, ValueTextBox, 132.f);
+    ValueTextBoxSizeBox = RICompactUI::WrapValueControl(WidgetTree, ValueTextBox, RI_RowValueWidth);
     if (UHorizontalBoxSlot* TextBoxSlot = SummaryRowBox->AddChildToHorizontalBox(ValueTextBoxSizeBox))
     {
         TextBoxSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
@@ -488,8 +491,10 @@ void UInspectorPropertyRowWidget::BuildWidgetTree()
     }
 
     BoolCheckBox = WidgetTree->ConstructWidget<UCheckBox>(UCheckBox::StaticClass(), TEXT("RI_PropertyRowBool"));
+    RICompactUI::ConfigureCheckBox(BoolCheckBox);
     BoolCheckBox->OnCheckStateChanged.AddDynamic(this, &UInspectorPropertyRowWidget::HandleBoolChanged);
-    BoolCheckBoxSizeBox = RICompactUI::WrapValueControl(WidgetTree, BoolCheckBox, 0.f, RICompactUI::GetInputHeight(), RICompactUI::GetInputHeight());
+    BoolCheckBoxSizeBox = RICompactUI::WrapValueControl(WidgetTree, BoolCheckBox, 0.f, RI_RowCheckBoxSize, RI_RowCheckBoxSize);
+    RICompactUI::CenterSizeBoxContent(BoolCheckBoxSizeBox);
     if (UHorizontalBoxSlot* BoolSlot = SummaryRowBox->AddChildToHorizontalBox(BoolCheckBoxSizeBox))
     {
         BoolSlot->SetVerticalAlignment(VAlign_Center);
@@ -499,7 +504,7 @@ void UInspectorPropertyRowWidget::BuildWidgetTree()
     RICompactUI::ConfigureComboBoxString(EnumComboBox, RI_PropertyTextColor());
     EnumComboBox->OnGenerateWidgetEvent.BindDynamic(this, &UInspectorPropertyRowWidget::HandleGenerateEnumOptionWidget);
     EnumComboBox->OnSelectionChanged.AddDynamic(this, &UInspectorPropertyRowWidget::HandleEnumChanged);
-    EnumComboBoxSizeBox = RICompactUI::WrapValueControl(WidgetTree, EnumComboBox, 132.f);
+    EnumComboBoxSizeBox = RICompactUI::WrapValueControl(WidgetTree, EnumComboBox, RI_RowValueWidth);
     if (UHorizontalBoxSlot* EnumSlot = SummaryRowBox->AddChildToHorizontalBox(EnumComboBoxSizeBox))
     {
         EnumSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
@@ -750,7 +755,7 @@ void UInspectorPropertyRowWidget::RefreshRow()
         RICompactUI::SetFavoriteIconState(
             FavoriteIcon,
             bFavorited,
-            FavoriteSizeBox ? FavoriteSizeBox->GetWidthOverride() * 0.58f : 0.f,
+            RI_RowFavoriteIconSize,
             RI_PropertyFavoriteActiveColor(),
             RI_PropertyMutedColor());
     }

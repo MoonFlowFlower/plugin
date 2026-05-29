@@ -13519,6 +13519,7 @@ bool UInspectorWorldSubsystem::ExecuteLegacyToolNativeBridgeAction(FName BridgeI
             && Summary.Contains(TEXT("RightPanel=1"))
             && Summary.Contains(TEXT("SideWidth=256"))
             && Summary.Contains(TEXT("CenterPassThrough=1"))
+            && Summary.Contains(TEXT("CenterSelectionPill=0"))
             && Summary.Contains(TEXT("FavoritesFrame=1"))
             && Summary.Contains(TEXT("FavoritesScroll=1"))
             && Summary.Contains(TEXT("FunctionsFrame=1"))

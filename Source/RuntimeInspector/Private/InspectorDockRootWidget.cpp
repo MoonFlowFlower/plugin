@@ -180,6 +180,7 @@ namespace
         IconBox->SetWidthOverride(IconSize);
         IconBox->SetHeightOverride(IconSize);
         IconBox->SetContent(Icon);
+        RICompactUI::CenterSizeBoxContent(IconBox);
         return IconBox;
     }
 
@@ -383,23 +384,6 @@ void UInspectorDockRootWidget::BuildCenterOverlay(UOverlay* OutOverlay)
     {
         return;
     }
-
-    SelectionPillBorder = RI_MakeSectionCard(WidgetTree, TEXT("RI_SelectionPill"));
-    SelectionPillBorder->SetVisibility(ESlateVisibility::HitTestInvisible);
-    UHorizontalBox* PillRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_SelectionPillRow"));
-    if (USizeBox* PillIcon = RI_MakeIconBox(WidgetTree, TEXT("RI_SelectionPillIcon"), TEXT("Circle"), 10.0f, RICompactUI::GetSuccessTextColor()))
-    {
-        RI_AddHorizontal(PillRow, PillIcon, FMargin(0.f, 1.f, RICompactUI::GetInlineGap() + 2.f, 0.f));
-    }
-    SelectionPillText = MakeBoundText(TEXT("RI_SelectionPillText"));
-    RI_AddHorizontal(PillRow, SelectionPillText, FMargin(0.f), ESlateSizeRule::Fill);
-    SelectionPillBorder->SetContent(PillRow);
-    if (UOverlaySlot* PillSlot = OutOverlay->AddChildToOverlay(SelectionPillBorder))
-    {
-        PillSlot->SetHorizontalAlignment(HAlign_Center);
-        PillSlot->SetVerticalAlignment(VAlign_Top);
-        PillSlot->SetPadding(FMargin(0.f, 8.f, 0.f, 0.f));
-    }
 }
 
 void UInspectorDockRootWidget::BuildRightInspector(UVerticalBox* OutPanel)
@@ -423,10 +407,10 @@ void UInspectorDockRootWidget::BuildRightInspector(UVerticalBox* OutPanel)
     RI_AddVertical(OutPanel, HeaderSurface, FMargin(0.f, 0.f, 0.f, RICompactUI::GetSectionGap()));
 
     TabButtonBox = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_TabBar"));
-    ActorTabButton = MakeDockButton(TEXT("RI_TabActor"), TEXT("Actor"));
-    ChangesTabButton = MakeDockButton(TEXT("RI_TabChanges"), TEXT("Changes"));
-    SettingsTabButton = MakeDockButton(TEXT("RI_TabSettings"), TEXT("Settings"));
-    ToolsTabButton = MakeDockButton(TEXT("RI_TabTools"), TEXT("Tools"));
+    ActorTabButton = MakeDockButton(TEXT("RI_TabActor"), TEXT("Actor"), false, 0.0f, RICompactUI::GetMutedFontSize() + 1);
+    ChangesTabButton = MakeDockButton(TEXT("RI_TabChanges"), TEXT("Changes"), false, 0.0f, RICompactUI::GetMutedFontSize() + 1);
+    SettingsTabButton = MakeDockButton(TEXT("RI_TabSettings"), TEXT("Settings"), false, 0.0f, RICompactUI::GetMutedFontSize() + 1);
+    ToolsTabButton = MakeDockButton(TEXT("RI_TabTools"), TEXT("Tools"), false, 0.0f, RICompactUI::GetMutedFontSize() + 1);
     ActorTabButton->OnClicked.AddDynamic(this, &UInspectorDockRootWidget::HandleActorTabClicked);
     ChangesTabButton->OnClicked.AddDynamic(this, &UInspectorDockRootWidget::HandleChangesTabClicked);
     SettingsTabButton->OnClicked.AddDynamic(this, &UInspectorDockRootWidget::HandleSettingsTabClicked);
@@ -450,18 +434,24 @@ void UInspectorDockRootWidget::BuildRightInspector(UVerticalBox* OutPanel)
     UHorizontalBox* ActionTopRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_ActionBarTopRow"));
     UHorizontalBox* ActionBottomRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_ActionBarBottomRow"));
     OnlyModifyCheckBox = WidgetTree->ConstructWidget<UCheckBox>(UCheckBox::StaticClass(), TEXT("RI_OnlyModify"));
+    RICompactUI::ConfigureCheckBox(OnlyModifyCheckBox);
     OnlyModifyCheckBox->OnCheckStateChanged.AddDynamic(this, &UInspectorDockRootWidget::HandleOnlyModifyChanged);
     UHorizontalBox* OnlyModifyBox = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
-    RI_AddHorizontal(OnlyModifyBox, OnlyModifyCheckBox);
+    USizeBox* OnlyModifyCheckSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_OnlyModifyCheckSize"));
+    OnlyModifyCheckSize->SetWidthOverride(16.0f);
+    OnlyModifyCheckSize->SetHeightOverride(16.0f);
+    OnlyModifyCheckSize->SetContent(OnlyModifyCheckBox);
+    RICompactUI::CenterSizeBoxContent(OnlyModifyCheckSize);
+    RI_AddHorizontal(OnlyModifyBox, OnlyModifyCheckSize);
     RI_AddHorizontal(OnlyModifyBox, RICompactUI::MakeText(WidgetTree, TEXT("Only Modify"), RICompactUI::GetLabelFontSize(), true, RICompactUI::GetSecondaryTextColor()), FMargin(4.f, 0.f, 0.f, 0.f));
     RI_AddHorizontal(ActionTopRow, OnlyModifyBox, FMargin(0.f, 0.f, RICompactUI::GetInlineGap(), 0.f), ESlateSizeRule::Fill);
 
     const int32 ActionFontSize = RICompactUI::GetMutedFontSize();
-    UButton* RefreshButton = MakeDockIconButton(TEXT("RI_ActionRefresh"), TEXT("Refresh"), TEXT("grid_white_tiling_256"), false, 54.0f, ActionFontSize, 9.0f);
-    ResetButton = MakeDockIconButton(TEXT("RI_ActionReset"), TEXT("Reset"), TEXT("delete_tag_white_64"), false, 48.0f, ActionFontSize, 9.0f);
-    UndoButton = MakeDockButton(TEXT("RI_ActionUndo"), TEXT("Undo"), false, 44.0f, ActionFontSize);
-    RedoButton = MakeDockButton(TEXT("RI_ActionRedo"), TEXT("Redo"), false, 44.0f, ActionFontSize);
-    ApplyButton = MakeDockIconButton(TEXT("RI_ActionApply"), TEXT("Apply"), TEXT("play_triangle_white_64"), true, 48.0f, ActionFontSize, 9.0f);
+    UButton* RefreshButton = MakeDockIconButton(TEXT("RI_ActionRefresh"), TEXT("Refresh"), TEXT("grid_white_tiling_256"), false, 52.0f, ActionFontSize, 8.0f);
+    ResetButton = MakeDockIconButton(TEXT("RI_ActionReset"), TEXT("Reset"), TEXT("delete_tag_white_64"), false, 44.0f, ActionFontSize, 8.0f);
+    UndoButton = MakeDockButton(TEXT("RI_ActionUndo"), TEXT("Undo"), false, 42.0f, ActionFontSize);
+    RedoButton = MakeDockButton(TEXT("RI_ActionRedo"), TEXT("Redo"), false, 42.0f, ActionFontSize);
+    ApplyButton = MakeDockIconButton(TEXT("RI_ActionApply"), TEXT("Apply"), TEXT("play_triangle_white_64"), true, 44.0f, ActionFontSize, 8.0f);
     RefreshButton->OnClicked.AddDynamic(this, &UInspectorDockRootWidget::HandleRefreshClicked);
     ResetButton->OnClicked.AddDynamic(this, &UInspectorDockRootWidget::HandleResetClicked);
     UndoButton->OnClicked.AddDynamic(this, &UInspectorDockRootWidget::HandleUndoClicked);
@@ -861,26 +851,8 @@ void UInspectorDockRootWidget::RefreshActorContext(const FRIInspectorViewModel& 
     }
 }
 
-void UInspectorDockRootWidget::RefreshViewportOverlay(const FRIInspectorViewModel& ViewModel)
+void UInspectorDockRootWidget::RefreshViewportOverlay(const FRIInspectorViewModel&)
 {
-    if (SelectionPillBorder)
-    {
-        const FVector2D ViewportSize = RI_GetDockLogicalViewportSize(this);
-        const float CenterWidth = RI_GetDockCenterWidth(ViewportSize.X, bLeftPanelCompact);
-        const bool bCanShowPill = CenterWidth >= 360.0f
-            && ViewModel.SelectedActor.SelectionState == ERISelectionState::Selected;
-        SelectionPillBorder->SetVisibility(bCanShowPill ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
-    }
-    if (SelectionPillText)
-    {
-        const FString DirtyMarker = ViewModel.StagedPatches.Num() > 0 ? TEXT(" | staged") : TEXT("");
-        SelectionPillText->SetText(FText::FromString(FString::Printf(
-            TEXT("%s | %s%s"),
-            *ViewModel.SelectedActor.ActorDisplayName.ToString(),
-            *ViewModel.SelectedActor.ActorClassName.ToString(),
-            *DirtyMarker)));
-        RICompactUI::ApplyTextStyle(SelectionPillText, RICompactUI::GetLabelFontSize(), true, RICompactUI::GetSecondaryTextColor());
-    }
 }
 
 void UInspectorDockRootWidget::RefreshHostedActorSections(const FRIInspectorViewModel& ViewModel)
@@ -1158,7 +1130,7 @@ FString UInspectorDockRootWidget::GetDockLayoutDebugSummary() const
     const int32 AttributeRows = ActorAttributesWidget ? ActorAttributesWidget->GetEntryWidgetCountForAutomation() : INDEX_NONE;
     const int32 HostedFunctionRows = ActorFunctionsWidget ? ActorFunctionsWidget->GetEntryWidgetCountForAutomation() : INDEX_NONE;
     return FString::Printf(
-        TEXT("DockRoot=1 LeftPanel=%s RightPanel=1 SideWidth=%.0f CenterWidth=%.0f CenterPassThrough=1 FavoritesFrame=%d FavoritesScroll=%d FunctionsFrame=%d ActionBar=%d PatchRows=%d FunctionRows=%d AttributeRows=%d AttributesTransform=%d ActiveTab=%d"),
+        TEXT("DockRoot=1 LeftPanel=%s RightPanel=1 SideWidth=%.0f CenterWidth=%.0f CenterPassThrough=1 CenterSelectionPill=0 FavoritesFrame=%d FavoritesScroll=%d FunctionsFrame=%d ActionBar=%d PatchRows=%d FunctionRows=%d AttributeRows=%d AttributesTransform=%d ActiveTab=%d"),
         bLeftPanelCompact ? TEXT("Compact") : TEXT("Expanded"),
         RI_DockSidePanelWidth,
         CenterWidth,

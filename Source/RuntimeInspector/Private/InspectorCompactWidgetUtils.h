@@ -8,6 +8,7 @@
 #include "Components/ButtonSlot.h"
 #include "Components/Border.h"
 #include "Components/BorderSlot.h"
+#include "Components/CheckBox.h"
 #include "Components/ComboBoxString.h"
 #include "Components/ContentWidget.h"
 #include "Components/EditableTextBox.h"
@@ -183,7 +184,7 @@ namespace RICompactUI
                 8, 7, 6, 5,
                 20.0f, 20.0f, 96.0f, 122.0f,
                 5.0f, 1.0f,
-                FMargin(6.f, 4.f),
+                FMargin(5.f, 3.f),
                 FMargin(0.f),
                 FMargin(6.f, 2.f)
             };
@@ -239,25 +240,25 @@ namespace RICompactUI
                 MakeTokenColor(TEXT("EDF2F7"))
             };
             Tokens.TabActiveButton = {
-                MakeTokenColor(TEXT("153E66")),
-                MakeTokenColor(TEXT("215E91")),
-                MakeTokenColor(TEXT("0E2C49")),
+                MakeTokenColor(TEXT("173858"), 0.94f),
+                MakeTokenColor(TEXT("214D73"), 0.96f),
+                MakeTokenColor(TEXT("102B45"), 0.96f),
                 MakeTokenColor(TEXT("0D1420"), 0.75f),
                 MakeTokenColor(TEXT("F2F6FA"))
             };
             Tokens.TabInactiveButton = {
-                MakeTokenColor(TEXT("0D1624")),
-                MakeTokenColor(TEXT("172638")),
-                MakeTokenColor(TEXT("09111C")),
+                MakeTokenColor(TEXT("090F18"), 0.76f),
+                MakeTokenColor(TEXT("121F30"), 0.88f),
+                MakeTokenColor(TEXT("080D15"), 0.90f),
                 MakeTokenColor(TEXT("09101A"), 0.75f),
                 MakeTokenColor(TEXT("AEBBCC"))
             };
             Tokens.StandardSection = {
-                MakeTokenColor(TEXT("1C3148")),
+                MakeTokenColor(TEXT("17283C"), 0.90f),
                 MakeTokenColor(TEXT("EDF2F7"))
             };
             Tokens.EmphasisSection = {
-                MakeTokenColor(TEXT("20405D")),
+                MakeTokenColor(TEXT("1C3854"), 0.92f),
                 MakeTokenColor(TEXT("F5F9FC"))
             };
             Tokens.StandardInput = {
@@ -316,7 +317,7 @@ namespace RICompactUI
             Tokens.Metrics.InputHeight = 22.0f;
             Tokens.Metrics.CompactListHeight = 94.0f;
             Tokens.Metrics.StandardListHeight = 120.0f;
-            Tokens.Metrics.SectionPadding = FMargin(6.f, 4.f);
+            Tokens.Metrics.SectionPadding = FMargin(5.f, 3.f);
             Tokens.Metrics.InputPadding = FMargin(7.f, 4.f);
             Tokens.PrimaryButton.Normal = MakeTokenColor(TEXT("2F8CFF"));
             Tokens.PrimaryButton.Hovered = MakeTokenColor(TEXT("46C8FF"));
@@ -329,14 +330,14 @@ namespace RICompactUI
             Tokens.HeaderButton.Normal = MakeTokenColor(TEXT("101927"));
             Tokens.HeaderButton.Hovered = MakeTokenColor(TEXT("17283D"));
             Tokens.HeaderButton.Pressed = MakeTokenColor(TEXT("0B121E"));
-            Tokens.TabActiveButton.Normal = MakeTokenColor(TEXT("1E4E7D"));
-            Tokens.TabActiveButton.Hovered = MakeTokenColor(TEXT("2A679C"));
-            Tokens.TabActiveButton.Pressed = MakeTokenColor(TEXT("173B63"));
-            Tokens.TabInactiveButton.Normal = MakeTokenColor(TEXT("111B2B"));
-            Tokens.TabInactiveButton.Hovered = MakeTokenColor(TEXT("182638"));
-            Tokens.TabInactiveButton.Pressed = MakeTokenColor(TEXT("0D1521"));
-            Tokens.StandardSection.Background = MakeTokenColor(TEXT("20344C"));
-            Tokens.EmphasisSection.Background = MakeTokenColor(TEXT("26496A"));
+            Tokens.TabActiveButton.Normal = MakeTokenColor(TEXT("1A456B"), 0.94f);
+            Tokens.TabActiveButton.Hovered = MakeTokenColor(TEXT("265A86"), 0.96f);
+            Tokens.TabActiveButton.Pressed = MakeTokenColor(TEXT("173858"), 0.96f);
+            Tokens.TabInactiveButton.Normal = MakeTokenColor(TEXT("0D1623"), 0.78f);
+            Tokens.TabInactiveButton.Hovered = MakeTokenColor(TEXT("172638"), 0.90f);
+            Tokens.TabInactiveButton.Pressed = MakeTokenColor(TEXT("0A111C"), 0.92f);
+            Tokens.StandardSection.Background = MakeTokenColor(TEXT("1A2D42"), 0.91f);
+            Tokens.EmphasisSection.Background = MakeTokenColor(TEXT("213F5B"), 0.93f);
             Tokens.StandardInput.Background = MakeTokenColor(TEXT("17283D"), 0.97f);
             Tokens.StandardInput.Hovered = MakeTokenColor(TEXT("1C2F46"));
             Tokens.StandardInput.Focused = FLinearColor(0.25f, 0.39f, 0.72f, 1.0f);
@@ -680,14 +681,32 @@ namespace RICompactUI
         UImage* Image = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), Name);
         if (UTexture2D* Texture = LoadIconTexture(AssetName))
         {
-            Image->SetBrushFromTexture(Texture, true);
+            Image->SetBrushFromTexture(Texture, false);
         }
         if (DesiredSize > 0.f)
         {
+            FSlateBrush Brush = Image->GetBrush();
+            Brush.ImageSize = FVector2D(DesiredSize, DesiredSize);
+            Image->SetBrush(Brush);
             Image->SetDesiredSizeOverride(FVector2D(DesiredSize, DesiredSize));
         }
         Image->SetColorAndOpacity(Tint);
         return Image;
+    }
+
+    inline void CenterSizeBoxContent(USizeBox* SizeBox)
+    {
+        if (!SizeBox)
+        {
+            return;
+        }
+
+        if (USizeBoxSlot* SizeBoxSlot = Cast<USizeBoxSlot>(SizeBox->GetContentSlot()))
+        {
+            SizeBoxSlot->SetHorizontalAlignment(HAlign_Center);
+            SizeBoxSlot->SetVerticalAlignment(VAlign_Center);
+            SizeBoxSlot->SetPadding(FMargin(0.f));
+        }
     }
 
     inline void SetFavoriteIconState(
@@ -704,11 +723,14 @@ namespace RICompactUI
 
         if (UTexture2D* Texture = GetFavoriteIconTexture(bFavorited))
         {
-            Image->SetBrushFromTexture(Texture, true);
+            Image->SetBrushFromTexture(Texture, false);
         }
 
         if (DesiredSize > 0.f)
         {
+            FSlateBrush Brush = Image->GetBrush();
+            Brush.ImageSize = FVector2D(DesiredSize, DesiredSize);
+            Image->SetBrush(Brush);
             Image->SetDesiredSizeOverride(FVector2D(DesiredSize, DesiredSize));
         }
 
@@ -877,17 +899,18 @@ namespace RICompactUI
         ButtonStyle.Hovered.DrawAs = ESlateBrushDrawType::RoundedBox;
         ButtonStyle.Pressed.DrawAs = ESlateBrushDrawType::RoundedBox;
         ButtonStyle.Disabled.DrawAs = ESlateBrushDrawType::RoundedBox;
-        const float ButtonCornerRadius = (Style == ERIButtonVisualStyle::TabActive || Style == ERIButtonVisualStyle::TabInactive)
-            ? 0.0f
-            : Metrics.CornerRadius;
+        const bool bTabButton = Style == ERIButtonVisualStyle::TabActive || Style == ERIButtonVisualStyle::TabInactive;
+        const bool bHeaderButton = Style == ERIButtonVisualStyle::Header;
+        const float ButtonCornerRadius = bTabButton ? FMath::Max(2.0f, Metrics.CornerRadius - 2.0f) : Metrics.CornerRadius;
         ButtonStyle.Normal.OutlineSettings.CornerRadii = FVector4(ButtonCornerRadius, ButtonCornerRadius, ButtonCornerRadius, ButtonCornerRadius);
         ButtonStyle.Hovered.OutlineSettings.CornerRadii = FVector4(ButtonCornerRadius, ButtonCornerRadius, ButtonCornerRadius, ButtonCornerRadius);
         ButtonStyle.Pressed.OutlineSettings.CornerRadii = FVector4(ButtonCornerRadius, ButtonCornerRadius, ButtonCornerRadius, ButtonCornerRadius);
         ButtonStyle.Disabled.OutlineSettings.CornerRadii = FVector4(ButtonCornerRadius, ButtonCornerRadius, ButtonCornerRadius, ButtonCornerRadius);
-        ButtonStyle.Normal.OutlineSettings.Width = Metrics.BorderWidth;
-        ButtonStyle.Hovered.OutlineSettings.Width = Metrics.BorderWidth;
-        ButtonStyle.Pressed.OutlineSettings.Width = Metrics.BorderWidth;
-        ButtonStyle.Disabled.OutlineSettings.Width = Metrics.BorderWidth;
+        const float OutlineWidth = (bTabButton || bHeaderButton) ? 0.0f : Metrics.BorderWidth;
+        ButtonStyle.Normal.OutlineSettings.Width = OutlineWidth;
+        ButtonStyle.Hovered.OutlineSettings.Width = OutlineWidth;
+        ButtonStyle.Pressed.OutlineSettings.Width = OutlineWidth;
+        ButtonStyle.Disabled.OutlineSettings.Width = OutlineWidth;
         Button->WidgetStyle = ButtonStyle;
         PRAGMA_ENABLE_DEPRECATION_WARNINGS
 
@@ -946,6 +969,76 @@ namespace RICompactUI
             ButtonSlot->SetVerticalAlignment(VAlign_Fill);
             ButtonSlot->SetPadding(FMargin(0.f));
         }
+    }
+
+    inline void ConfigureGhostIconButton(UButton* Button)
+    {
+        if (!Button)
+        {
+            return;
+        }
+
+        const FRIButtonPalette Palette = GetButtonPalette(ERIButtonVisualStyle::Subtle);
+        FLinearColor Hovered = Palette.Hovered;
+        Hovered.A *= 0.55f;
+        FLinearColor Pressed = Palette.Pressed;
+        Pressed.A *= 0.70f;
+
+        PRAGMA_DISABLE_DEPRECATION_WARNINGS
+        FButtonStyle ButtonStyle = Button->WidgetStyle;
+        const FSlateColor TransparentTint(FLinearColor::Transparent);
+        ButtonStyle.Normal.TintColor = TransparentTint;
+        ButtonStyle.Hovered.TintColor = FSlateColor(Hovered);
+        ButtonStyle.Pressed.TintColor = FSlateColor(Pressed);
+        ButtonStyle.Disabled.TintColor = TransparentTint;
+        ButtonStyle.Normal.DrawAs = ESlateBrushDrawType::RoundedBox;
+        ButtonStyle.Hovered.DrawAs = ESlateBrushDrawType::RoundedBox;
+        ButtonStyle.Pressed.DrawAs = ESlateBrushDrawType::RoundedBox;
+        ButtonStyle.Disabled.DrawAs = ESlateBrushDrawType::RoundedBox;
+        const float Radius = FMath::Max(2.0f, GetThemeMetrics().CornerRadius - 2.0f);
+        ButtonStyle.Normal.OutlineSettings.CornerRadii = FVector4(Radius, Radius, Radius, Radius);
+        ButtonStyle.Hovered.OutlineSettings.CornerRadii = FVector4(Radius, Radius, Radius, Radius);
+        ButtonStyle.Pressed.OutlineSettings.CornerRadii = FVector4(Radius, Radius, Radius, Radius);
+        ButtonStyle.Disabled.OutlineSettings.CornerRadii = FVector4(Radius, Radius, Radius, Radius);
+        ButtonStyle.Normal.OutlineSettings.Width = 0.0f;
+        ButtonStyle.Hovered.OutlineSettings.Width = 0.0f;
+        ButtonStyle.Pressed.OutlineSettings.Width = 0.0f;
+        ButtonStyle.Disabled.OutlineSettings.Width = 0.0f;
+        ButtonStyle.NormalPadding = FMargin(0.f);
+        ButtonStyle.PressedPadding = FMargin(0.f);
+        Button->WidgetStyle = ButtonStyle;
+        PRAGMA_ENABLE_DEPRECATION_WARNINGS
+
+        Button->SetBackgroundColor(FLinearColor::Transparent);
+        Button->SetColorAndOpacity(FLinearColor::White);
+        if (UButtonSlot* ButtonSlot = Cast<UButtonSlot>(Button->GetContentSlot()))
+        {
+            ButtonSlot->SetHorizontalAlignment(HAlign_Center);
+            ButtonSlot->SetVerticalAlignment(VAlign_Center);
+            ButtonSlot->SetPadding(FMargin(0.f));
+        }
+    }
+
+    inline void ConfigureCheckBox(UCheckBox* CheckBox)
+    {
+        if (!CheckBox)
+        {
+            return;
+        }
+
+        const FRIInputPalette Palette = GetInputPalette(ERIInputVisualStyle::Muted);
+
+        PRAGMA_DISABLE_DEPRECATION_WARNINGS
+        FCheckBoxStyle CheckBoxStyle = CheckBox->WidgetStyle;
+        CheckBoxStyle.UncheckedImage.TintColor = FSlateColor(Palette.Background);
+        CheckBoxStyle.UncheckedHoveredImage.TintColor = FSlateColor(Palette.Hovered);
+        CheckBoxStyle.UncheckedPressedImage.TintColor = FSlateColor(Palette.Focused);
+        CheckBoxStyle.CheckedImage.TintColor = FSlateColor(GetSuccessTextColor());
+        CheckBoxStyle.CheckedHoveredImage.TintColor = FSlateColor(GetSuccessTextColor());
+        CheckBoxStyle.CheckedPressedImage.TintColor = FSlateColor(GetSecondaryTextColor());
+        CheckBoxStyle.UndeterminedImage.TintColor = FSlateColor(GetWarningTextColor());
+        CheckBox->WidgetStyle = CheckBoxStyle;
+        PRAGMA_ENABLE_DEPRECATION_WARNINGS
     }
 
     inline UButton* MakeLabeledButton(

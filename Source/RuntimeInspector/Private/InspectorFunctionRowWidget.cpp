@@ -40,6 +40,13 @@ namespace
     {
         return RICompactUI::GetWarningTextColor();
     }
+
+    static constexpr float RI_FunctionFavoriteButtonSize = 16.0f;
+    static constexpr float RI_FunctionFavoriteIconSize = 10.5f;
+    static constexpr float RI_FunctionRunButtonWidth = 42.0f;
+    static constexpr float RI_FunctionRunButtonHeight = 18.0f;
+    static constexpr float RI_FunctionParameterWidth = 88.0f;
+    static constexpr float RI_FunctionParameterCheckSize = 16.0f;
 }
 
 UInspectorFunctionRowWidget::UInspectorFunctionRowWidget(const FObjectInitializer& ObjectInitializer)
@@ -170,22 +177,21 @@ void UInspectorFunctionRowWidget::BuildWidgetTree()
     }
 
     FavoriteButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("RI_FunctionRowFavoriteButton"));
-    RICompactUI::ConfigureButton(FavoriteButton, RICompactUI::ERIButtonVisualStyle::Secondary, false);
     FavoriteButton->OnClicked.AddDynamic(this, &UInspectorFunctionRowWidget::HandleFavoriteClicked);
     FavoriteSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_FunctionRowFavoriteSize"));
-    const float FavoriteButtonSize = FMath::Max(18.f, RICompactUI::GetInputHeight() - 4.f);
-    const float FavoriteIconSize = FavoriteButtonSize * 0.58f;
-    FavoriteSizeBox->SetWidthOverride(FavoriteButtonSize);
-    FavoriteSizeBox->SetHeightOverride(FavoriteButtonSize);
+    FavoriteSizeBox->SetWidthOverride(RI_FunctionFavoriteButtonSize);
+    FavoriteSizeBox->SetHeightOverride(RI_FunctionFavoriteButtonSize);
     FavoriteIcon = RICompactUI::MakeFavoriteIcon(
         WidgetTree,
         TEXT("RI_FunctionRowFavoriteIcon"),
-        FavoriteIconSize,
+        RI_FunctionFavoriteIconSize,
         false,
         RI_FunctionFavoriteActiveColor(),
         RI_FunctionRowMutedColor());
     FavoriteSizeBox->SetContent(FavoriteIcon);
+    RICompactUI::CenterSizeBoxContent(FavoriteSizeBox);
     FavoriteButton->AddChild(FavoriteSizeBox);
+    RICompactUI::ConfigureGhostIconButton(FavoriteButton);
     if (UButtonSlot* FavoriteButtonSlot = Cast<UButtonSlot>(FavoriteButton->GetContentSlot()))
     {
         FavoriteButtonSlot->SetHorizontalAlignment(HAlign_Center);
@@ -195,7 +201,7 @@ void UInspectorFunctionRowWidget::BuildWidgetTree()
     if (UHorizontalBoxSlot* FavoriteSlot = HeaderRow->AddChildToHorizontalBox(FavoriteButton))
     {
         FavoriteSlot->SetVerticalAlignment(VAlign_Center);
-        FavoriteSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
+        FavoriteSlot->SetPadding(FMargin(0.f, 0.f, 5.f, 0.f));
     }
 
     TitleButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("RI_FunctionRowTitleButton"));
@@ -246,8 +252,8 @@ void UInspectorFunctionRowWidget::BuildWidgetTree()
         TEXT("BTN_InvokeFunction"),
         TEXT("Run"),
         RICompactUI::ERIButtonVisualStyle::Primary,
-        48.f,
-        RICompactUI::GetInputHeight(),
+        RI_FunctionRunButtonWidth,
+        RI_FunctionRunButtonHeight,
         RICompactUI::GetValueFontSize());
     InvokeButton->OnClicked.AddDynamic(this, &UInspectorFunctionRowWidget::HandleInvokeClicked);
     if (UHorizontalBoxSlot* ButtonSlot = HeaderRow->AddChildToHorizontalBox(InvokeButton))
@@ -371,15 +377,17 @@ void UInspectorFunctionRowWidget::RefreshRow()
                 Combo->SetSelectedOption(Param.EnumOptions[0]);
             }
             Control = Combo;
-            WrappedControl = RICompactUI::WrapValueControl(WidgetTree, Combo, 96.f);
+            WrappedControl = RICompactUI::WrapValueControl(WidgetTree, Combo, RI_FunctionParameterWidth);
         }
         else if (Param.TypeLabel.Equals(TEXT("bool"), ESearchCase::IgnoreCase))
         {
             UCheckBox* CheckBox = WidgetTree->ConstructWidget<UCheckBox>(UCheckBox::StaticClass());
+            RICompactUI::ConfigureCheckBox(CheckBox);
             const bool bChecked = Param.DefaultText.Equals(TEXT("True"), ESearchCase::IgnoreCase) || Param.DefaultText == TEXT("1");
             CheckBox->SetIsChecked(bChecked);
             Control = CheckBox;
-            WrappedControl = RICompactUI::WrapValueControl(WidgetTree, CheckBox, 0.f, RICompactUI::GetInputHeight(), RICompactUI::GetInputHeight());
+            WrappedControl = RICompactUI::WrapValueControl(WidgetTree, CheckBox, 0.f, RI_FunctionParameterCheckSize, RI_FunctionParameterCheckSize);
+            RICompactUI::CenterSizeBoxContent(Cast<USizeBox>(WrappedControl));
         }
         else
         {
@@ -387,7 +395,7 @@ void UInspectorFunctionRowWidget::RefreshRow()
             RICompactUI::ConfigureEditableTextBox(TextBox, RI_FunctionRowTextColor(), RICompactUI::GetValueFontSize(), RICompactUI::ERIInputVisualStyle::Strong);
             TextBox->SetText(FText::FromString(Param.DefaultText));
             Control = TextBox;
-            WrappedControl = RICompactUI::WrapValueControl(WidgetTree, TextBox, 96.f);
+            WrappedControl = RICompactUI::WrapValueControl(WidgetTree, TextBox, RI_FunctionParameterWidth);
         }
 
         if (Control)
@@ -399,9 +407,9 @@ void UInspectorFunctionRowWidget::RefreshRow()
 
             if (UHorizontalBoxSlot* ControlSlot = ParamRow->AddChildToHorizontalBox(WrappedControl ? WrappedControl : Control))
             {
-                ControlSlot->SetPadding(FMargin(8.f, 0.f, 0.f, 0.f));
-                ControlSlot->SetHorizontalAlignment(HAlign_Fill);
-                ControlSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+                ControlSlot->SetPadding(FMargin(6.f, 0.f, 0.f, 0.f));
+                ControlSlot->SetHorizontalAlignment(HAlign_Right);
+                ControlSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
                 ControlSlot->SetVerticalAlignment(VAlign_Center);
             }
             ParameterWidgets.Add(Control);
@@ -520,7 +528,7 @@ void UInspectorFunctionRowWidget::UpdateCachedDisplayState(bool bFavorited)
         RICompactUI::SetFavoriteIconState(
             FavoriteIcon,
             bFavorited,
-            FavoriteSizeBox ? FavoriteSizeBox->GetWidthOverride() * 0.58f : 0.f,
+            RI_FunctionFavoriteIconSize,
             RI_FunctionFavoriteActiveColor(),
             RI_FunctionRowMutedColor());
     }

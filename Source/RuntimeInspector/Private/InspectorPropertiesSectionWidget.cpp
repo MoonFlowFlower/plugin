@@ -498,12 +498,19 @@ UWidget* UInspectorPropertiesSectionWidget::CreatePropertyCategoryHeader(const F
     UButton* HeaderButton = WidgetTree->ConstructWidget<UButton>(
         UButton::StaticClass(),
         *FString::Printf(TEXT("RI_PropertyCategoryButton_%s"), *Token));
-    RICompactUI::ConfigureButton(HeaderButton, RICompactUI::ERIButtonVisualStyle::Header, false);
+
+    UBorder* HeaderSurface = RICompactUI::MakeSurfaceCard(
+        WidgetTree,
+        *FString::Printf(TEXT("RI_PropertyCategorySurface_%s"), *Token),
+        RICompactUI::GetContextSecondaryCellBackgroundColor(),
+        FMargin(5.f, 2.f));
 
     UHorizontalBox* RowBox = WidgetTree->ConstructWidget<UHorizontalBox>(
         UHorizontalBox::StaticClass(),
         *FString::Printf(TEXT("RI_PropertyCategoryRow_%s"), *Token));
-    HeaderButton->SetContent(RowBox);
+    HeaderSurface->SetContent(RowBox);
+    HeaderButton->SetContent(HeaderSurface);
+    RICompactUI::ConfigureSwatchButton(HeaderButton);
 
     UTextBlock* ToggleText = RICompactUI::MakeText(
         WidgetTree,

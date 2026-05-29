@@ -217,10 +217,6 @@ private:
     UPROPERTY(Transient)
     TObjectPtr<UTextBlock> StagedBannerText;
     UPROPERTY(Transient)
-    TObjectPtr<UBorder> SelectionPillBorder;
-    UPROPERTY(Transient)
-    TObjectPtr<UTextBlock> SelectionPillText;
-    UPROPERTY(Transient)
     TObjectPtr<UTextBlock> HeaderText;
     UPROPERTY(Transient)
     TObjectPtr<UTextBlock> ActionStatusText;
