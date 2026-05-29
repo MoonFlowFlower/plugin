@@ -7,6 +7,7 @@
 #include "InspectorFunctionsSectionWidget.h"
 #include "InspectorFunctionRowWidget.h"
 #include "InspectorGroupsSectionWidget.h"
+#include "InspectorColorPickerWidget.h"
 #include "InspectorMaterialParamRowWidget.h"
 #include "InspectorModalBlockerWidget.h"
 #include "InspectorPropertiesSectionWidget.h"
@@ -403,6 +404,7 @@ static constexpr float RI_DefaultPanelViewportInsetY = 8.0f;
 static constexpr float RI_DefaultPanelViewportSafetyMargin = 16.0f;
 static const TCHAR* RI_ConfirmDialogClassPath = TEXT("/RuntimeInspector/UI/WBP_ConfirmDialog.WBP_ConfirmDialog_C");
 static const FName RI_SelfTestId_ConfirmDialog(TEXT("confirm_dialog_color_input"));
+static const FName RI_SelfTestId_ColorPickerUIContract(TEXT("color_picker_ui_contract"));
 static const FName RI_SelfTestId_SettingsPreview(TEXT("settings_preview"));
 static const FName RI_SelfTestId_SettingsSavePersistence(TEXT("settings_save_persistence"));
 static const FName RI_SelfTestId_StarLiveEditAndRun(TEXT("star_live_edit_and_run"));
@@ -11639,6 +11641,13 @@ void UInspectorWorldSubsystem::ClearConfirmDialogBinding()
 #if RUNTIME_INSPECTOR_ENABLED
     DeactivateConfirmDialogModalState();
 
+    if (UInspectorColorPickerWidget* PickerWidget = Cast<UInspectorColorPickerWidget>(ActiveConfirmDialogWidget.Get()))
+    {
+        PickerWidget->OnPreviewColorChanged.RemoveAll(this);
+        PickerWidget->OnColorAccepted.RemoveAll(this);
+        PickerWidget->OnColorCanceled.RemoveAll(this);
+    }
+
     if (UButton* Button = ActiveConfirmDialogYesButton.Get())
     {
         Button->OnClicked.RemoveAll(this);
@@ -11706,6 +11715,11 @@ bool UInspectorWorldSubsystem::TryBindActiveConfirmDialog(UUserWidget* DialogWid
         return false;
     }
 
+    if (UInspectorColorPickerWidget* PickerWidget = Cast<UInspectorColorPickerWidget>(DialogWidget))
+    {
+        return TryBindActiveColorPicker(PickerWidget);
+    }
+
     UEditableTextBox* InputR = Cast<UEditableTextBox>(DialogWidget->GetWidgetFromName(TEXT("InputTXT_R")));
     UEditableTextBox* InputG = Cast<UEditableTextBox>(DialogWidget->GetWidgetFromName(TEXT("InputTXT_G")));
     UEditableTextBox* InputB = Cast<UEditableTextBox>(DialogWidget->GetWidgetFromName(TEXT("InputTXT_B")));
@@ -11759,6 +11773,39 @@ bool UInspectorWorldSubsystem::TryBindActiveConfirmDialog(UUserWidget* DialogWid
     TryActivateConfirmDialogColorPage(DialogWidget);
     ActivateConfirmDialogModalState(DialogWidget);
     return true;
+#else
+    return false;
+#endif
+}
+
+bool UInspectorWorldSubsystem::TryBindActiveColorPicker(UInspectorColorPickerWidget* PickerWidget)
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    if (!PickerWidget)
+    {
+        return false;
+    }
+
+    ClearConfirmDialogBinding();
+
+    ActiveConfirmDialogWidget = PickerWidget;
+    ActiveConfirmDialogYesButton = PickerWidget->GetApplyButton();
+    ActiveConfirmDialogNoButton = PickerWidget->GetCancelButton();
+    ActiveConfirmDialogInputR = PickerWidget->GetInputR();
+    ActiveConfirmDialogInputG = PickerWidget->GetInputG();
+    ActiveConfirmDialogInputB = PickerWidget->GetInputB();
+    ActiveConfirmDialogInputA = PickerWidget->GetInputA();
+    ActiveConfirmDialogInputHex = PickerWidget->GetInputHex();
+
+    PickerWidget->OnPreviewColorChanged.RemoveAll(this);
+    PickerWidget->OnColorAccepted.RemoveAll(this);
+    PickerWidget->OnColorCanceled.RemoveAll(this);
+    PickerWidget->OnPreviewColorChanged.AddDynamic(this, &UInspectorWorldSubsystem::HandleActiveColorPickerPreviewChanged);
+    PickerWidget->OnColorAccepted.AddDynamic(this, &UInspectorWorldSubsystem::HandleActiveColorPickerAccepted);
+    PickerWidget->OnColorCanceled.AddDynamic(this, &UInspectorWorldSubsystem::HandleActiveConfirmDialogCanceled);
+
+    ActivateConfirmDialogModalState(PickerWidget);
+    return PickerWidget->IsNativeColorPickerReadyForAutomation();
 #else
     return false;
 #endif
@@ -11849,6 +11896,11 @@ bool UInspectorWorldSubsystem::TryActivateConfirmDialogColorPage(UUserWidget* Di
         return false;
     }
 
+    if (UInspectorColorPickerWidget* PickerWidget = Cast<UInspectorColorPickerWidget>(DialogWidget))
+    {
+        return PickerWidget->HasNativeColorPickerContractForAutomation();
+    }
+
     UWidgetSwitcher* Switcher = Cast<UWidgetSwitcher>(DialogWidget->GetWidgetFromName(TEXT("WidgetSwitcher_167")));
     UWidget* ColorCanvas = DialogWidget->GetWidgetFromName(TEXT("Canvas_Color"));
     if (!Switcher || !ColorCanvas)
@@ -11881,6 +11933,11 @@ bool UInspectorWorldSubsystem::IsConfirmDialogColorPageActive(UUserWidget* Dialo
     if (!DialogWidget)
     {
         return false;
+    }
+
+    if (UInspectorColorPickerWidget* PickerWidget = Cast<UInspectorColorPickerWidget>(DialogWidget))
+    {
+        return PickerWidget->HasNativeColorPickerContractForAutomation();
     }
 
     UWidgetSwitcher* Switcher = Cast<UWidgetSwitcher>(DialogWidget->GetWidgetFromName(TEXT("WidgetSwitcher_167")));
@@ -11916,6 +11973,14 @@ void UInspectorWorldSubsystem::RefreshConfirmDialogBinding()
     {
         ClearConfirmDialogBinding();
         return;
+    }
+
+    if (UInspectorColorPickerWidget* ActivePicker = Cast<UInspectorColorPickerWidget>(ActiveConfirmDialogWidget.Get()))
+    {
+        if (ActivePicker->IsInViewport())
+        {
+            return;
+        }
     }
 
     UClass* ConfirmDialogClass = ConfirmDialogWidgetClass.LoadSynchronous();
@@ -12005,6 +12070,12 @@ bool UInspectorWorldSubsystem::TryGetActiveConfirmDialogColor(FLinearColor& OutC
         return false;
     }
 
+    if (const UInspectorColorPickerWidget* PickerWidget = Cast<UInspectorColorPickerWidget>(DialogWidget))
+    {
+        OutColor = PickerWidget->GetPickerColor();
+        return true;
+    }
+
     const FStructProperty* ColorProp = RI_FindStructPropertyByAuthoredName(DialogWidget->GetClass(), TEXT("CurrentColor"));
     if (!ColorProp)
     {
@@ -12045,6 +12116,12 @@ bool UInspectorWorldSubsystem::TrySetActiveConfirmDialogColor(const FLinearColor
     if (!DialogWidget)
     {
         return false;
+    }
+
+    if (UInspectorColorPickerWidget* PickerWidget = Cast<UInspectorColorPickerWidget>(DialogWidget))
+    {
+        PickerWidget->SetPickerColor(InColor, false);
+        return true;
     }
 
     FStructProperty* ColorProp = RI_FindStructPropertyByAuthoredName(DialogWidget->GetClass(), TEXT("CurrentColor"));
@@ -12090,6 +12167,12 @@ bool UInspectorWorldSubsystem::ApplyActiveConfirmDialogColor(const FLinearColor&
         return false;
     }
 
+    if (UInspectorColorPickerWidget* PickerWidget = Cast<UInspectorColorPickerWidget>(DialogWidget))
+    {
+        PickerWidget->SetPickerColor(InColor, false);
+        return true;
+    }
+
     UFunction* InitDataFn = DialogWidget->FindFunction(TEXT("InitData"));
     if (!InitDataFn)
     {
@@ -12124,6 +12207,12 @@ bool UInspectorWorldSubsystem::TryBuildActiveConfirmDialogColorFromInputs(FLinea
     const UEditableTextBox* InputG = ActiveConfirmDialogInputG.Get();
     const UEditableTextBox* InputB = ActiveConfirmDialogInputB.Get();
     const UEditableTextBox* InputA = ActiveConfirmDialogInputA.Get();
+    if (const UInspectorColorPickerWidget* PickerWidget = Cast<UInspectorColorPickerWidget>(ActiveConfirmDialogWidget.Get()))
+    {
+        OutColor = PickerWidget->GetPickerColor();
+        return true;
+    }
+
     if (!InputR || !InputG || !InputB || !InputA)
     {
         return false;
@@ -12160,6 +12249,11 @@ void UInspectorWorldSubsystem::RefreshActiveConfirmDialogColor()
         TGuardValue<bool> GuardUpdatingText(bUpdatingConfirmDialogText, true);
         DialogWidget->ProcessEvent(RefreshFn, nullptr);
     }
+
+    if (UInspectorColorPickerWidget* PickerWidget = Cast<UInspectorColorPickerWidget>(DialogWidget))
+    {
+        PickerWidget->RefreshPickerForAutomation();
+    }
 #endif
 }
 
@@ -12181,7 +12275,9 @@ bool UInspectorWorldSubsystem::TryParseConfirmDialogUnitFloat(const FText& InTex
         return false;
     }
 
-    OutValue = FMath::Clamp(static_cast<float>(ParsedValue), 0.0f, 1.0f);
+    OutValue = ParsedValue > 1.0
+        ? FMath::Clamp(static_cast<float>(ParsedValue / 255.0), 0.0f, 1.0f)
+        : FMath::Clamp(static_cast<float>(ParsedValue), 0.0f, 1.0f);
     return true;
 }
 
@@ -12345,8 +12441,7 @@ bool UInspectorWorldSubsystem::OpenColorEditorForItemInternal(UObject* ItemObjec
 
     UWorld* World = GetWorld();
     APlayerController* PC = GetLocalPC();
-    UClass* ConfirmDialogClass = ConfirmDialogWidgetClass.LoadSynchronous();
-    if (!World || !PC || !ConfirmDialogClass)
+    if (!World || !PC)
     {
         return false;
     }
@@ -12357,40 +12452,18 @@ bool UInspectorWorldSubsystem::OpenColorEditorForItemInternal(UObject* ItemObjec
         ClearConfirmDialogBinding();
     }
 
-    UUserWidget* DialogWidget = CreateWidget<UUserWidget>(PC, ConfirmDialogClass);
-    if (!DialogWidget)
+    UInspectorColorPickerWidget* PickerWidget = CreateWidget<UInspectorColorPickerWidget>(PC, UInspectorColorPickerWidget::StaticClass());
+    if (!PickerWidget)
     {
         return false;
     }
 
-    DialogWidget->AddToViewport(10001);
+    PickerWidget->InitializePicker(InitialColor, RecentColorPickerColors);
+    PickerWidget->AddToViewport(10001);
 
-    UFunction* InitDataFn = DialogWidget->FindFunction(TEXT("InitData"));
-    if (!InitDataFn)
+    if (!TryBindActiveConfirmDialog(PickerWidget))
     {
-        DialogWidget->RemoveFromParent();
-        return false;
-    }
-
-    const FString HexText = InitialColor.ToFColorSRGB().ToHex();
-
-    struct FRIInitDataParams
-    {
-        FString Title;
-        FString Content;
-        FString Type;
-    };
-
-    FRIInitDataParams Params;
-    Params.Title = TEXT("Color");
-    Params.Content = HexText;
-    Params.Type = TEXT("Color");
-    DialogWidget->ProcessEvent(InitDataFn, &Params);
-    TryActivateConfirmDialogColorPage(DialogWidget);
-
-    if (!TryBindActiveConfirmDialog(DialogWidget))
-    {
-        DialogWidget->RemoveFromParent();
+        PickerWidget->RemoveFromParent();
         return false;
     }
 
@@ -12401,8 +12474,6 @@ bool UInspectorWorldSubsystem::OpenColorEditorForItemInternal(UObject* ItemObjec
     bHasActiveColorEditLastPreviewColor = true;
     ActiveColorEditOriginalColor = InitialColor;
     ActiveColorEditLastPreviewColor = InitialColor;
-    ApplyActiveConfirmDialogColor(InitialColor);
-    RefreshActiveConfirmDialogColor();
     return true;
 #endif
 }
@@ -12426,6 +12497,27 @@ void UInspectorWorldSubsystem::ApplyActiveColorEditItemIfNeeded(const FLinearCol
         && !InColor.Equals(ActiveColorEditOriginalColor, KINDA_SMALL_NUMBER);
     bHasActiveColorEditLastPreviewColor = true;
     ActiveColorEditLastPreviewColor = InColor;
+#endif
+}
+
+void UInspectorWorldSubsystem::RememberRecentColorPickerColor(const FLinearColor& InColor)
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    const FLinearColor ClampedColor = InColor.GetClamped();
+    for (int32 Index = RecentColorPickerColors.Num() - 1; Index >= 0; --Index)
+    {
+        if (RecentColorPickerColors[Index].Equals(ClampedColor, 0.001f))
+        {
+            RecentColorPickerColors.RemoveAt(Index);
+        }
+    }
+
+    RecentColorPickerColors.Insert(ClampedColor, 0);
+    constexpr int32 RI_MaxRecentColorPickerColors = 8;
+    while (RecentColorPickerColors.Num() > RI_MaxRecentColorPickerColors)
+    {
+        RecentColorPickerColors.RemoveAt(RecentColorPickerColors.Num() - 1);
+    }
 #endif
 }
 
@@ -12504,6 +12596,22 @@ void UInspectorWorldSubsystem::HandleActiveConfirmDialogCanceled()
         DialogWidget->RemoveFromParent();
     }
     ClearConfirmDialogBinding();
+#endif
+}
+
+void UInspectorWorldSubsystem::HandleActiveColorPickerPreviewChanged(FLinearColor InColor)
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    ApplyActiveColorEditItemIfNeeded(InColor);
+#endif
+}
+
+void UInspectorWorldSubsystem::HandleActiveColorPickerAccepted(FLinearColor InColor)
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    ApplyActiveColorEditItemIfNeeded(InColor);
+    RememberRecentColorPickerColor(InColor);
+    HandleActiveConfirmDialogAccepted();
 #endif
 }
 
@@ -13417,6 +13525,12 @@ bool UInspectorWorldSubsystem::ExecuteLegacyToolNativeBridgeAction(FName BridgeI
     if (BridgeId == RI_SelfTestId_ConfirmDialog)
     {
         bOutPassed = RunConfirmDialogColorInputSelfTest(OutReport);
+        return true;
+    }
+
+    if (BridgeId == RI_SelfTestId_ColorPickerUIContract)
+    {
+        bOutPassed = RunColorPickerUIContractSelfTest(OutReport);
         return true;
     }
 
@@ -15371,14 +15485,12 @@ bool UInspectorWorldSubsystem::RunConfirmDialogColorInputSelfTest(FString& OutRe
 
     UWorld* World = GetWorld();
     APlayerController* PC = GetLocalPC();
-    UClass* ConfirmDialogClass = ConfirmDialogWidgetClass.LoadSynchronous();
-    if (!World || !PC || !ConfirmDialogClass)
+    if (!World || !PC)
     {
         OutReport = FString::Printf(
-            TEXT("Missing prerequisite. World=%s PC=%s ConfirmDialogClass=%s"),
+            TEXT("Missing prerequisite. World=%s PC=%s NativeColorPickerClass=ok"),
             World ? TEXT("ok") : TEXT("null"),
-            PC ? TEXT("ok") : TEXT("null"),
-            ConfirmDialogClass ? TEXT("ok") : TEXT("null"));
+            PC ? TEXT("ok") : TEXT("null"));
         LastConfirmDialogSelfTestReport = OutReport;
         UE_LOG(LogRuntimeInspector, Warning, TEXT("[RI] %s"), *OutReport);
         return false;
@@ -15391,10 +15503,10 @@ bool UInspectorWorldSubsystem::RunConfirmDialogColorInputSelfTest(FString& OutRe
         Open();
     }
 
-    UUserWidget* TestWidget = CreateWidget<UUserWidget>(PC, ConfirmDialogClass);
+    UInspectorColorPickerWidget* TestWidget = CreateWidget<UInspectorColorPickerWidget>(PC, UInspectorColorPickerWidget::StaticClass());
     if (!TestWidget)
     {
-        OutReport = TEXT("CreateWidget failed for WBP_ConfirmDialog");
+        OutReport = TEXT("CreateWidget failed for native color picker");
         LastConfirmDialogSelfTestReport = OutReport;
         UE_LOG(LogRuntimeInspector, Warning, TEXT("[RI] %s"), *OutReport);
         if (!bWasOpen)
@@ -15433,28 +15545,7 @@ bool UInspectorWorldSubsystem::RunConfirmDialogColorInputSelfTest(FString& OutRe
         }
     };
 
-    UFunction* InitDataFn = TestWidget->FindFunction(TEXT("InitData"));
-    if (!InitDataFn)
-    {
-        OutReport = TEXT("InitData not found on WBP_ConfirmDialog");
-        LastConfirmDialogSelfTestReport = OutReport;
-        UE_LOG(LogRuntimeInspector, Warning, TEXT("[RI] %s"), *OutReport);
-        Cleanup();
-        return false;
-    }
-
-    struct FRIInitDataParams
-    {
-        FString Title;
-        FString Content;
-        FString Type;
-    };
-
-    FRIInitDataParams InitDataParams;
-    InitDataParams.Title = TEXT("Color");
-    InitDataParams.Content = TEXT("FF0000FF");
-    InitDataParams.Type = TEXT("Color");
-    TestWidget->ProcessEvent(InitDataFn, &InitDataParams);
+    TestWidget->InitializePicker(FLinearColor::Red, RecentColorPickerColors);
     const bool bDirectColorPageOk = TryActivateConfirmDialogColorPage(TestWidget) && IsConfirmDialogColorPageActive(TestWidget);
 
     if (!TryBindActiveConfirmDialog(TestWidget))
@@ -15922,6 +16013,93 @@ bool UInspectorWorldSubsystem::RunConfirmDialogColorInputSelfTest(FString& OutRe
     bLastConfirmDialogSelfTestPassed = bOverallSuccess;
     UE_LOG(LogRuntimeInspector, Log, TEXT("[RI] %s"), *OutReport);
     return bOverallSuccess;
+#endif
+}
+
+bool UInspectorWorldSubsystem::RunColorPickerUIContractSelfTest(FString& OutReport)
+{
+#if !RUNTIME_INSPECTOR_ENABLED
+    OutReport = TEXT("RuntimeInspector disabled");
+    return false;
+#else
+    OutReport.Reset();
+    UWorld* World = GetWorld();
+    APlayerController* PC = GetLocalPC();
+    if (!World || !PC)
+    {
+        OutReport = FString::Printf(
+            TEXT("ColorPickerUIContract=FAIL | World=%s PC=%s"),
+            World ? TEXT("ok") : TEXT("null"),
+            PC ? TEXT("ok") : TEXT("null"));
+        return false;
+    }
+
+    UInspectorColorPickerWidget* PickerWidget = CreateWidget<UInspectorColorPickerWidget>(PC, UInspectorColorPickerWidget::StaticClass());
+    if (!PickerWidget)
+    {
+        OutReport = TEXT("ColorPickerUIContract=FAIL | CreateWidget=0");
+        return false;
+    }
+
+    const TArray<FLinearColor> TestRecentColors = {
+        FLinearColor::Red,
+        FLinearColor::Green,
+        FLinearColor::Blue,
+        FLinearColor::White
+    };
+    PickerWidget->InitializePicker(FLinearColor::Red, TestRecentColors);
+    PickerWidget->AddToViewport(10001);
+
+    const bool bBound = TryBindActiveConfirmDialog(PickerWidget);
+    const bool bPageActive = TryActivateConfirmDialogColorPage(PickerWidget) && IsConfirmDialogColorPageActive(PickerWidget);
+    const bool bContract = PickerWidget->HasNativeColorPickerContractForAutomation();
+    const bool bModal = ActiveConfirmDialogModalBlockerWidget.IsValid();
+
+    bool bRgbInput = false;
+    if (bBound)
+    {
+        bRgbInput = PickerWidget->SetRgbChannelTextForAutomation(0, TEXT("128"));
+    }
+
+    FLinearColor AfterRgb = FLinearColor::Black;
+    const bool bRgbParsed = TryGetActiveConfirmDialogColor(AfterRgb)
+        && FMath::IsNearlyEqual(AfterRgb.R, 128.0f / 255.0f, 0.02f);
+
+    bool bHexInput = false;
+    if (bBound)
+    {
+        bHexInput = PickerWidget->SetHexTextForAutomation(TEXT("#00FF00FF"));
+    }
+
+    FLinearColor AfterHex = FLinearColor::Black;
+    const bool bHexParsed = TryGetActiveConfirmDialogColor(AfterHex)
+        && AfterHex.R <= 0.02f
+        && AfterHex.G >= 0.95f
+        && AfterHex.B <= 0.02f
+        && FMath::IsNearlyEqual(AfterHex.A, 1.0f, 0.02f);
+
+    if (UUserWidget* ActiveDialog = ActiveConfirmDialogWidget.Get())
+    {
+        ActiveDialog->RemoveFromParent();
+    }
+    ClearConfirmDialogBinding();
+    const bool bModalCleared = !ActiveConfirmDialogModalBlockerWidget.IsValid();
+
+    const bool bPassed = bBound && bPageActive && bContract && bModal && bRgbInput && bRgbParsed && bHexInput && bHexParsed && bModalCleared;
+    OutReport = FString::Printf(
+        TEXT("ColorPickerUIContract=%s | Bound=%d Page=%d Contract=%d Modal=%d RgbInput=%d RgbParsed=%d HexInput=%d HexParsed=%d ModalCleared=%d"),
+        bPassed ? TEXT("PASS") : TEXT("FAIL"),
+        bBound ? 1 : 0,
+        bPageActive ? 1 : 0,
+        bContract ? 1 : 0,
+        bModal ? 1 : 0,
+        bRgbInput ? 1 : 0,
+        bRgbParsed ? 1 : 0,
+        bHexInput ? 1 : 0,
+        bHexParsed ? 1 : 0,
+        bModalCleared ? 1 : 0);
+    UE_LOG(LogRuntimeInspector, Log, TEXT("[RI] %s"), *OutReport);
+    return bPassed;
 #endif
 }
 

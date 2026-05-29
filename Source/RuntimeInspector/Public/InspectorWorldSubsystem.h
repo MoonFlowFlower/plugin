@@ -41,6 +41,7 @@ class UCameraComponent;
 class UBorder;
 class UButton;
 class UInputComponent;
+class UInspectorColorPickerWidget;
 class UInspectorDockRootWidget;
 class UInspectorFilePageWidget;
 class UInspectorFunctionItem;
@@ -251,6 +252,9 @@ public:
 
     UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Debug")
     bool RunConfirmDialogColorInputSelfTest(FString& OutReport);
+
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Debug")
+    bool RunColorPickerUIContractSelfTest(FString& OutReport);
 
     UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Debug")
     FString RunConfirmDialogColorInputSelfTestSimple();
@@ -1182,6 +1186,7 @@ private:
     void RefreshConfirmDialogBinding();
     void ClearConfirmDialogBinding();
     bool TryBindActiveConfirmDialog(UUserWidget* DialogWidget);
+    bool TryBindActiveColorPicker(UInspectorColorPickerWidget* PickerWidget);
     void ActivateConfirmDialogModalState(UUserWidget* DialogWidget);
     void DeactivateConfirmDialogModalState();
     bool TryActivateConfirmDialogColorPage(UUserWidget* DialogWidget) const;
@@ -1198,6 +1203,7 @@ private:
     bool ApplyInspectorItemColorInternal(UObject* ItemObject, const FLinearColor& InColor, FString& OutError, bool bSuppressHistory);
     bool OpenColorEditorForItemInternal(UObject* ItemObject);
     void ApplyActiveColorEditItemIfNeeded(const FLinearColor& InColor);
+    void RememberRecentColorPickerColor(const FLinearColor& InColor);
     void SyncActiveConfirmDialogColorPreview();
     void FinalizeActiveColorEdit(bool bAccept);
     void ApplyActiveConfirmDialogChannels();
@@ -1212,6 +1218,12 @@ private:
 
     UFUNCTION()
     void HandleActiveConfirmDialogCanceled();
+
+    UFUNCTION()
+    void HandleActiveColorPickerPreviewChanged(FLinearColor InColor);
+
+    UFUNCTION()
+    void HandleActiveColorPickerAccepted(FLinearColor InColor);
     //void RefreshPanel();
 
     // <<< ADD���۵�״̬����
@@ -1268,6 +1280,9 @@ private:
     TWeakObjectPtr<UEditableTextBox> ActiveConfirmDialogInputB;
     TWeakObjectPtr<UEditableTextBox> ActiveConfirmDialogInputA;
     TWeakObjectPtr<UEditableTextBox> ActiveConfirmDialogInputHex;
+
+    UPROPERTY(Transient)
+    TArray<FLinearColor> RecentColorPickerColors;
 
     UPROPERTY()
     TSoftClassPtr<UUserWidget> ConfirmDialogWidgetClass;

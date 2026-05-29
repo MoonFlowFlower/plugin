@@ -1,13 +1,23 @@
 [
   {
     "Id": "confirm_dialog_color_input",
-    "DisplayName": "Confirm Dialog Color Input",
+    "DisplayName": "Native Color Picker Input",
     "Category": "UI",
-    "Description": "Validates confirm-dialog color input parsing and preview behavior.",
+    "Description": "Validates native color picker input parsing and preview behavior.",
     "bRequiresPIE": true,
     "bMutatesRuntime": true,
     "bEnabled": true,
     "LegacyNativeBridgeId": "confirm_dialog_color_input"
+  },
+  {
+    "Id": "color_picker_ui_contract",
+    "DisplayName": "Color Picker UI Contract",
+    "Category": "UI",
+    "Description": "Validates native color picker modal layout, dim blocker, color fields, HEX, and recent swatches.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": false,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "color_picker_ui_contract"
   },
   {
     "Id": "settings_preview",
