@@ -236,8 +236,10 @@ for ($SummaryAttempt = 1; $SummaryAttempt -le 8; $SummaryAttempt++) {
     Start-Sleep -Milliseconds 350
 }
 $WindowTitle = Get-WindowTitleFromSummary -Summary $AutomationSummary.panelHostWindowDebug
+$WindowTitleFallbackUsed = $false
 if ([string]::IsNullOrWhiteSpace($WindowTitle)) {
-    throw "Failed to resolve RuntimeInspector host window title from panelHostWindowDebug."
+    $WindowTitle = "PluginMaker Preview"
+    $WindowTitleFallbackUsed = $true
 }
 
 $CaptureResult = Invoke-BridgeRequest -BridgeState $BridgeState -Method "capture_window_screenshot" -Params @{
@@ -273,6 +275,7 @@ $Result = [ordered]@{
     contextLabelChains = [string]$AutomationSummary.contextLabelChains
     panelHostWindowDebug = [string]$AutomationSummary.panelHostWindowDebug
     windowTitle = [string]$WindowTitle
+    windowTitleFallbackUsed = [bool]$WindowTitleFallbackUsed
     hostWindowTitle = [string]$WindowTitle
     captureSuccess = [bool]$CaptureResult.success
     captureMode = [string]$CaptureResult.captureMode
