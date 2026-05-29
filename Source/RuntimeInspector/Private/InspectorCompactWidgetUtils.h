@@ -138,6 +138,13 @@ namespace RICompactUI
         FRIInputPalette MutedInput;
     };
 
+    inline FLinearColor MakeTokenColor(const TCHAR* Hex, float Alpha = 1.0f)
+    {
+        FLinearColor Color = FLinearColor::FromSRGBColor(FColor::FromHex(Hex));
+        Color.A = Alpha;
+        return Color;
+    }
+
     inline ERIThemePreset GetActiveThemePreset()
     {
         const int32 OverrideValue = RI_GetThemePresetOverrideValue();
@@ -180,42 +187,42 @@ namespace RICompactUI
                 FMargin(0.f),
                 FMargin(6.f, 2.f)
             };
-            Tokens.PageBackground = FLinearColor(0.02f, 0.02f, 0.03f, 0.90f);
-            Tokens.FooterBackground = FLinearColor(0.05f, 0.05f, 0.07f, 0.95f);
-            Tokens.ContextStripBackground = FLinearColor(0.08f, 0.09f, 0.11f, 0.94f);
-            Tokens.ContextPrimaryCellBackground = FLinearColor(0.13f, 0.15f, 0.20f, 0.98f);
-            Tokens.ContextSecondaryCellBackground = FLinearColor(0.10f, 0.11f, 0.14f, 0.95f);
-            Tokens.ContextStatusCellBackground = FLinearColor(0.15f, 0.12f, 0.08f, 0.98f);
-            Tokens.SectionSurfaceBackground = FLinearColor(0.12f, 0.13f, 0.16f, 0.93f);
-            Tokens.RowSurfaceBackground = FLinearColor(0.09f, 0.10f, 0.12f, 0.90f);
-            Tokens.CellSurfaceBackground = FLinearColor(0.10f, 0.11f, 0.14f, 0.92f);
-            Tokens.SelectedRowSurfaceBackground = FLinearColor(0.16f, 0.21f, 0.27f, 0.94f);
-            Tokens.StrongText = FLinearColor(0.96f, 0.96f, 0.96f, 1.0f);
-            Tokens.SecondaryText = FLinearColor(0.84f, 0.88f, 0.96f, 1.0f);
-            Tokens.MutedText = FLinearColor(0.72f, 0.72f, 0.72f, 1.0f);
+            Tokens.PageBackground = MakeTokenColor(TEXT("07111E"), 0.94f);
+            Tokens.FooterBackground = MakeTokenColor(TEXT("091220"), 0.96f);
+            Tokens.ContextStripBackground = MakeTokenColor(TEXT("0B1626"), 0.95f);
+            Tokens.ContextPrimaryCellBackground = MakeTokenColor(TEXT("18283D"), 0.98f);
+            Tokens.ContextSecondaryCellBackground = MakeTokenColor(TEXT("101B2B"), 0.96f);
+            Tokens.ContextStatusCellBackground = MakeTokenColor(TEXT("402C10"), 0.98f);
+            Tokens.SectionSurfaceBackground = MakeTokenColor(TEXT("142234"), 0.93f);
+            Tokens.RowSurfaceBackground = MakeTokenColor(TEXT("0F1B2B"), 0.92f);
+            Tokens.CellSurfaceBackground = MakeTokenColor(TEXT("132236"), 0.93f);
+            Tokens.SelectedRowSurfaceBackground = MakeTokenColor(TEXT("1A3652"), 0.95f);
+            Tokens.StrongText = MakeTokenColor(TEXT("F2F6FA"));
+            Tokens.SecondaryText = MakeTokenColor(TEXT("AAB6C5"));
+            Tokens.MutedText = MakeTokenColor(TEXT("6E7B8C"));
             Tokens.SuccessText = FLinearColor(0.42f, 0.92f, 0.58f, 1.0f);
             Tokens.WarningText = FLinearColor(0.95f, 0.75f, 0.25f, 1.0f);
             Tokens.ErrorText = FLinearColor(0.95f, 0.35f, 0.35f, 1.0f);
             Tokens.PrimaryButton = {
-                FLinearColor(0.14f, 0.38f, 0.86f, 1.0f),
-                FLinearColor(0.18f, 0.46f, 0.96f, 1.0f),
-                FLinearColor(0.10f, 0.29f, 0.68f, 1.0f),
-                FLinearColor(0.20f, 0.24f, 0.30f, 0.65f),
+                MakeTokenColor(TEXT("2F8CFF")),
+                MakeTokenColor(TEXT("46C8FF")),
+                MakeTokenColor(TEXT("1658B4")),
+                MakeTokenColor(TEXT("17202B"), 0.65f),
                 FLinearColor(0.98f, 0.99f, 1.0f, 1.0f)
             };
             Tokens.SecondaryButton = {
-                FLinearColor(0.28f, 0.29f, 0.33f, 1.0f),
-                FLinearColor(0.34f, 0.35f, 0.40f, 1.0f),
-                FLinearColor(0.22f, 0.23f, 0.27f, 1.0f),
-                FLinearColor(0.20f, 0.21f, 0.24f, 0.65f),
-                FLinearColor(0.95f, 0.95f, 0.97f, 1.0f)
+                MakeTokenColor(TEXT("172538")),
+                MakeTokenColor(TEXT("1F344D")),
+                MakeTokenColor(TEXT("0F1B2A")),
+                MakeTokenColor(TEXT("0F141C"), 0.65f),
+                MakeTokenColor(TEXT("E5ECF4"))
             };
             Tokens.SubtleButton = {
-                FLinearColor(0.22f, 0.23f, 0.26f, 1.0f),
-                FLinearColor(0.27f, 0.28f, 0.32f, 1.0f),
-                FLinearColor(0.18f, 0.19f, 0.22f, 1.0f),
-                FLinearColor(0.18f, 0.19f, 0.22f, 0.65f),
-                FLinearColor(0.93f, 0.93f, 0.95f, 1.0f)
+                MakeTokenColor(TEXT("121C2A")),
+                MakeTokenColor(TEXT("18283D")),
+                MakeTokenColor(TEXT("0B1420")),
+                MakeTokenColor(TEXT("0B121A"), 0.65f),
+                MakeTokenColor(TEXT("DDE6EF"))
             };
             Tokens.DangerButton = {
                 FLinearColor(0.55f, 0.19f, 0.22f, 1.0f),
@@ -225,57 +232,57 @@ namespace RICompactUI
                 FLinearColor(1.0f, 0.96f, 0.96f, 1.0f)
             };
             Tokens.HeaderButton = {
-                FLinearColor(0.20f, 0.21f, 0.24f, 1.0f),
-                FLinearColor(0.24f, 0.25f, 0.29f, 1.0f),
-                FLinearColor(0.16f, 0.17f, 0.20f, 1.0f),
-                FLinearColor(0.16f, 0.17f, 0.20f, 0.75f),
-                FLinearColor(0.95f, 0.95f, 0.97f, 1.0f)
+                MakeTokenColor(TEXT("0B1320")),
+                MakeTokenColor(TEXT("122034")),
+                MakeTokenColor(TEXT("080D16")),
+                MakeTokenColor(TEXT("080D16"), 0.75f),
+                MakeTokenColor(TEXT("EDF2F7"))
             };
             Tokens.TabActiveButton = {
-                FLinearColor(0.70f, 0.72f, 0.76f, 1.0f),
-                FLinearColor(0.76f, 0.78f, 0.82f, 1.0f),
-                FLinearColor(0.58f, 0.60f, 0.65f, 1.0f),
-                FLinearColor(0.20f, 0.20f, 0.22f, 0.75f),
-                FLinearColor(0.10f, 0.11f, 0.13f, 1.0f)
+                MakeTokenColor(TEXT("153E66")),
+                MakeTokenColor(TEXT("215E91")),
+                MakeTokenColor(TEXT("0E2C49")),
+                MakeTokenColor(TEXT("0D1420"), 0.75f),
+                MakeTokenColor(TEXT("F2F6FA"))
             };
             Tokens.TabInactiveButton = {
-                FLinearColor(0.15f, 0.16f, 0.18f, 1.0f),
-                FLinearColor(0.19f, 0.20f, 0.23f, 1.0f),
-                FLinearColor(0.11f, 0.12f, 0.14f, 1.0f),
-                FLinearColor(0.12f, 0.13f, 0.15f, 0.75f),
-                FLinearColor(0.92f, 0.92f, 0.94f, 1.0f)
+                MakeTokenColor(TEXT("0D1624")),
+                MakeTokenColor(TEXT("172638")),
+                MakeTokenColor(TEXT("09111C")),
+                MakeTokenColor(TEXT("09101A"), 0.75f),
+                MakeTokenColor(TEXT("AEBBCC"))
             };
             Tokens.StandardSection = {
-                FLinearColor(0.20f, 0.21f, 0.24f, 1.0f),
-                FLinearColor(0.95f, 0.95f, 0.97f, 1.0f)
+                MakeTokenColor(TEXT("1C3148")),
+                MakeTokenColor(TEXT("EDF2F7"))
             };
             Tokens.EmphasisSection = {
-                FLinearColor(0.17f, 0.19f, 0.24f, 1.0f),
-                FLinearColor(0.97f, 0.98f, 1.0f, 1.0f)
+                MakeTokenColor(TEXT("20405D")),
+                MakeTokenColor(TEXT("F5F9FC"))
             };
             Tokens.StandardInput = {
-                FLinearColor(0.18f, 0.19f, 0.22f, 0.96f),
-                FLinearColor(0.22f, 0.23f, 0.27f, 1.0f),
-                FLinearColor(0.22f, 0.34f, 0.66f, 1.0f),
-                FLinearColor(0.15f, 0.16f, 0.18f, 0.72f),
-                FLinearColor(0.95f, 0.95f, 0.97f, 1.0f),
-                FLinearColor(0.60f, 0.63f, 0.69f, 1.0f)
+                MakeTokenColor(TEXT("132236"), 0.96f),
+                MakeTokenColor(TEXT("182A3F")),
+                MakeTokenColor(TEXT("1B4A87")),
+                MakeTokenColor(TEXT("0E1620"), 0.72f),
+                MakeTokenColor(TEXT("EDF2F7")),
+                MakeTokenColor(TEXT("8290A3"))
             };
             Tokens.StrongInput = {
-                FLinearColor(0.16f, 0.19f, 0.25f, 0.98f),
-                FLinearColor(0.19f, 0.23f, 0.30f, 1.0f),
-                FLinearColor(0.20f, 0.32f, 0.62f, 1.0f),
-                FLinearColor(0.14f, 0.16f, 0.20f, 0.75f),
-                FLinearColor(0.97f, 0.98f, 1.0f, 1.0f),
-                FLinearColor(0.62f, 0.68f, 0.78f, 1.0f)
+                MakeTokenColor(TEXT("16263B"), 0.98f),
+                MakeTokenColor(TEXT("1D344F")),
+                MakeTokenColor(TEXT("1E5AA3")),
+                MakeTokenColor(TEXT("101925"), 0.75f),
+                MakeTokenColor(TEXT("F3F8FC")),
+                MakeTokenColor(TEXT("8A9FBD"))
             };
             Tokens.MutedInput = {
-                FLinearColor(0.16f, 0.17f, 0.19f, 0.90f),
-                FLinearColor(0.18f, 0.19f, 0.21f, 0.95f),
-                FLinearColor(0.21f, 0.24f, 0.30f, 0.95f),
-                FLinearColor(0.14f, 0.15f, 0.17f, 0.70f),
-                FLinearColor(0.90f, 0.91f, 0.93f, 1.0f),
-                FLinearColor(0.56f, 0.58f, 0.63f, 1.0f)
+                MakeTokenColor(TEXT("0F1B2A"), 0.90f),
+                MakeTokenColor(TEXT("132236"), 0.95f),
+                MakeTokenColor(TEXT("182638"), 0.95f),
+                MakeTokenColor(TEXT("0B141E"), 0.70f),
+                MakeTokenColor(TEXT("D9E2EC")),
+                MakeTokenColor(TEXT("6F7D90"))
             };
             return Tokens;
         }();
@@ -285,16 +292,16 @@ namespace RICompactUI
             FRIThemePresetTokens Tokens = StudioSlate;
             Tokens.Metrics.CornerRadius = 7.0f;
             Tokens.Metrics.BorderWidth = 1.25f;
-            Tokens.PageBackground = FLinearColor(0.03f, 0.03f, 0.04f, 0.90f);
-            Tokens.FooterBackground = FLinearColor(0.07f, 0.07f, 0.09f, 0.96f);
-            Tokens.ContextStripBackground = FLinearColor(0.08f, 0.09f, 0.11f, 0.95f);
-            Tokens.ContextPrimaryCellBackground = FLinearColor(0.13f, 0.15f, 0.20f, 0.99f);
-            Tokens.ContextSecondaryCellBackground = FLinearColor(0.10f, 0.12f, 0.15f, 0.95f);
-            Tokens.ContextStatusCellBackground = FLinearColor(0.20f, 0.16f, 0.10f, 0.99f);
-            Tokens.SectionSurfaceBackground = FLinearColor(0.14f, 0.15f, 0.18f, 0.94f);
-            Tokens.RowSurfaceBackground = FLinearColor(0.10f, 0.11f, 0.13f, 0.91f);
-            Tokens.CellSurfaceBackground = FLinearColor(0.12f, 0.13f, 0.16f, 0.93f);
-            Tokens.SelectedRowSurfaceBackground = FLinearColor(0.18f, 0.24f, 0.31f, 0.95f);
+            Tokens.PageBackground = MakeTokenColor(TEXT("081424"), 0.94f);
+            Tokens.FooterBackground = MakeTokenColor(TEXT("0B1624"), 0.97f);
+            Tokens.ContextStripBackground = MakeTokenColor(TEXT("0D1728"), 0.96f);
+            Tokens.ContextPrimaryCellBackground = MakeTokenColor(TEXT("182A3F"), 0.99f);
+            Tokens.ContextSecondaryCellBackground = MakeTokenColor(TEXT("132236"), 0.96f);
+            Tokens.ContextStatusCellBackground = MakeTokenColor(TEXT("4D3514"), 0.99f);
+            Tokens.SectionSurfaceBackground = MakeTokenColor(TEXT("17283D"), 0.95f);
+            Tokens.RowSurfaceBackground = MakeTokenColor(TEXT("101B2B"), 0.93f);
+            Tokens.CellSurfaceBackground = MakeTokenColor(TEXT("142234"), 0.94f);
+            Tokens.SelectedRowSurfaceBackground = MakeTokenColor(TEXT("1D3D5C"), 0.96f);
             Tokens.StrongText = FLinearColor(0.98f, 0.98f, 0.99f, 1.0f);
             Tokens.SecondaryText = FLinearColor(0.88f, 0.91f, 0.95f, 1.0f);
             Tokens.MutedText = FLinearColor(0.78f, 0.80f, 0.84f, 1.0f);
@@ -311,21 +318,27 @@ namespace RICompactUI
             Tokens.Metrics.StandardListHeight = 120.0f;
             Tokens.Metrics.SectionPadding = FMargin(6.f, 4.f);
             Tokens.Metrics.InputPadding = FMargin(7.f, 4.f);
-            Tokens.PrimaryButton.Normal = FLinearColor(0.18f, 0.50f, 0.88f, 1.0f);
-            Tokens.PrimaryButton.Hovered = FLinearColor(0.25f, 0.58f, 0.95f, 1.0f);
-            Tokens.SecondaryButton.Normal = FLinearColor(0.35f, 0.37f, 0.42f, 1.0f);
-            Tokens.SecondaryButton.Hovered = FLinearColor(0.41f, 0.43f, 0.49f, 1.0f);
-            Tokens.SecondaryButton.Pressed = FLinearColor(0.28f, 0.30f, 0.35f, 1.0f);
-            Tokens.SubtleButton.Normal = FLinearColor(0.18f, 0.19f, 0.22f, 1.0f);
-            Tokens.SubtleButton.Hovered = FLinearColor(0.22f, 0.23f, 0.27f, 1.0f);
-            Tokens.SubtleButton.Pressed = FLinearColor(0.15f, 0.16f, 0.19f, 1.0f);
-            Tokens.HeaderButton.Normal = FLinearColor(0.24f, 0.26f, 0.30f, 1.0f);
-            Tokens.HeaderButton.Hovered = FLinearColor(0.29f, 0.31f, 0.36f, 1.0f);
-            Tokens.HeaderButton.Pressed = FLinearColor(0.20f, 0.22f, 0.26f, 1.0f);
-            Tokens.StandardSection.Background = FLinearColor(0.22f, 0.23f, 0.26f, 1.0f);
-            Tokens.EmphasisSection.Background = FLinearColor(0.20f, 0.24f, 0.30f, 1.0f);
-            Tokens.StandardInput.Background = FLinearColor(0.20f, 0.21f, 0.24f, 0.96f);
-            Tokens.StandardInput.Hovered = FLinearColor(0.24f, 0.25f, 0.29f, 1.0f);
+            Tokens.PrimaryButton.Normal = MakeTokenColor(TEXT("2F8CFF"));
+            Tokens.PrimaryButton.Hovered = MakeTokenColor(TEXT("46C8FF"));
+            Tokens.SecondaryButton.Normal = MakeTokenColor(TEXT("1B2B41"));
+            Tokens.SecondaryButton.Hovered = MakeTokenColor(TEXT("223952"));
+            Tokens.SecondaryButton.Pressed = MakeTokenColor(TEXT("142133"));
+            Tokens.SubtleButton.Normal = MakeTokenColor(TEXT("152335"));
+            Tokens.SubtleButton.Hovered = MakeTokenColor(TEXT("1C2D43"));
+            Tokens.SubtleButton.Pressed = MakeTokenColor(TEXT("101A29"));
+            Tokens.HeaderButton.Normal = MakeTokenColor(TEXT("101927"));
+            Tokens.HeaderButton.Hovered = MakeTokenColor(TEXT("17283D"));
+            Tokens.HeaderButton.Pressed = MakeTokenColor(TEXT("0B121E"));
+            Tokens.TabActiveButton.Normal = MakeTokenColor(TEXT("1E4E7D"));
+            Tokens.TabActiveButton.Hovered = MakeTokenColor(TEXT("2A679C"));
+            Tokens.TabActiveButton.Pressed = MakeTokenColor(TEXT("173B63"));
+            Tokens.TabInactiveButton.Normal = MakeTokenColor(TEXT("111B2B"));
+            Tokens.TabInactiveButton.Hovered = MakeTokenColor(TEXT("182638"));
+            Tokens.TabInactiveButton.Pressed = MakeTokenColor(TEXT("0D1521"));
+            Tokens.StandardSection.Background = MakeTokenColor(TEXT("20344C"));
+            Tokens.EmphasisSection.Background = MakeTokenColor(TEXT("26496A"));
+            Tokens.StandardInput.Background = MakeTokenColor(TEXT("17283D"), 0.97f);
+            Tokens.StandardInput.Hovered = MakeTokenColor(TEXT("1C2F46"));
             Tokens.StandardInput.Focused = FLinearColor(0.25f, 0.39f, 0.72f, 1.0f);
             Tokens.StrongInput.Background = FLinearColor(0.18f, 0.22f, 0.29f, 0.98f);
             Tokens.StrongInput.Hovered = FLinearColor(0.22f, 0.27f, 0.35f, 1.0f);
@@ -633,6 +646,50 @@ namespace RICompactUI
         return CachedTexture.Get();
     }
 
+    inline UTexture2D* LoadIconTexture(const TCHAR* AssetName)
+    {
+        if (!AssetName || AssetName[0] == TEXT('\0'))
+        {
+            return nullptr;
+        }
+
+        static TMap<FString, TWeakObjectPtr<UTexture2D>> CachedTextures;
+        const FString IconName(AssetName);
+        TWeakObjectPtr<UTexture2D>& CachedTexture = CachedTextures.FindOrAdd(IconName);
+        if (!CachedTexture.IsValid())
+        {
+            const FString AssetPath = FString::Printf(TEXT("/RuntimeInspector/UI/Assets/%s.%s"), *IconName, *IconName);
+            CachedTexture = LoadObject<UTexture2D>(nullptr, *AssetPath);
+        }
+
+        return CachedTexture.Get();
+    }
+
+    inline UImage* MakeIcon(
+        UWidgetTree* WidgetTree,
+        const FName& Name,
+        const TCHAR* AssetName,
+        float DesiredSize,
+        const FLinearColor& Tint)
+    {
+        if (!WidgetTree)
+        {
+            return nullptr;
+        }
+
+        UImage* Image = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), Name);
+        if (UTexture2D* Texture = LoadIconTexture(AssetName))
+        {
+            Image->SetBrushFromTexture(Texture, true);
+        }
+        if (DesiredSize > 0.f)
+        {
+            Image->SetDesiredSizeOverride(FVector2D(DesiredSize, DesiredSize));
+        }
+        Image->SetColorAndOpacity(Tint);
+        return Image;
+    }
+
     inline void SetFavoriteIconState(
         UImage* Image,
         bool bFavorited,
@@ -834,7 +891,7 @@ namespace RICompactUI
         Button->WidgetStyle = ButtonStyle;
         PRAGMA_ENABLE_DEPRECATION_WARNINGS
 
-        Button->SetBackgroundColor(FLinearColor::White);
+        Button->SetBackgroundColor(Palette.Normal);
         Button->SetColorAndOpacity(FLinearColor::White);
         if (UButtonSlot* ButtonSlot = Cast<UButtonSlot>(Button->GetContentSlot()))
         {

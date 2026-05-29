@@ -160,6 +160,116 @@
     "LegacyNativeBridgeId": "context_strip"
   },
   {
+    "Id": "dock_layout",
+    "DisplayName": "Dock Layout",
+    "Category": "UI",
+    "Description": "Validates the native dock overlay shell and center viewport pass-through contract.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": false,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "dock_layout"
+  },
+  {
+    "Id": "right_inspector_tabs",
+    "DisplayName": "Right Inspector Tabs",
+    "Category": "UI",
+    "Description": "Validates Actor, Changes, Settings, and Tools routing inside the right inspector tab content.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": false,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "right_inspector_tabs"
+  },
+  {
+    "Id": "actor_context_panel",
+    "DisplayName": "Actor Context Panel",
+    "Category": "UI",
+    "Description": "Validates selected actor, component tree, transform, function, and favorite ViewModel rendering inputs.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": true,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "actor_context_panel"
+  },
+  {
+    "Id": "actor_attributes_section",
+    "DisplayName": "Actor Attributes Section",
+    "Category": "UI",
+    "Description": "Validates the dock Actor tab hosts the canonical Actor Attributes and Callable Functions sections.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": true,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "actor_attributes_section"
+  },
+  {
+    "Id": "component_row_focus_route",
+    "DisplayName": "Component Row Focus Route",
+    "Category": "UI",
+    "Description": "Validates dock component rows route through the controller to focus component attributes/functions.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": true,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "component_row_focus_route"
+  },
+  {
+    "Id": "favorite_row_navigation_route",
+    "DisplayName": "Favorite Row Navigation Route",
+    "Category": "UI",
+    "Description": "Validates dock favorite rows carry their source object and navigate through the controller/subsystem path.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": true,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "favorite_row_navigation_route"
+  },
+  {
+    "Id": "function_row_parameter_run_route",
+    "DisplayName": "Function Row Parameter Run Route",
+    "Category": "UI",
+    "Description": "Validates hosted function rows expose parameter inputs and run through the subsystem invocation authority.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": true,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "function_row_parameter_run_route"
+  },
+  {
+    "Id": "search_syncs_subsystem",
+    "DisplayName": "Search Syncs Subsystem",
+    "Category": "UI",
+    "Description": "Validates dock search text syncs to the subsystem and filters context/attributes/functions from one source.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": true,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "search_syncs_subsystem"
+  },
+  {
+    "Id": "transform_patch_gate",
+    "DisplayName": "Transform Patch Gate",
+    "Category": "Patch",
+    "Description": "Validates transform edits stage a patch without direct actor mutation.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": true,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "transform_patch_gate"
+  },
+  {
+    "Id": "changes_patch_visibility",
+    "DisplayName": "Changes Patch Visibility",
+    "Category": "Patch",
+    "Description": "Validates every staged transform modification is visible through the Changes patch ViewModel before apply.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": true,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "changes_patch_visibility"
+  },
+  {
+    "Id": "action_bar_controller_route",
+    "DisplayName": "Action Bar Controller Route",
+    "Category": "UI",
+    "Description": "Validates action bar intents route through the RuntimeInspector controller.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": true,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "action_bar_controller_route"
+  },
+  {
     "Id": "capture_changes_first_open_perf",
     "DisplayName": "Capture Changes First Open Perf",
     "Category": "Validation",

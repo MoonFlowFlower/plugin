@@ -84,9 +84,15 @@ RuntimeInspector 当前是一个 **运行时检查、变更审阅、验证与受
 
 共享 UI 事实：
 
-- `Changes / Settings / Tools` 继续使用全局 `SharedContextStrip`
-- `Actor` 页上下文摘要 authority 只能是 `ActorTopContextStrip`
-- `SharedContextStrip` 不得作为 `Actor` 页首帧 fallback，也不负责纠正 `Actor` 页布局
+- 当前首发 UI authority 是 persistent dock overlay shell：
+  - 原生 `UInspectorDockRootWidget`
+  - 左侧 `Actor Context Panel`
+  - 中央透明 viewport pass-through overlay
+  - 右侧 `Inspector Panel`
+- RuntimeInspector 不创建、不嵌入、不接管 UE/PIE viewport；中央区域只允许轻量 selection pill / toolbar 类 overlay
+- `Actor / Changes / Settings / Tools` 现在都在右侧 Inspector `TabContent` 内切换
+- `Changes / Settings / Tools` 可以复用既有页面 widget，但业务逻辑 authority 仍在 `UInspectorWorldSubsystem`
+- 旧 `Actor` dynamic split shell 不再是新首发 root 的 authority；不要在新 root 中重新挂载 legacy actor shell
 - 高级能力默认收起，不应抢占首屏
 - 结构性 UI 规则见 `docs/UI_GUARDRAILS.md`
 
@@ -102,25 +108,21 @@ RuntimeInspector 当前是一个 **运行时检查、变更审阅、验证与受
 - UI 结构 guardrails authority
   - `docs/UI_GUARDRAILS.md`
 
-`Actor` 页首开上下文条 authority 固定如下：
+Dock overlay UI authority 固定如下：
 
-- 首帧准备只能收口到 `UInspectorWorldSubsystem::PrimeActorPageForInitialOpen()`
-- `UInspectorWorldSubsystem::PrepareActorPageForPresentation()` 是 `Actor` 页进入可见态前的唯一包装 helper
-- `UInspectorWorldSubsystem::ApplyActorSplitPresentation()` 是 `Actor` 页左右分体呈现的唯一 helper
-- `UInspectorWorldSubsystem::RestoreActorSinglePanelBodyLayout()` 是 `Actor` 页退出 split 或窄屏 fallback 的唯一 helper
-- `Open()` 与 `HandleActorTabClicked()` 必须共用这条 helper
-- 首次 `AddToViewport()` 之前就必须先完成 `Actor` 页动态宿主和顶部条注入，不能等 panel 已经显示后再补
-- `ScheduleDeferredOpenActorRefresh()` 只负责默认选中 actor、baseline 与结构刷新
-- 不能再让 deferred refresh 承担“把底部条修回顶部”的职责
-- `GetActorPropertyHostDebugSummaryForAutomation()` 是 `Actor` 页结构诊断入口
-- `HideSharedContextStripForActorPage()` 是 `Actor` 页首开和切页时收起底部共享条的唯一 helper
-- `Actor` 页 split 只允许把 `ActorWorkbenchSidebarHost` 挂到左侧副 panel；`ActorTopContextStrip` 必须作为 `ActorWorkbenchSidebarHost` 的 `child[0]` 跟随左栏移动，不能继续留在右侧主 panel
-- `Actor` 页 split 默认几何是“左栏贴左边、右栏贴右边”，中间留白来自剩余视野，不再维护固定 center gap
-- `Actor` 页 selection 顶部摘要唯一 authority 是左栏顶部 compact `ActorTopContextStrip`；右侧不再使用四栏 summary，也不能把 `SharedContextStrip` 当成 `Actor` 页 fallback
-- `ActorTopContextStrip` 需要压缩时优先改它自己的 compact builder，不要误伤 `SharedContextStrip`
-- `Changes / Settings / Tools` 不允许复用 `Actor` 页 split shell；切出 `Actor` 页后必须回退到单面板
-- 非 `Actor` 单面板宽度 authority 现在和 `Actor` 右栏绑定，默认走同一套窄栏宽度规则，不再单独维护宽屏默认宽度
-- `Changes / Settings / Tools` 的布局实现必须先满足 `320..420px` 窄栏可用，再考虑宽屏；新增 row/action UI 时优先复用 compact helper，而不是继续写固定 label 宽和宽屏横排
+- `UInspectorWorldSubsystem::OpenToPage()` 只负责打开 native dock root、注册 input processor、设置 mouse/input mode 和 outline；不再挂载 legacy actor split shell
+- `URuntimeInspectorController` 只是 facade/adaptor：
+  - 读取 `UInspectorWorldSubsystem` 当前状态生成 `FRIInspectorViewModel`
+  - 接收 UI intent
+  - 转发到现有 patch/apply/undo/redo/function authority
+  - 不维护第二套 patch registry、selection state、undo history 或 workflow registry
+- `UInspectorDockRootWidget` 只能 render ViewModel、emit intent、保存局部视觉状态；不得直接查 Actor、改 Actor、写 patch 或维护 undo history
+- Transform 输入 commit 必须走 `URuntimeInspectorController::RequestStageTransformChange()`，先生成 `FRIPatchBundle/FRIPatchOperation` staged patch；Widget 内不得调用 `SetActor*`、`SetRelative*` 或 `ApplyFromText`
+- Apply/Revert/Undo/Redo/Refresh/Only Modify 都必须经 Controller 再进入 `UInspectorWorldSubsystem`
+- `FRIPatchViewModel` 只是当前 staged session 的展示映射；canonical record 仍是 `FRIPatchBundle/FRIPatchOperation`
+- `RICompactUI` 是新 UI 唯一 style token source；新增 dock widget 不允许散落裸颜色、button brush、radius/padding 常量
+- `GetDockLayoutDebugSummaryForAutomation()` 是 persistent dock shell 的结构诊断入口
+- 旧 `PrimeActorPageForInitialOpen()`、`PrepareActorPageForPresentation()`、`ApplyActorSplitPresentation()`、`ActorTopContextStrip` 只保留给 legacy fallback/历史路径；不要把它们作为新首发 root 的修复入口
 
 执行规则：
 

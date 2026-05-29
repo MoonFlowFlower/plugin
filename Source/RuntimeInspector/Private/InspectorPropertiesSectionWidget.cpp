@@ -267,7 +267,7 @@ void UInspectorPropertiesSectionWidget::BuildWidgetTree()
     RootBorder->SetContent(RootBox);
 
     if (UVerticalBoxSlot* TitleSlot = RootBox->AddChildToVerticalBox(
-        RICompactUI::MakeSectionTitle(WidgetTree, TEXT("Property"), RICompactUI::ERISectionVisualStyle::Emphasis)))
+        RICompactUI::MakeSectionTitle(WidgetTree, TEXT("Actor Attributes"), RICompactUI::ERISectionVisualStyle::Emphasis)))
     {
         TitleSlot->SetPadding(FMargin(0.f, 0.f, 0.f, RICompactUI::GetInlineGap()));
     }
@@ -438,7 +438,7 @@ UWidget* UInspectorPropertiesSectionWidget::CreateActorTransformBlock(const TArr
     BlockBorder->SetContent(BlockBox);
 
     if (UVerticalBoxSlot* TitleSlot = BlockBox->AddChildToVerticalBox(
-        RICompactUI::MakeSectionTitle(WidgetTree, TEXT("Actor Transform"), RICompactUI::ERISectionVisualStyle::Emphasis)))
+        RICompactUI::MakeSectionTitle(WidgetTree, TEXT("Transform"), RICompactUI::ERISectionVisualStyle::Emphasis)))
     {
         TitleSlot->SetPadding(FMargin(0.f, 0.f, 0.f, RICompactUI::GetInlineGap()));
     }

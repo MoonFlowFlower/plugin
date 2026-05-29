@@ -18,6 +18,8 @@
 #include "InspectorTestPageWidget.h"
 #include "InspectorTouchScrollBox.h"
 #include "InspectorCompactWidgetUtils.h"
+#include "InspectorDockRootWidget.h"
+#include "RuntimeInspectorController.h"
 
 #include "RuntimeInspectorInputProcessor.h"
 #include "RuntimeInspectorSettings.h"
@@ -416,6 +418,17 @@ static const FName RI_SelfTestId_PromoteMaterialApply(TEXT("promote_material_app
 static const FName RI_SelfTestId_AuditReport(TEXT("audit_report"));
 static const FName RI_SelfTestId_FilePage(TEXT("file_page_injection"));
 static const FName RI_SelfTestId_ContextStrip(TEXT("context_strip"));
+static const FName RI_SelfTestId_DockLayout(TEXT("dock_layout"));
+static const FName RI_SelfTestId_RightInspectorTabs(TEXT("right_inspector_tabs"));
+static const FName RI_SelfTestId_ActorContextPanel(TEXT("actor_context_panel"));
+static const FName RI_SelfTestId_ActorAttributesSection(TEXT("actor_attributes_section"));
+static const FName RI_SelfTestId_ComponentRowFocusRoute(TEXT("component_row_focus_route"));
+static const FName RI_SelfTestId_FavoriteRowNavigationRoute(TEXT("favorite_row_navigation_route"));
+static const FName RI_SelfTestId_FunctionRowParameterRunRoute(TEXT("function_row_parameter_run_route"));
+static const FName RI_SelfTestId_SearchSyncsSubsystem(TEXT("search_syncs_subsystem"));
+static const FName RI_SelfTestId_TransformPatchGate(TEXT("transform_patch_gate"));
+static const FName RI_SelfTestId_ChangesPatchVisibility(TEXT("changes_patch_visibility"));
+static const FName RI_SelfTestId_ActionBarControllerRoute(TEXT("action_bar_controller_route"));
 static const FName RI_SelfTestId_CaptureChangesFirstOpenPerf(TEXT("capture_changes_first_open_perf"));
 static const FName RI_SelfTestId_TransformSourcePersistencePrepare(TEXT("transform_source_persistence_prepare"));
 static const FName RI_SelfTestId_TransformSourcePersistenceVerifyRestore(TEXT("transform_source_persistence_verify_restore"));
@@ -3623,6 +3636,11 @@ FString UInspectorWorldSubsystem::GetPanelHostWindowDebugSummaryForAutomation() 
 #if !RUNTIME_INSPECTOR_ENABLED
     return TEXT("RuntimeInspector disabled");
 #else
+    if (const UInspectorDockRootWidget* RootWidget = DockRootWidget.Get())
+    {
+        return RootWidget->GetDockLayoutDebugSummary();
+    }
+
     if (UUserWidget* Panel = const_cast<UInspectorWorldSubsystem*>(this)->PanelWidget.Get())
     {
         RI_ForceWidgetTreeLayout(Panel);
@@ -3654,6 +3672,19 @@ FString UInspectorWorldSubsystem::GetPanelHostWindowDebugSummaryForAutomation() 
         WindowRect.GetSize().Y,
         WindowRect.Left,
         WindowRect.Top);
+#endif
+}
+
+FString UInspectorWorldSubsystem::GetDockLayoutDebugSummaryForAutomation() const
+{
+#if !RUNTIME_INSPECTOR_ENABLED
+    return TEXT("RuntimeInspector disabled");
+#else
+    if (const UInspectorDockRootWidget* RootWidget = DockRootWidget.Get())
+    {
+        return RootWidget->GetDockLayoutDebugSummary();
+    }
+    return TEXT("DockRoot=None");
 #endif
 }
 
@@ -4440,37 +4471,33 @@ void UInspectorWorldSubsystem::OpenToPage(ERIVisiblePage InitialPage)
 
     RegisterInputProcessor();
 
-    EnsurePanelWidget();
-
-    if (UUserWidget* W = PanelWidget.Get())
+    EnsureDockRootWidget();
+    if (URuntimeInspectorController* Controller = GetOrCreateRuntimeInspectorController())
     {
-        W->AddToViewport(9999);
-        RI_ApplyLegacyActorHeaderVisibilityFix(W);
+        switch (InitialPage)
+        {
+        case ERIVisiblePage::Changes:
+            Controller->SetActiveTab(ERIInspectorTab::Changes);
+            break;
+        case ERIVisiblePage::Settings:
+            Controller->SetActiveTab(ERIInspectorTab::Settings);
+            break;
+        case ERIVisiblePage::Tools:
+            Controller->SetActiveTab(ERIInspectorTab::Tools);
+            break;
+        case ERIVisiblePage::Actor:
+        default:
+            Controller->SetActiveTab(ERIInspectorTab::Actor);
+            break;
+        }
     }
-    EnsurePanelInteractionInitialized();
+    if (UInspectorDockRootWidget* RootWidget = DockRootWidget.Get())
+    {
+        RootWidget->AddToViewport(9999);
+        RootWidget->RefreshFromController();
+    }
     bHasCompletedInitialActorPanelRefresh = false;
-
-    switch (InitialPage)
-    {
-    case ERIVisiblePage::Changes:
-        CancelDeferredOpenActorRefresh();
-        ShowFilePage();
-        break;
-    case ERIVisiblePage::Settings:
-        CancelDeferredOpenActorRefresh();
-        ShowSettingsPage();
-        break;
-    case ERIVisiblePage::Tools:
-        CancelDeferredOpenActorRefresh();
-        ShowTestPage();
-        break;
-    case ERIVisiblePage::Actor:
-    default:
-        PrepareActorPageForPresentation(false);
-        PrepareActorPageForPresentation(true);
-        ScheduleDeferredOpenActorRefresh(true);
-        break;
-    }
+    CancelDeferredOpenActorRefresh();
 
     // 让鼠标可用（也可以后续做成设置项）
     if (APlayerController* PC = GetLocalPC())
@@ -4504,6 +4531,10 @@ void UInspectorWorldSubsystem::Close()
     if (!bOpen) return;
     bOpen = false;
     bInspectorOpen = false;
+    if (UInspectorDockRootWidget* ExistingDockRoot = DockRootWidget.Get())
+    {
+        ExistingDockRoot->RemoveFromParent();
+    }
     UUserWidget* ExistingPanelWidget = PanelWidget.Get();
     if (ExistingPanelWidget)
     {
@@ -5974,6 +6005,125 @@ void UInspectorWorldSubsystem::EnsurePanelWidget()
 #endif
 }
 
+URuntimeInspectorController* UInspectorWorldSubsystem::GetOrCreateRuntimeInspectorController()
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    if (!RuntimeInspectorController)
+    {
+        RuntimeInspectorController = NewObject<URuntimeInspectorController>(this);
+        RuntimeInspectorController->Initialize(this);
+    }
+    return RuntimeInspectorController;
+#else
+    return nullptr;
+#endif
+}
+
+void UInspectorWorldSubsystem::EnsureDockRootWidget()
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    if (DockRootWidget.IsValid())
+    {
+        return;
+    }
+
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
+
+    UInspectorDockRootWidget* RootWidget = nullptr;
+    if (APlayerController* PC = GetLocalPC())
+    {
+        RootWidget = CreateWidget<UInspectorDockRootWidget>(PC, UInspectorDockRootWidget::StaticClass());
+    }
+    if (!RootWidget)
+    {
+        RootWidget = CreateWidget<UInspectorDockRootWidget>(World, UInspectorDockRootWidget::StaticClass());
+    }
+    if (!RootWidget)
+    {
+        UE_LOG(LogRuntimeInspector, Error, TEXT("[RI] CreateWidget failed for native dock root."));
+        return;
+    }
+
+    DockRootWidgetStrong = RootWidget;
+    DockRootWidget = RootWidget;
+    RootWidget->SetController(GetOrCreateRuntimeInspectorController());
+    RegisterDockHostedPages(RootWidget->GetHostedFilePage(), RootWidget->GetHostedSettingsPage(), RootWidget->GetHostedTestPage());
+    RegisterDockHostedActorSections(RootWidget->GetHostedActorAttributes(), RootWidget->GetHostedActorFunctions());
+#endif
+}
+
+void UInspectorWorldSubsystem::RefreshDockRootWidget()
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    if (UInspectorDockRootWidget* RootWidget = DockRootWidget.Get())
+    {
+        RootWidget->RefreshFromController();
+        RegisterDockHostedPages(RootWidget->GetHostedFilePage(), RootWidget->GetHostedSettingsPage(), RootWidget->GetHostedTestPage());
+        RegisterDockHostedActorSections(RootWidget->GetHostedActorAttributes(), RootWidget->GetHostedActorFunctions());
+    }
+#endif
+}
+
+bool UInspectorWorldSubsystem::IsDockRootActive() const
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    const UInspectorDockRootWidget* RootWidget = DockRootWidget.Get();
+    return RootWidget && RootWidget->IsInViewport();
+#else
+    return false;
+#endif
+}
+
+void UInspectorWorldSubsystem::RegisterDockHostedPages(UInspectorFilePageWidget* InFilePage, UInspectorSettingsPageWidget* InSettingsPage, UInspectorTestPageWidget* InTestPage)
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    if (InFilePage)
+    {
+        FilePageWidgetStrong = InFilePage;
+        FilePageWidget = InFilePage;
+    }
+    if (InSettingsPage)
+    {
+        SettingsPageWidgetStrong = InSettingsPage;
+        SettingsPageWidget = InSettingsPage;
+    }
+    if (InTestPage)
+    {
+        TestPageWidgetStrong = InTestPage;
+        TestPageWidget = InTestPage;
+    }
+#else
+    (void)InFilePage;
+    (void)InSettingsPage;
+    (void)InTestPage;
+#endif
+}
+
+void UInspectorWorldSubsystem::RegisterDockHostedActorSections(UInspectorPropertiesSectionWidget* InPropertiesSection, UInspectorFunctionsSectionWidget* InFunctionsSection)
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    if (InPropertiesSection)
+    {
+        ActorPropertiesSectionWidgetStrong = InPropertiesSection;
+        ActorPropertiesSectionWidget = InPropertiesSection;
+        InPropertiesSection->SetInspectorSubsystem(this);
+    }
+    if (InFunctionsSection)
+    {
+        ActorFunctionsSectionWidgetStrong = InFunctionsSection;
+        ActorFunctionsSectionWidget = InFunctionsSection;
+        InFunctionsSection->SetInspectorSubsystem(this);
+    }
+#else
+    (void)InPropertiesSection;
+    (void)InFunctionsSection;
+#endif
+}
+
 void UInspectorWorldSubsystem::ResetPanelWidgetRuntimeState()
 {
 #if RUNTIME_INSPECTOR_ENABLED
@@ -7337,6 +7487,25 @@ void UInspectorWorldSubsystem::SetContentSwitcherIndex(int32 InIndex)
 UInspectorWorldSubsystem::ERIVisiblePage UInspectorWorldSubsystem::GetVisiblePage() const
 {
 #if RUNTIME_INSPECTOR_ENABLED
+    if (IsDockRootActive())
+    {
+        if (const URuntimeInspectorController* Controller = RuntimeInspectorController)
+        {
+            switch (Controller->GetActiveTab())
+            {
+            case ERIInspectorTab::Changes:
+                return ERIVisiblePage::Changes;
+            case ERIInspectorTab::Settings:
+                return ERIVisiblePage::Settings;
+            case ERIInspectorTab::Tools:
+                return ERIVisiblePage::Tools;
+            case ERIInspectorTab::Actor:
+            default:
+                return ERIVisiblePage::Actor;
+            }
+        }
+    }
+
     UWidgetSwitcher* Switcher = ContentSwitcher.Get();
     if (!Switcher)
     {
@@ -8865,6 +9034,14 @@ FString UInspectorWorldSubsystem::BuildActorPageStructureKey() const
 bool UInspectorWorldSubsystem::IsActorOnlyModifiedFilterEnabled() const
 {
 #if RUNTIME_INSPECTOR_ENABLED
+    if (const URuntimeInspectorController* Controller = RuntimeInspectorController)
+    {
+        if (IsDockRootActive())
+        {
+            return Controller->IsOnlyModifyEnabled();
+        }
+    }
+
     if (UUserWidget* Panel = PanelWidget.Get())
     {
         if (Panel->WidgetTree)
@@ -10680,6 +10857,15 @@ void UInspectorWorldSubsystem::ShowSettingsPage()
         OpenToPage(ERIVisiblePage::Settings);
         return;
     }
+    if (IsDockRootActive())
+    {
+        if (URuntimeInspectorController* Controller = GetOrCreateRuntimeInspectorController())
+        {
+            Controller->SetActiveTab(ERIInspectorTab::Settings);
+        }
+        RefreshDockRootWidget();
+        return;
+    }
     const double StartSeconds = FPlatformTime::Seconds();
     EnsureSettingsPageInjected();
     if (UInspectorSettingsPageWidget* Page = SettingsPageWidget.Get())
@@ -10765,6 +10951,15 @@ void UInspectorWorldSubsystem::ShowFilePage()
         OpenToPage(ERIVisiblePage::Changes);
         return;
     }
+    if (IsDockRootActive())
+    {
+        if (URuntimeInspectorController* Controller = GetOrCreateRuntimeInspectorController())
+        {
+            Controller->SetActiveTab(ERIInspectorTab::Changes);
+        }
+        RefreshDockRootWidget();
+        return;
+    }
     const double StartSeconds = FPlatformTime::Seconds();
     EnsureFilePageInjected();
     SetContentSwitcherIndex(1);
@@ -10786,6 +10981,15 @@ void UInspectorWorldSubsystem::ShowTestPage()
     if (!bOpen)
     {
         OpenToPage(ERIVisiblePage::Tools);
+        return;
+    }
+    if (IsDockRootActive())
+    {
+        if (URuntimeInspectorController* Controller = GetOrCreateRuntimeInspectorController())
+        {
+            Controller->SetActiveTab(ERIInspectorTab::Tools);
+        }
+        RefreshDockRootWidget();
         return;
     }
     EnsureTestPageInjected();
@@ -10811,6 +11015,16 @@ void UInspectorWorldSubsystem::HandleActorTabClicked()
     RestoreMountedHostPanelVisibility();
 
 #if RUNTIME_INSPECTOR_ENABLED
+    if (IsDockRootActive())
+    {
+        if (URuntimeInspectorController* Controller = GetOrCreateRuntimeInspectorController())
+        {
+            Controller->SetActiveTab(ERIInspectorTab::Actor);
+        }
+        RefreshDockRootWidget();
+        return;
+    }
+
     PrepareActorPageForPresentation(true);
 
     if (!bHasCompletedInitialActorPanelRefresh || !SelectedActor.IsValid())
@@ -12549,12 +12763,36 @@ TArray<FRISelfTestTableRow> UInspectorWorldSubsystem::LoadConfiguredSelfTestRows
         }
     }
 
-    if (Rows.Num() == 0)
+    TArray<FRISelfTestTableRow> JsonRows;
     {
         FString Error;
-        if (!RI_LoadRowsFromJsonFile(RI_GetToolsConfigFilePath(TEXT("ToolsSelfTestsDefault.json")), Rows, Error))
+        if (!RI_LoadRowsFromJsonFile(RI_GetToolsConfigFilePath(TEXT("ToolsSelfTestsDefault.json")), JsonRows, Error))
         {
             LogToolsDefinitionIssue(Error);
+        }
+    }
+
+    if (Rows.Num() == 0)
+    {
+        Rows = MoveTemp(JsonRows);
+    }
+    else
+    {
+        for (FRISelfTestTableRow& JsonRow : JsonRows)
+        {
+            if (JsonRow.Id.IsNone())
+            {
+                continue;
+            }
+
+            const bool bAlreadyConfigured = Rows.ContainsByPredicate([&JsonRow](const FRISelfTestTableRow& ExistingRow)
+            {
+                return ExistingRow.Id == JsonRow.Id;
+            });
+            if (!bAlreadyConfigured)
+            {
+                Rows.Add(MoveTemp(JsonRow));
+            }
         }
     }
 #endif
@@ -12596,12 +12834,36 @@ TArray<FRIWorkflowTableRow> UInspectorWorldSubsystem::LoadConfiguredWorkflowRows
         }
     }
 
-    if (Rows.Num() == 0)
+    TArray<FRIWorkflowTableRow> JsonRows;
     {
         FString Error;
-        if (!RI_LoadRowsFromJsonFile(RI_GetToolsConfigFilePath(TEXT("ToolsWorkflowsDefault.json")), Rows, Error))
+        if (!RI_LoadRowsFromJsonFile(RI_GetToolsConfigFilePath(TEXT("ToolsWorkflowsDefault.json")), JsonRows, Error))
         {
             LogToolsDefinitionIssue(Error);
+        }
+    }
+
+    if (Rows.Num() == 0)
+    {
+        Rows = MoveTemp(JsonRows);
+    }
+    else
+    {
+        for (FRIWorkflowTableRow& JsonRow : JsonRows)
+        {
+            if (JsonRow.WorkflowId.IsNone())
+            {
+                continue;
+            }
+
+            const bool bAlreadyConfigured = Rows.ContainsByPredicate([&JsonRow](const FRIWorkflowTableRow& ExistingRow)
+            {
+                return ExistingRow.WorkflowId == JsonRow.WorkflowId;
+            });
+            if (!bAlreadyConfigured)
+            {
+                Rows.Add(MoveTemp(JsonRow));
+            }
         }
     }
 #endif
@@ -13082,6 +13344,73 @@ bool UInspectorWorldSubsystem::ExecuteLegacyToolNativeBridgeAction(FName BridgeI
     OutReport = TEXT("RuntimeInspector disabled");
     return false;
 #else
+    auto ResolveDockContractActor = [this](bool& bOutSpawnedActor) -> AActor*
+    {
+        bOutSpawnedActor = false;
+
+        if (SelectedActor.IsValid())
+        {
+            return SelectedActor.Get();
+        }
+
+        if (AActor* PreferredActor = ResolvePreferredFabScreenshotActor())
+        {
+            return PreferredActor;
+        }
+
+        UWorld* World = GetWorld();
+        if (!World)
+        {
+            return nullptr;
+        }
+
+        AActor* BestActor = nullptr;
+        int32 BestScore = MIN_int32;
+        for (TActorIterator<AActor> It(World); It; ++It)
+        {
+            AActor* Candidate = *It;
+            if (!Candidate || Candidate->IsActorBeingDestroyed())
+            {
+                continue;
+            }
+
+            const int32 Score = RI_ScoreDefaultSelectionActor(Candidate);
+            if (Score > BestScore)
+            {
+                BestScore = Score;
+                BestActor = Candidate;
+            }
+        }
+
+        if (BestActor && BestScore > MIN_int32)
+        {
+            return BestActor;
+        }
+
+        FActorSpawnParameters SpawnParameters;
+        SpawnParameters.ObjectFlags |= RF_Transient;
+        AStaticMeshActor* SpawnedActor = World->SpawnActor<AStaticMeshActor>(AStaticMeshActor::StaticClass(), FTransform::Identity, SpawnParameters);
+        bOutSpawnedActor = SpawnedActor != nullptr;
+        return SpawnedActor;
+    };
+
+    auto CleanupDockContractActor = [this](AActor* Actor, bool bSpawnedActor, TWeakObjectPtr<AActor> PreviousActor)
+    {
+        if (PreviousActor.IsValid() && SelectedActor.Get() != PreviousActor.Get())
+        {
+            SetSelectedActor(PreviousActor.Get());
+        }
+        else if (!PreviousActor.IsValid() && Actor && SelectedActor.Get() == Actor)
+        {
+            SetSelectedActor(nullptr);
+        }
+
+        if (bSpawnedActor && Actor && !Actor->IsActorBeingDestroyed())
+        {
+            Actor->Destroy();
+        }
+    };
+
     if (BridgeId == RI_SelfTestId_ConfirmDialog)
     {
         bOutPassed = RunConfirmDialogColorInputSelfTest(OutReport);
@@ -13175,6 +13504,556 @@ bool UInspectorWorldSubsystem::ExecuteLegacyToolNativeBridgeAction(FName BridgeI
     if (BridgeId == RI_SelfTestId_ContextStrip)
     {
         bOutPassed = RunContextStripSelfTest(OutReport);
+        return true;
+    }
+
+    if (BridgeId == RI_SelfTestId_DockLayout)
+    {
+        if (!bOpen)
+        {
+            Open();
+        }
+        RefreshDockRootWidget();
+        const FString Summary = GetDockLayoutDebugSummaryForAutomation();
+        bOutPassed = Summary.Contains(TEXT("DockRoot=1"))
+            && Summary.Contains(TEXT("RightPanel=1"))
+            && Summary.Contains(TEXT("SideWidth=256"))
+            && Summary.Contains(TEXT("CenterPassThrough=1"))
+            && Summary.Contains(TEXT("FavoritesFrame=1"))
+            && Summary.Contains(TEXT("FavoritesScroll=1"))
+            && Summary.Contains(TEXT("FunctionsFrame=1"))
+            && Summary.Contains(TEXT("ActionBar=1"));
+        OutReport = FString::Printf(TEXT("dock_layout=%s | %s"), bOutPassed ? TEXT("PASS") : TEXT("FAIL"), *Summary);
+        return true;
+    }
+
+    if (BridgeId == RI_SelfTestId_RightInspectorTabs)
+    {
+        if (!bOpen)
+        {
+            Open();
+        }
+
+        struct FTabCheck
+        {
+            ERIVisiblePage Page;
+            ERIInspectorTab Tab;
+        };
+
+        const FTabCheck Checks[] = {
+            { ERIVisiblePage::Actor, ERIInspectorTab::Actor },
+            { ERIVisiblePage::Changes, ERIInspectorTab::Changes },
+            { ERIVisiblePage::Settings, ERIInspectorTab::Settings },
+            { ERIVisiblePage::Tools, ERIInspectorTab::Tools }
+        };
+
+        TArray<FString> Reports;
+        bool bAllTabsOk = true;
+        for (const FTabCheck& Check : Checks)
+        {
+            switch (Check.Page)
+            {
+            case ERIVisiblePage::Actor:
+                HandleActorTabClicked();
+                break;
+            case ERIVisiblePage::Changes:
+                HandleFileTabClicked();
+                break;
+            case ERIVisiblePage::Settings:
+                HandleSettingsTabClicked();
+                break;
+            case ERIVisiblePage::Tools:
+                HandleTestTabClicked();
+                break;
+            default:
+                break;
+            }
+
+            const bool bPageOk = GetVisiblePage() == Check.Page;
+            const bool bControllerOk = RuntimeInspectorController && RuntimeInspectorController->GetActiveTab() == Check.Tab;
+            bAllTabsOk = bAllTabsOk && bPageOk && bControllerOk;
+            Reports.Add(FString::Printf(TEXT("%d page=%d controller=%d"), static_cast<int32>(Check.Page), bPageOk ? 1 : 0, bControllerOk ? 1 : 0));
+        }
+
+        bOutPassed = bAllTabsOk;
+        OutReport = FString::Printf(TEXT("right_inspector_tabs=%s | %s"), bOutPassed ? TEXT("PASS") : TEXT("FAIL"), *FString::Join(Reports, TEXT(" | ")));
+        return true;
+    }
+
+    if (BridgeId == RI_SelfTestId_ActorContextPanel)
+    {
+        if (!bOpen)
+        {
+            Open();
+        }
+
+        const TWeakObjectPtr<AActor> PreviousActor = SelectedActor;
+        bool bSpawnedActor = false;
+        AActor* TestActor = ResolveDockContractActor(bSpawnedActor);
+        if (TestActor && SelectedActor.Get() != TestActor)
+        {
+            SetSelectedActor(TestActor);
+        }
+
+        URuntimeInspectorController* Controller = GetOrCreateRuntimeInspectorController();
+        const FRIInspectorViewModel ViewModel = Controller ? Controller->GetCurrentViewModel() : FRIInspectorViewModel();
+        const bool bActorOk = ViewModel.SelectedActor.SelectionState == ERISelectionState::Selected;
+        const bool bComponentOk = ViewModel.Components.Num() > 0;
+        const bool bTransformOk = !ViewModel.Transform.bReadOnly;
+        bOutPassed = bActorOk && bComponentOk && bTransformOk;
+        OutReport = FString::Printf(
+            TEXT("actor_context_panel=%s | Actor=%d Components=%d TransformReadOnly=%d Functions=%d Favorites=%d"),
+            bOutPassed ? TEXT("PASS") : TEXT("FAIL"),
+            bActorOk ? 1 : 0,
+            ViewModel.Components.Num(),
+            ViewModel.Transform.bReadOnly ? 1 : 0,
+            ViewModel.Functions.Num(),
+            ViewModel.Favorites.Num());
+        CleanupDockContractActor(TestActor, bSpawnedActor, PreviousActor);
+        return true;
+    }
+
+    if (BridgeId == RI_SelfTestId_ActorAttributesSection)
+    {
+        if (!bOpen)
+        {
+            Open();
+        }
+
+        const TWeakObjectPtr<AActor> PreviousActor = SelectedActor;
+        bool bSpawnedActor = false;
+        AActor* TestActor = ResolveDockContractActor(bSpawnedActor);
+        if (TestActor && SelectedActor.Get() != TestActor)
+        {
+            SetSelectedActor(TestActor);
+        }
+
+        RefreshDockRootWidget();
+        const int32 AttributeRows = ActorPropertiesSectionWidget.IsValid()
+            ? ActorPropertiesSectionWidget->GetEntryWidgetCountForAutomation()
+            : INDEX_NONE;
+        const bool bAttributesOk = ActorPropertiesSectionWidget.IsValid()
+            && ActorPropertiesSectionWidget->HasPropertyScrollRoot()
+            && AttributeRows > 0;
+        const bool bTransformOk = ActorPropertiesSectionWidget.IsValid()
+            && ActorPropertiesSectionWidget->HasActorTransformBlockForAutomation();
+        const int32 FunctionRows = ActorFunctionsSectionWidget.IsValid()
+            ? ActorFunctionsSectionWidget->GetEntryWidgetCountForAutomation()
+            : INDEX_NONE;
+        const bool bFunctionsOk = ActorFunctionsSectionWidget.IsValid()
+            && ActorFunctionsSectionWidget->HasFunctionScrollRoot()
+            && FunctionRows >= 0;
+
+        bOutPassed = bAttributesOk && bTransformOk && bFunctionsOk;
+        OutReport = FString::Printf(
+            TEXT("actor_attributes_section=%s | Attributes=%d Transform=%d Rows=%d Functions=%d"),
+            bOutPassed ? TEXT("PASS") : TEXT("FAIL"),
+            bAttributesOk ? 1 : 0,
+            bTransformOk ? 1 : 0,
+            AttributeRows,
+            FunctionRows);
+        CleanupDockContractActor(TestActor, bSpawnedActor, PreviousActor);
+        return true;
+    }
+
+    if (BridgeId == RI_SelfTestId_ComponentRowFocusRoute)
+    {
+        if (!bOpen)
+        {
+            Open();
+        }
+
+        const TWeakObjectPtr<AActor> PreviousActor = SelectedActor;
+        bool bSpawnedActor = false;
+        AActor* TestActor = ResolveDockContractActor(bSpawnedActor);
+        if (TestActor && SelectedActor.Get() != TestActor)
+        {
+            SetSelectedActor(TestActor);
+        }
+
+        URuntimeInspectorController* Controller = GetOrCreateRuntimeInspectorController();
+        const FRIInspectorViewModel ViewModel = Controller ? Controller->GetCurrentViewModel() : FRIInspectorViewModel();
+        FString TargetComponentName;
+        for (const FRIComponentNodeViewModel& Component : ViewModel.Components)
+        {
+            if (!Component.ComponentName.IsEmpty())
+            {
+                TargetComponentName = Component.ComponentName;
+                if (!Component.bSelected)
+                {
+                    break;
+                }
+            }
+        }
+
+        FString RouteError;
+        const bool bRouteOk = Controller && !TargetComponentName.IsEmpty()
+            && Controller->RequestFocusComponent(TargetComponentName, RouteError);
+        UObject* FocusedObject = GetFocusedInspectObject();
+        const bool bFocusOk = FocusedObject && FocusedObject->GetName().Equals(TargetComponentName, ESearchCase::IgnoreCase);
+        RefreshDockRootWidget();
+        const FRIInspectorViewModel AfterViewModel = Controller ? Controller->GetCurrentViewModel() : FRIInspectorViewModel();
+        bool bViewModelSelected = false;
+        for (const FRIComponentNodeViewModel& Component : AfterViewModel.Components)
+        {
+            if (Component.bSelected && Component.ComponentName.Equals(TargetComponentName, ESearchCase::IgnoreCase))
+            {
+                bViewModelSelected = true;
+                break;
+            }
+        }
+
+        bOutPassed = bRouteOk && bFocusOk && bViewModelSelected;
+        OutReport = FString::Printf(
+            TEXT("component_row_focus_route=%s | Component=%s Route=%d Focus=%d VM=%d Error=%s"),
+            bOutPassed ? TEXT("PASS") : TEXT("FAIL"),
+            *TargetComponentName,
+            bRouteOk ? 1 : 0,
+            bFocusOk ? 1 : 0,
+            bViewModelSelected ? 1 : 0,
+            *RouteError);
+        CleanupDockContractActor(TestActor, bSpawnedActor, PreviousActor);
+        return true;
+    }
+
+    if (BridgeId == RI_SelfTestId_FavoriteRowNavigationRoute)
+    {
+        if (!bOpen)
+        {
+            Open();
+        }
+
+        const TWeakObjectPtr<AActor> PreviousActor = SelectedActor;
+        bool bSpawnedActor = false;
+        AActor* TestActor = ResolveDockContractActor(bSpawnedActor);
+        if (TestActor && SelectedActor.Get() != TestActor)
+        {
+            SetSelectedActor(TestActor);
+        }
+
+        URuntimeInspectorController* Controller = GetOrCreateRuntimeInspectorController();
+        if (Controller)
+        {
+            Controller->SetSearchText(FText::GetEmpty());
+        }
+
+        TArray<UObject*> PropertyItems;
+        GetPropertyItemsForSelectedEx(TEXT(""), false, PropertyItems);
+        UObject* FavoriteCandidate = nullptr;
+        for (UObject* ItemObject : PropertyItems)
+        {
+            UInspectorPropertyItem* PropertyItem = Cast<UInspectorPropertyItem>(ItemObject);
+            if (PropertyItem && PropertyItem->GetTargetObject())
+            {
+                FavoriteCandidate = PropertyItem;
+                break;
+            }
+        }
+
+        const bool bWasFavorite = FavoriteCandidate && IsFavoriteForAnyItem(FavoriteCandidate);
+        if (FavoriteCandidate && !bWasFavorite)
+        {
+            ToggleFavoriteForAnyItem(FavoriteCandidate);
+        }
+
+        RefreshDockRootWidget();
+        const FRIInspectorViewModel ViewModel = Controller ? Controller->GetCurrentViewModel() : FRIInspectorViewModel();
+        bool bFavoriteVisible = false;
+        for (const FRIFavoriteViewModel& Favorite : ViewModel.Favorites)
+        {
+            if (Favorite.SourceItem == FavoriteCandidate)
+            {
+                bFavoriteVisible = true;
+                break;
+            }
+        }
+
+        FString NavigateError;
+        const bool bNavigateOk = Controller && FavoriteCandidate
+            && Controller->RequestNavigateToPinnedItem(FavoriteCandidate, NavigateError);
+        const bool bSearchCleared = GetCurrentActorSearchText().IsEmpty()
+            && (!Controller || Controller->GetSearchText().IsEmpty());
+
+        if (FavoriteCandidate && IsFavoriteForAnyItem(FavoriteCandidate) != bWasFavorite)
+        {
+            ToggleFavoriteForAnyItem(FavoriteCandidate);
+        }
+
+        RefreshDockRootWidget();
+        bOutPassed = FavoriteCandidate && bFavoriteVisible && bNavigateOk && bSearchCleared;
+        OutReport = FString::Printf(
+            TEXT("favorite_row_navigation_route=%s | Candidate=%s Visible=%d Navigate=%d SearchCleared=%d Error=%s"),
+            bOutPassed ? TEXT("PASS") : TEXT("FAIL"),
+            *GetNameSafe(FavoriteCandidate),
+            bFavoriteVisible ? 1 : 0,
+            bNavigateOk ? 1 : 0,
+            bSearchCleared ? 1 : 0,
+            *NavigateError);
+        CleanupDockContractActor(TestActor, bSpawnedActor, PreviousActor);
+        return true;
+    }
+
+    if (BridgeId == RI_SelfTestId_FunctionRowParameterRunRoute)
+    {
+        if (!bOpen)
+        {
+            Open();
+        }
+
+        const TWeakObjectPtr<AActor> PreviousActor = SelectedActor;
+        bool bSpawnedActor = false;
+        AActor* TestActor = ResolveDockContractActor(bSpawnedActor);
+        if (TestActor && SelectedActor.Get() != TestActor)
+        {
+            SetSelectedActor(TestActor);
+        }
+
+        TArray<UInspectorFunctionItem*> FunctionItems;
+        GetFunctionItemsForSelected(TEXT(""), FunctionItems);
+
+        auto AreParamsSupported = [](const UInspectorFunctionItem* Item) -> bool
+        {
+            if (!Item)
+            {
+                return false;
+            }
+            for (const FRIFunctionParameterSpec& Spec : Item->GetParameterSpecs())
+            {
+                if (!Spec.bIsSupported)
+                {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        auto IsSafeRunCandidate = [](const UInspectorFunctionItem* Item) -> bool
+        {
+            if (!Item || !Item->IsValidItem())
+            {
+                return false;
+            }
+            const FString Name = Item->GetFunctionName();
+            return Name.Contains(TEXT("Print"), ESearchCase::IgnoreCase)
+                || Name.Contains(TEXT("FlushNetDormancy"), ESearchCase::IgnoreCase)
+                || Name.Contains(TEXT("ForceNetUpdate"), ESearchCase::IgnoreCase);
+        };
+
+        UInspectorFunctionItem* ParameterItem = nullptr;
+        UInspectorFunctionItem* RunItem = nullptr;
+        for (UInspectorFunctionItem* Item : FunctionItems)
+        {
+            if (!Item || !Item->IsValidItem() || !AreParamsSupported(Item))
+            {
+                continue;
+            }
+            if (!ParameterItem && Item->GetParameterCount() > 0)
+            {
+                ParameterItem = Item;
+            }
+            if (!RunItem && IsSafeRunCandidate(Item))
+            {
+                RunItem = Item;
+            }
+        }
+        if (!RunItem && ParameterItem)
+        {
+            RunItem = ParameterItem;
+        }
+
+        RefreshDockRootWidget();
+        if (ActorFunctionsSectionWidget.IsValid())
+        {
+            ActorFunctionsSectionWidget->RefreshFromSubsystem();
+        }
+
+        UInspectorFunctionRowWidget* ParameterRow = ParameterItem && ActorFunctionsSectionWidget.IsValid()
+            ? ActorFunctionsSectionWidget->FindFunctionRowForAutomation(ParameterItem)
+            : nullptr;
+        const bool bParameterUiOk = ParameterItem
+            && ParameterRow
+            && ParameterRow->GetParameterInputHeightForAutomation() > 0.f;
+
+        UInspectorFunctionRowWidget* RunRow = RunItem && ActorFunctionsSectionWidget.IsValid()
+            ? ActorFunctionsSectionWidget->FindFunctionRowForAutomation(RunItem)
+            : nullptr;
+        FString RunError;
+        const bool bRunOk = RunRow && RunRow->InvokeForAutomation(RunError);
+
+        bOutPassed = ActorFunctionsSectionWidget.IsValid()
+            && FunctionItems.Num() > 0
+            && bParameterUiOk
+            && bRunOk;
+        OutReport = FString::Printf(
+            TEXT("function_row_parameter_run_route=%s | Functions=%d Param=%s ParamUI=%d Run=%s RunOk=%d Error=%s"),
+            bOutPassed ? TEXT("PASS") : TEXT("FAIL"),
+            FunctionItems.Num(),
+            *GetNameSafe(ParameterItem),
+            bParameterUiOk ? 1 : 0,
+            *GetNameSafe(RunItem),
+            bRunOk ? 1 : 0,
+            *RunError);
+        CleanupDockContractActor(TestActor, bSpawnedActor, PreviousActor);
+        return true;
+    }
+
+    if (BridgeId == RI_SelfTestId_SearchSyncsSubsystem)
+    {
+        if (!bOpen)
+        {
+            Open();
+        }
+
+        const TWeakObjectPtr<AActor> PreviousActor = SelectedActor;
+        bool bSpawnedActor = false;
+        AActor* TestActor = ResolveDockContractActor(bSpawnedActor);
+        if (TestActor && SelectedActor.Get() != TestActor)
+        {
+            SetSelectedActor(TestActor);
+        }
+
+        URuntimeInspectorController* Controller = GetOrCreateRuntimeInspectorController();
+        if (Controller)
+        {
+            Controller->SetSearchText(FText::GetEmpty());
+        }
+        const FRIInspectorViewModel AllViewModel = Controller ? Controller->GetCurrentViewModel() : FRIInspectorViewModel();
+
+        FString Query;
+        if (AllViewModel.Components.Num() > 0)
+        {
+            Query = AllViewModel.Components[0].ComponentName.Left(4);
+            if (Query.Len() < 2)
+            {
+                Query = AllViewModel.Components[0].ComponentName;
+            }
+        }
+
+        if (Controller && !Query.IsEmpty())
+        {
+            Controller->SetSearchText(FText::FromString(Query));
+        }
+        RefreshDockRootWidget();
+        const FRIInspectorViewModel FilteredViewModel = Controller ? Controller->GetCurrentViewModel() : FRIInspectorViewModel();
+        const bool bSubsystemSync = GetCurrentActorSearchText().Equals(Query, ESearchCase::CaseSensitive)
+            && Controller
+            && Controller->GetSearchText().Equals(Query, ESearchCase::CaseSensitive);
+        bool bComponentFilterOk = !Query.IsEmpty()
+            && FilteredViewModel.Components.Num() > 0
+            && FilteredViewModel.Components.Num() <= AllViewModel.Components.Num();
+        for (const FRIComponentNodeViewModel& Component : FilteredViewModel.Components)
+        {
+            const FString Haystack = FString::Printf(
+                TEXT("%s %s %s"),
+                *Component.ComponentName,
+                *Component.DisplayName.ToString(),
+                *Component.ClassName.ToString());
+            if (!Haystack.Contains(Query, ESearchCase::IgnoreCase))
+            {
+                bComponentFilterOk = false;
+                break;
+            }
+        }
+
+        const bool bHostedSectionsOk = ActorPropertiesSectionWidget.IsValid()
+            && ActorFunctionsSectionWidget.IsValid();
+        if (Controller)
+        {
+            Controller->SetSearchText(FText::GetEmpty());
+        }
+        RefreshDockRootWidget();
+
+        bOutPassed = bSubsystemSync && bComponentFilterOk && bHostedSectionsOk;
+        OutReport = FString::Printf(
+            TEXT("search_syncs_subsystem=%s | Query=%s Sync=%d Components=%d->%d Hosted=%d"),
+            bOutPassed ? TEXT("PASS") : TEXT("FAIL"),
+            *Query,
+            bSubsystemSync ? 1 : 0,
+            AllViewModel.Components.Num(),
+            FilteredViewModel.Components.Num(),
+            bHostedSectionsOk ? 1 : 0);
+        CleanupDockContractActor(TestActor, bSpawnedActor, PreviousActor);
+        return true;
+    }
+
+    if (BridgeId == RI_SelfTestId_TransformPatchGate || BridgeId == RI_SelfTestId_ChangesPatchVisibility)
+    {
+        const TWeakObjectPtr<AActor> PreviousActor = SelectedActor;
+        bool bSpawnedActor = false;
+        AActor* TestActor = ResolveDockContractActor(bSpawnedActor);
+        if (TestActor && SelectedActor.Get() != TestActor)
+        {
+            SetSelectedActor(TestActor);
+        }
+
+        if (!SelectedActor.IsValid())
+        {
+            OutReport = TEXT("Blocked: selected actor is required.");
+            bOutPassed = false;
+            CleanupDockContractActor(TestActor, bSpawnedActor, PreviousActor);
+            return true;
+        }
+
+        AActor* Actor = SelectedActor.Get();
+        USceneComponent* RootComponent = Actor ? Actor->GetRootComponent() : nullptr;
+        if (!RootComponent)
+        {
+            OutReport = TEXT("Blocked: selected actor has no root scene component.");
+            bOutPassed = false;
+            CleanupDockContractActor(TestActor, bSpawnedActor, PreviousActor);
+            return true;
+        }
+
+        if (!bOpen)
+        {
+            Open();
+        }
+
+        const FVector BeforeLocation = RootComponent->GetRelativeLocation();
+        URuntimeInspectorController* Controller = GetOrCreateRuntimeInspectorController();
+        FString StageError;
+        const bool bStageOk = Controller && Controller->RequestStageTransformChange(ERITransformField::Location, ERIAxis::X, BeforeLocation.X + 7.0, StageError);
+        const FVector AfterStageLocation = RootComponent->GetRelativeLocation();
+        const FRIInspectorViewModel ViewModel = Controller ? Controller->GetCurrentViewModel() : FRIInspectorViewModel();
+        const bool bNoDirectMutation = AfterStageLocation.Equals(BeforeLocation);
+        const bool bVisiblePatch = ViewModel.StagedPatches.Num() > 0;
+        const bool bChangesDebugOk = GetDockLayoutDebugSummaryForAutomation().Contains(TEXT("PatchRows="));
+        ClearStagedPatch();
+        RefreshDockRootWidget();
+
+        bOutPassed = bStageOk && bNoDirectMutation && bVisiblePatch && bChangesDebugOk;
+        OutReport = FString::Printf(
+            TEXT("%s=%s | Stage=%d NoDirectMutation=%d PatchRows=%d Error=%s"),
+            BridgeId == RI_SelfTestId_TransformPatchGate ? TEXT("transform_patch_gate") : TEXT("changes_patch_visibility"),
+            bOutPassed ? TEXT("PASS") : TEXT("FAIL"),
+            bStageOk ? 1 : 0,
+            bNoDirectMutation ? 1 : 0,
+            ViewModel.StagedPatches.Num(),
+            *StageError);
+        CleanupDockContractActor(TestActor, bSpawnedActor, PreviousActor);
+        return true;
+    }
+
+    if (BridgeId == RI_SelfTestId_ActionBarControllerRoute)
+    {
+        if (!bOpen)
+        {
+            Open();
+        }
+
+        URuntimeInspectorController* Controller = GetOrCreateRuntimeInspectorController();
+        FString ResetError;
+        const bool bControllerOk = Controller != nullptr;
+        if (Controller)
+        {
+            Controller->RequestRefresh();
+            Controller->RequestReset(ResetError);
+            Controller->RequestUndo();
+            Controller->RequestRedo();
+        }
+        const FString LastIntent = Controller ? Controller->GetLastIntentLog() : FString();
+        bOutPassed = bControllerOk && LastIntent.Contains(TEXT("Redo"));
+        OutReport = FString::Printf(TEXT("action_bar_controller_route=%s | LastIntent=%s"), bOutPassed ? TEXT("PASS") : TEXT("FAIL"), *LastIntent);
         return true;
     }
 
@@ -22936,6 +23815,20 @@ void UInspectorWorldSubsystem::RefreshPanel(EInspectorRefreshReason Reason)
 {
 #if RUNTIME_INSPECTOR_ENABLED
     const double StartSeconds = FPlatformTime::Seconds();
+    if (IsDockRootActive())
+    {
+        RefreshDockRootWidget();
+        const ERIVisiblePage VisiblePage = GetVisiblePage();
+        UE_LOG(
+            LogRuntimeInspector,
+            Log,
+            TEXT("[RI][Perf] RefreshDockRoot %.2f ms | Page=%d Reason=%d"),
+            (FPlatformTime::Seconds() - StartSeconds) * 1000.0,
+            static_cast<int32>(VisiblePage),
+            static_cast<int32>(Reason));
+        return;
+    }
+
     ApplyPanelInteractionPresentation();
     const ERIVisiblePage VisiblePage = GetVisiblePage();
     const bool bActorPageVisible = VisiblePage == ERIVisiblePage::Actor;
@@ -28200,6 +29093,41 @@ bool UInspectorWorldSubsystem::StageSelectionAsPatch(FString& OutError)
     bHasStagedPatch = StagedPatchBundle.Operations.Num() > 0;
     InvalidateFileManagementSummaryCache();
     return bHasStagedPatch;
+#endif
+}
+
+bool UInspectorWorldSubsystem::StagePatchBundle(const FRIPatchBundle& InBundle, FString& OutError)
+{
+#if !RUNTIME_INSPECTOR_ENABLED
+    OutError = TEXT("Not available (RUNTIME_INSPECTOR_ENABLED=0)");
+    return false;
+#else
+    OutError.Reset();
+    if (InBundle.Operations.Num() <= 0)
+    {
+        OutError = TEXT("Patch bundle has no operations");
+        return false;
+    }
+
+    StagedPatchBundle = InBundle;
+    StagedPatchBundle.Version = StagedPatchBundle.Version <= 0 ? 1 : StagedPatchBundle.Version;
+    if (StagedPatchBundle.BundleId.IsEmpty())
+    {
+        StagedPatchBundle.BundleId = FGuid::NewGuid().ToString(EGuidFormats::DigitsWithHyphensLower);
+    }
+    if (StagedPatchBundle.CapturedAtUtc.IsEmpty())
+    {
+        StagedPatchBundle.CapturedAtUtc = FDateTime::UtcNow().ToIso8601();
+    }
+    if (StagedPatchBundle.DisplayName.IsEmpty())
+    {
+        StagedPatchBundle.DisplayName = TEXT("RuntimeInspector staged changes");
+    }
+    bHasStagedPatch = true;
+    LastPatchApplyResult = FRIApplyResult();
+    InvalidateFileManagementSummaryCache();
+    RefreshPanel(EInspectorRefreshReason::ValuesChanged);
+    return true;
 #endif
 }
 

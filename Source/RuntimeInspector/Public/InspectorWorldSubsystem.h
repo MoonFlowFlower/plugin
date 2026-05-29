@@ -41,6 +41,7 @@ class UCameraComponent;
 class UBorder;
 class UButton;
 class UInputComponent;
+class UInspectorDockRootWidget;
 class UInspectorFilePageWidget;
 class UInspectorFunctionItem;
 class UInspectorFunctionsSectionWidget;
@@ -62,6 +63,7 @@ class UTextBlock;
 class UInspectorPropertyItem;
 class UInspectorGroupButtonProxy;
 class UInspectorPinnedItemButtonProxy;
+class URuntimeInspectorController;
 class FRuntimeInspectorInputProcessor;
 struct FPointerEvent;
 class FSlateRect;
@@ -710,6 +712,8 @@ public:
     UFUNCTION(BlueprintPure, Category = "RuntimeInspector|Automation")
     FString GetPanelHostWindowDebugSummaryForAutomation() const;
     UFUNCTION(BlueprintPure, Category = "RuntimeInspector|Automation")
+    FString GetDockLayoutDebugSummaryForAutomation() const;
+    UFUNCTION(BlueprintPure, Category = "RuntimeInspector|Automation")
     FString GetLastPickDebugSummaryForAutomation() const;
     void ClearActivityLog();
     void AppendActivityLog(ERIToastType Severity, const FString& Category, const FString& Message);
@@ -817,6 +821,9 @@ public:
 
     UFUNCTION(BlueprintPure, Category = "RuntimeInspector|Patch")
     FRIPatchBundle GetStagedPatch() const { return StagedPatchBundle; }
+
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Patch")
+    bool StagePatchBundle(const FRIPatchBundle& InBundle, FString& OutError);
 
     UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Patch")
     bool ApplyStagedPatch(FRIApplyResult& OutResult);
@@ -1023,6 +1030,10 @@ public:
     UFUNCTION(BlueprintCallable, Category = "RuntimeInspector")
     bool InvokeFunctionItem(UInspectorFunctionItem* Item, const TArray<FString>& InArgTexts, FString& OutError);
 
+    URuntimeInspectorController* GetOrCreateRuntimeInspectorController();
+    void RegisterDockHostedPages(UInspectorFilePageWidget* InFilePage, UInspectorSettingsPageWidget* InSettingsPage, UInspectorTestPageWidget* InTestPage);
+    void RegisterDockHostedActorSections(UInspectorPropertiesSectionWidget* InPropertiesSection, UInspectorFunctionsSectionWidget* InFunctionsSection);
+
     void RefreshActorPropertyValue(UObject* TargetObject, FName PropertyName, bool bAllowSectionFallback = true);
 
     UFUNCTION()
@@ -1037,6 +1048,9 @@ private:
     UInspectorSettingsPageWidget* CreateSettingsPageWidgetInstance();
     UInspectorTestPageWidget* CreateTestPageWidgetInstance();
     void OpenToPage(ERIVisiblePage InitialPage);
+    void EnsureDockRootWidget();
+    void RefreshDockRootWidget();
+    bool IsDockRootActive() const;
     void EnsurePanelWidget();
     void ResetPanelWidgetRuntimeState();
     void ReleasePanelWidgetForRecreate();
@@ -1233,6 +1247,15 @@ private:
     TObjectPtr<UUserWidget> PanelWidgetStrong = nullptr;
 
     TWeakObjectPtr<UUserWidget> PanelWidget;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UInspectorDockRootWidget> DockRootWidgetStrong = nullptr;
+
+    TWeakObjectPtr<UInspectorDockRootWidget> DockRootWidget;
+
+    UPROPERTY(Transient)
+    TObjectPtr<URuntimeInspectorController> RuntimeInspectorController = nullptr;
+
     TWeakObjectPtr<UUserWidget> ActiveConfirmDialogWidget;
     TWeakObjectPtr<UInspectorModalBlockerWidget> ActiveConfirmDialogModalBlockerWidget;
     TWeakObjectPtr<UObject> ActiveColorEditItem;

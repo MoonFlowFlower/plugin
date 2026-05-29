@@ -480,19 +480,18 @@ bool UInspectorFunctionRowWidget::InvokeForAutomation(FString& OutError)
         return false;
     }
 
-    const TArray<FString> Args = CollectArgumentTexts();
-    if (!Item->Invoke(Args, OutError))
+    UInspectorWorldSubsystem* InspectorSubsystem = Subsystem.Get();
+    if (!InspectorSubsystem)
     {
-        if (UInspectorWorldSubsystem* Sub = Subsystem.Get())
-        {
-            Sub->PushToast(ERIToastType::Error, OutError.IsEmpty() ? TEXT("Function call failed") : OutError, 2.0f);
-        }
+        OutError = TEXT("Inspector subsystem is unavailable");
         return false;
     }
 
-    if (UInspectorWorldSubsystem* Sub = Subsystem.Get())
+    const TArray<FString> Args = CollectArgumentTexts();
+    if (!InspectorSubsystem->InvokeFunctionItem(Item, Args, OutError))
     {
-        Sub->PushToast(ERIToastType::Success, FString::Printf(TEXT("Invoked %s"), *Item->GetQualifiedDisplayName()), 1.5f);
+        InspectorSubsystem->PushToast(ERIToastType::Error, OutError.IsEmpty() ? TEXT("Function call failed") : OutError, 2.0f);
+        return false;
     }
 
     return true;

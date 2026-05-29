@@ -33,18 +33,32 @@ Structural changes are not done by compilation alone. They must add or update la
 
 ## Non-Negotiable Layout Rules
 
-- Shared `Context Strip` must live in document flow below the tabs and above page content.
-- Persistent summary or control rows must not be mounted directly under `Overlay`.
-- `Overlay` is reserved for transient UI such as toast, modal, or tooltip behavior.
+- Current first-launch UI uses a top-level full-screen `Overlay` only as the dock shell root.
+- The dock shell must keep the center viewport area transparent/pass-through; RuntimeInspector must not mount a viewport widget.
+- Persistent summary or control rows may live in the dock overlay only when they belong to `UInspectorDockRootWidget` panels or the lightweight center overlay.
+- Modal/toast content must stay in a separate modal/toast layer, not mixed into left/right panel document flow.
 - Page content must either:
   - live in a vertical layout stack, or
   - own a page-level `ScrollBox` if it can exceed the viewport.
 - Top-level content must not rely on overlap to stay visible.
+- New dock widgets must route mutation through `URuntimeInspectorController`; no Widget code may directly call actor/component mutation APIs.
 
 ## Current Hard Assertions
 
 The current self-test suite must keep enforcing these layout facts:
 
+- `dock_layout`
+  - native dock root is present
+  - left and right panels exist
+  - center area is transparent/pass-through and does not own a viewport widget
+  - modal/toast layer is separate from dock panels
+- `right_inspector_tabs`
+  - `Actor`, `Changes`, `Settings`, and `Tools` switch inside right `TabContent`
+  - only one tab is active/highlighted
+- `transform_patch_gate`
+  - transform edit creates a staged patch row
+  - actor transform is not mutated before Apply
+  - Apply enters `UInspectorWorldSubsystem` patch authority
 - `context_strip`
   - parent host is `RI_SharedContextStripHost`
   - shared strip parent is a `VerticalBox`
@@ -70,6 +84,9 @@ The current self-test suite must keep enforcing these layout facts:
 
 Any structural UI change must keep these green:
 
+- `dock_layout`
+- `right_inspector_tabs`
+- `transform_patch_gate`
 - `context_strip`
 - `file_page_injection`
 - `workflow_page_view`
@@ -113,6 +130,9 @@ For structural UI work, run this sequence instead of ad-hoc clicking:
 - first screen shows the page's main action or primary content
 - lower content remains reachable by scrolling
 - no old blueprint sibling content is visible through injected pages
+- center viewport area remains the real UE/PIE viewport behind the dock shell
+- transform edit appears in `Changes` before Apply is enabled
+- new dock widget source uses `RICompactUI` token helpers instead of local hardcoded colors
 
 ## Before Coding
 

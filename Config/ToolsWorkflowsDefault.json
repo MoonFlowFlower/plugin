@@ -363,6 +363,31 @@
     ]
   },
   {
+    "WorkflowId": "runtime_ui_contract_v1",
+    "DisplayName": "Runtime UI Contract v1",
+    "Description": "Runs the dock overlay, right inspector tabs, actor context, transform patch gate, changes visibility, and action bar controller-route gates.",
+    "Category": "UI",
+    "bRequiresPIE": true,
+    "bRequiresSelectedActor": false,
+    "bMutatesRuntime": true,
+    "bMutatesSource": false,
+    "bEnabled": true,
+    "Tags": ["ui", "dock", "contract", "patch-gate"],
+    "ActionSequence": [
+      { "ActionType": "RunSelfTest", "RefId": "dock_layout" },
+      { "ActionType": "RunSelfTest", "RefId": "right_inspector_tabs" },
+      { "ActionType": "RunSelfTest", "RefId": "actor_context_panel" },
+      { "ActionType": "RunSelfTest", "RefId": "actor_attributes_section" },
+      { "ActionType": "RunSelfTest", "RefId": "component_row_focus_route" },
+      { "ActionType": "RunSelfTest", "RefId": "favorite_row_navigation_route" },
+      { "ActionType": "RunSelfTest", "RefId": "function_row_parameter_run_route" },
+      { "ActionType": "RunSelfTest", "RefId": "search_syncs_subsystem" },
+      { "ActionType": "RunSelfTest", "RefId": "transform_patch_gate" },
+      { "ActionType": "RunSelfTest", "RefId": "changes_patch_visibility" },
+      { "ActionType": "RunSelfTest", "RefId": "action_bar_controller_route" }
+    ]
+  },
+  {
     "WorkflowId": "mainline_full_closure",
     "DisplayName": "Mainline Full Closure",
     "Description": "Runs the curated RuntimeInspector closure suite: UI, settings, patch, compare, and promote.",
@@ -395,6 +420,7 @@
       { "ActionType": "RunVerificationProfile", "RefId": "file_promote_config" },
       { "ActionType": "RunVerificationProfile", "RefId": "workflow_page_view" },
       { "ActionType": "RunVerificationProfile", "RefId": "test_page_layout" },
+      { "ActionType": "RunWorkflow", "RefId": "runtime_ui_contract_v1" },
       { "ActionType": "RunSelfTest", "RefId": "file_page_injection" },
       { "ActionType": "RunSelfTest", "RefId": "file_workflow" }
     ]

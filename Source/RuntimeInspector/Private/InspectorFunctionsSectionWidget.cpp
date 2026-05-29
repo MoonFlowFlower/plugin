@@ -123,7 +123,7 @@ void UInspectorFunctionsSectionWidget::BuildWidgetTree()
     FunctionsSectionBorder->SetContent(RootBox);
 
     if (UVerticalBoxSlot* HeaderSlot = RootBox->AddChildToVerticalBox(
-        RICompactUI::MakeSectionTitle(WidgetTree, TEXT("Function"), RICompactUI::ERISectionVisualStyle::Emphasis)))
+        RICompactUI::MakeSectionTitle(WidgetTree, TEXT("Callable Functions"), RICompactUI::ERISectionVisualStyle::Emphasis)))
     {
         HeaderSlot->SetPadding(FMargin(0.f, 0.f, 0.f, RICompactUI::GetInlineGap()));
     }
