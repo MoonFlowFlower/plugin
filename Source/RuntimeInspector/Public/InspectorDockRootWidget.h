@@ -100,6 +100,9 @@ public:
     ERIInspectorTab GetActiveTab() const { return CurrentViewModel.ActiveTab; }
     bool IsOnlyModifyEnabled() const { return CurrentViewModel.bOnlyModify; }
     FString GetDockLayoutDebugSummary() const;
+    bool AreHostedActorSectionsDeferredRefreshPendingForAutomation() const;
+    bool FlushHostedActorSectionsDeferredRefreshForAutomation();
+    double GetLastComponentFocusIntentMsForAutomation() const { return LastComponentFocusIntentMs; }
 
     UInspectorFilePageWidget* GetHostedFilePage() const { return FilePageWidget.Get(); }
     UInspectorSettingsPageWidget* GetHostedSettingsPage() const { return SettingsPageWidget.Get(); }
@@ -128,6 +131,7 @@ private:
     void RefreshLayoutForViewport();
     void RefreshActorContext(const FRIInspectorViewModel& ViewModel);
     void RefreshHostedActorSections(const FRIInspectorViewModel& ViewModel);
+    void RefreshHostedActorSectionsDeferred(const FRIInspectorViewModel& ViewModel);
     void RefreshAfterComponentFocus(const FString& ComponentName, bool bFocusSucceeded);
     void RefreshComponentSelectionPresentation(const FString& ComponentName);
     void RefreshChangesTab(const FRIInspectorViewModel& ViewModel);
@@ -260,6 +264,8 @@ private:
 
     TMap<FString, TWeakObjectPtr<UBorder>> ComponentRowSurfaces;
     TMap<FString, TWeakObjectPtr<UTextBlock>> ComponentRowTexts;
+
+    double LastComponentFocusIntentMs = 0.0;
 
     bool bWidgetTreeBuilt = false;
     bool bLeftPanelCompact = false;

@@ -23,6 +23,10 @@ public:
 
     void SetInspectorSubsystem(UInspectorWorldSubsystem* InSubsystem);
     void RefreshFromSubsystem();
+    void RefreshFromSubsystemDeferred();
+    void CancelDeferredRefresh();
+    bool FlushDeferredRefreshForAutomation(int32 MaxIterations = 128);
+    bool IsDeferredRefreshPendingForAutomation() const { return bDeferredRefreshPending; }
     int32 GetEntryWidgetCountForAutomation() const;
     UInspectorFunctionRowWidget* FindFunctionRowForAutomation(const UInspectorFunctionItem* Item) const;
     bool ScrollToItemForAutomation(UInspectorFunctionItem* Item);
@@ -40,6 +44,10 @@ private:
     void BuildWidgetTree();
     UWidget* CreateSectionTitle(const FString& InTitle);
     UWidget* CreateFunctionRow(UInspectorFunctionItem* Item);
+    void ScheduleDeferredRefreshTick();
+    void ProcessDeferredRefresh(int32 Serial);
+    bool BuildNextDeferredFunctionBatch();
+    void FinishDeferredRefresh();
 
 private:
     TWeakObjectPtr<UInspectorWorldSubsystem> Subsystem;
@@ -58,4 +66,10 @@ private:
 
     UPROPERTY(Transient)
     UScrollBox* FunctionsScrollBox = nullptr;
+
+    int32 DeferredRefreshSerial = 0;
+    bool bDeferredRefreshPending = false;
+    bool bDeferredRefreshCollectPending = false;
+    TArray<TWeakObjectPtr<UInspectorFunctionItem>> DeferredFunctionItems;
+    int32 DeferredFunctionIndex = 0;
 };

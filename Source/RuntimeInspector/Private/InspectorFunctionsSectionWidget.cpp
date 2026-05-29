@@ -13,7 +13,9 @@
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
+#include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "TimerManager.h"
 
 namespace
 {
@@ -31,6 +33,8 @@ namespace
     {
         return RICompactUI::GetMutedTextColor();
     }
+
+    static constexpr int32 RI_FunctionDeferredBatchSize = 3;
 }
 
 UInspectorFunctionsSectionWidget::UInspectorFunctionsSectionWidget(const FObjectInitializer& ObjectInitializer)
@@ -47,6 +51,27 @@ void UInspectorFunctionsSectionWidget::SetInspectorSubsystem(UInspectorWorldSubs
 int32 UInspectorFunctionsSectionWidget::GetEntryWidgetCountForAutomation() const
 {
     return FunctionsEntriesBox ? FunctionsEntriesBox->GetChildrenCount() : INDEX_NONE;
+}
+
+void UInspectorFunctionsSectionWidget::CancelDeferredRefresh()
+{
+    ++DeferredRefreshSerial;
+    bDeferredRefreshPending = false;
+    bDeferredRefreshCollectPending = false;
+    DeferredFunctionItems.Reset();
+    DeferredFunctionIndex = 0;
+}
+
+bool UInspectorFunctionsSectionWidget::FlushDeferredRefreshForAutomation(int32 MaxIterations)
+{
+    int32 Iterations = 0;
+    while (bDeferredRefreshPending && Iterations < MaxIterations)
+    {
+        ProcessDeferredRefresh(DeferredRefreshSerial);
+        ++Iterations;
+    }
+
+    return !bDeferredRefreshPending;
 }
 
 bool UInspectorFunctionsSectionWidget::HasTouchScrollSupportForAutomation() const
@@ -191,6 +216,7 @@ void UInspectorFunctionsSectionWidget::RefreshFromSubsystem()
         return;
     }
 
+    CancelDeferredRefresh();
     FunctionsEntriesBox->ClearChildren();
 
     UInspectorWorldSubsystem* InspectorSubsystem = Subsystem.Get();
@@ -232,4 +258,125 @@ void UInspectorFunctionsSectionWidget::RefreshFromSubsystem()
             }
         }
     }
+}
+
+void UInspectorFunctionsSectionWidget::RefreshFromSubsystemDeferred()
+{
+    if (!WidgetTree || !FunctionsEntriesBox)
+    {
+        return;
+    }
+
+    CancelDeferredRefresh();
+    RIInspectorTouchScroll::Configure(FunctionsScrollBox);
+    FunctionsEntriesBox->ClearChildren();
+    FunctionsEntriesBox->AddChildToVerticalBox(
+        RICompactUI::MakeText(WidgetTree, TEXT("Loading functions..."), RICompactUI::GetMutedFontSize(), false, RI_FunctionMutedColor(), true));
+
+    bDeferredRefreshPending = true;
+    bDeferredRefreshCollectPending = true;
+    ++DeferredRefreshSerial;
+    ScheduleDeferredRefreshTick();
+}
+
+void UInspectorFunctionsSectionWidget::ScheduleDeferredRefreshTick()
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        ProcessDeferredRefresh(DeferredRefreshSerial);
+        return;
+    }
+
+    FTimerDelegate Delegate;
+    Delegate.BindUObject(this, &UInspectorFunctionsSectionWidget::ProcessDeferredRefresh, DeferredRefreshSerial);
+    World->GetTimerManager().SetTimerForNextTick(Delegate);
+}
+
+void UInspectorFunctionsSectionWidget::ProcessDeferredRefresh(int32 Serial)
+{
+    if (Serial != DeferredRefreshSerial || !bDeferredRefreshPending || !WidgetTree || !FunctionsEntriesBox)
+    {
+        return;
+    }
+
+    UInspectorWorldSubsystem* InspectorSubsystem = Subsystem.Get();
+    if (!InspectorSubsystem)
+    {
+        FunctionsEntriesBox->ClearChildren();
+        FunctionsEntriesBox->AddChildToVerticalBox(
+            RICompactUI::MakeText(WidgetTree, TEXT("Inspector subsystem unavailable."), RICompactUI::GetMutedFontSize(), false, RI_FunctionMutedColor(), true));
+        FinishDeferredRefresh();
+        return;
+    }
+
+    if (bDeferredRefreshCollectPending)
+    {
+        FunctionsEntriesBox->ClearChildren();
+        TArray<UInspectorFunctionItem*> Items;
+        InspectorSubsystem->GetFunctionItemsForSelected(InspectorSubsystem->GetCurrentActorSearchText(), Items);
+        for (UInspectorFunctionItem* Item : Items)
+        {
+            if (Item)
+            {
+                DeferredFunctionItems.Add(Item);
+            }
+        }
+        DeferredFunctionIndex = 0;
+        bDeferredRefreshCollectPending = false;
+
+        if (DeferredFunctionItems.Num() == 0)
+        {
+            FunctionsEntriesBox->AddChildToVerticalBox(RICompactUI::MakeText(
+                WidgetTree,
+                TEXT("No callable functions match the current selection."),
+                RICompactUI::GetMutedFontSize(),
+                false,
+                RI_FunctionMutedColor(),
+                true));
+            FinishDeferredRefresh();
+            return;
+        }
+    }
+
+    if (BuildNextDeferredFunctionBatch())
+    {
+        FinishDeferredRefresh();
+        return;
+    }
+
+    ScheduleDeferredRefreshTick();
+}
+
+bool UInspectorFunctionsSectionWidget::BuildNextDeferredFunctionBatch()
+{
+    int32 BuiltCount = 0;
+    while (DeferredFunctionIndex < DeferredFunctionItems.Num() && BuiltCount < RI_FunctionDeferredBatchSize)
+    {
+        UInspectorFunctionItem* Item = DeferredFunctionItems[DeferredFunctionIndex].Get();
+        ++DeferredFunctionIndex;
+        if (!Item)
+        {
+            continue;
+        }
+
+        if (UWidget* RowWidget = CreateFunctionRow(Item))
+        {
+            if (UVerticalBoxSlot* EntrySlot = FunctionsEntriesBox->AddChildToVerticalBox(RowWidget))
+            {
+                EntrySlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+            }
+            ++BuiltCount;
+        }
+    }
+
+    return DeferredFunctionIndex >= DeferredFunctionItems.Num();
+}
+
+void UInspectorFunctionsSectionWidget::FinishDeferredRefresh()
+{
+    bDeferredRefreshPending = false;
+    bDeferredRefreshCollectPending = false;
+    DeferredFunctionItems.Reset();
+    DeferredFunctionIndex = 0;
 }

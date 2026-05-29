@@ -865,8 +865,8 @@ void UInspectorDockRootWidget::RefreshAfterComponentFocus(const FString& Compone
     if (bFocusSucceeded)
     {
         RefreshComponentSelectionPresentation(ComponentName);
+        RefreshHostedActorSectionsDeferred(CurrentViewModel);
     }
-    RefreshHostedActorSections(CurrentViewModel);
     RefreshTabPresentation(CurrentViewModel);
     RefreshActionBar(CurrentViewModel);
     if (ActionStatusText && Controller)
@@ -915,6 +915,19 @@ void UInspectorDockRootWidget::RefreshHostedActorSections(const FRIInspectorView
     if (ActorFunctionsWidget)
     {
         ActorFunctionsWidget->RefreshFromSubsystem();
+    }
+}
+
+void UInspectorDockRootWidget::RefreshHostedActorSectionsDeferred(const FRIInspectorViewModel& ViewModel)
+{
+    if (ActorAttributesWidget)
+    {
+        ActorAttributesWidget->SetOnlyModified(ViewModel.bOnlyModify);
+        ActorAttributesWidget->RefreshFromSubsystemDeferred();
+    }
+    if (ActorFunctionsWidget)
+    {
+        ActorFunctionsWidget->RefreshFromSubsystemDeferred();
     }
 }
 
@@ -1163,13 +1176,15 @@ void UInspectorDockRootWidget::HandleComponentProxyClicked(const FString& Compon
         bFocusSucceeded = Controller->RequestFocusComponentWithRefreshPolicy(ComponentName, Error, false);
     }
     RefreshAfterComponentFocus(ComponentName, bFocusSucceeded);
+    LastComponentFocusIntentMs = (FPlatformTime::Seconds() - StartSeconds) * 1000.0;
     UE_LOG(
         LogRuntimeInspector,
         Log,
-        TEXT("[RI][Perf] DockComponentFocusFast %.2f ms | Component=%s Result=%s"),
-        (FPlatformTime::Seconds() - StartSeconds) * 1000.0,
+        TEXT("[RI][Perf] DockComponentFocusIntent %.2f ms | Component=%s Result=%s Deferred=%d"),
+        LastComponentFocusIntentMs,
         *ComponentName,
-        bFocusSucceeded ? TEXT("ok") : *Error);
+        bFocusSucceeded ? TEXT("ok") : *Error,
+        AreHostedActorSectionsDeferredRefreshPendingForAutomation() ? 1 : 0);
 }
 
 void UInspectorDockRootWidget::HandleFavoriteProxyClicked(UObject* SourceItem)
@@ -1189,7 +1204,7 @@ FString UInspectorDockRootWidget::GetDockLayoutDebugSummary() const
     const int32 AttributeRows = ActorAttributesWidget ? ActorAttributesWidget->GetEntryWidgetCountForAutomation() : INDEX_NONE;
     const int32 HostedFunctionRows = ActorFunctionsWidget ? ActorFunctionsWidget->GetEntryWidgetCountForAutomation() : INDEX_NONE;
     return FString::Printf(
-        TEXT("DockRoot=1 LeftPanel=%s RightPanel=1 SideWidth=%.0f CenterWidth=%.0f CenterPassThrough=1 CenterSelectionPill=0 FavoritesFrame=%d FavoritesScroll=%d FunctionsFrame=%d ActionBar=%d PatchRows=%d FunctionRows=%d AttributeRows=%d AttributesTransform=%d ActiveTab=%d"),
+        TEXT("DockRoot=1 LeftPanel=%s RightPanel=1 SideWidth=%.0f CenterWidth=%.0f CenterPassThrough=1 CenterSelectionPill=0 FavoritesFrame=%d FavoritesScroll=%d FunctionsFrame=%d ActionBar=%d PatchRows=%d FunctionRows=%d AttributeRows=%d AttributesTransform=%d AttributesPending=%d FunctionsPending=%d LastComponentFocusIntentMs=%.2f ActiveTab=%d"),
         bLeftPanelCompact ? TEXT("Compact") : TEXT("Expanded"),
         RI_DockSidePanelWidth,
         CenterWidth,
@@ -1201,5 +1216,29 @@ FString UInspectorDockRootWidget::GetDockLayoutDebugSummary() const
         HostedFunctionRows,
         AttributeRows,
         ActorAttributesWidget && ActorAttributesWidget->HasActorTransformBlockForAutomation() ? 1 : 0,
+        ActorAttributesWidget && ActorAttributesWidget->IsDeferredRefreshPendingForAutomation() ? 1 : 0,
+        ActorFunctionsWidget && ActorFunctionsWidget->IsDeferredRefreshPendingForAutomation() ? 1 : 0,
+        LastComponentFocusIntentMs,
         static_cast<int32>(CurrentViewModel.ActiveTab));
+}
+
+bool UInspectorDockRootWidget::AreHostedActorSectionsDeferredRefreshPendingForAutomation() const
+{
+    return (ActorAttributesWidget && ActorAttributesWidget->IsDeferredRefreshPendingForAutomation())
+        || (ActorFunctionsWidget && ActorFunctionsWidget->IsDeferredRefreshPendingForAutomation());
+}
+
+bool UInspectorDockRootWidget::FlushHostedActorSectionsDeferredRefreshForAutomation()
+{
+    bool bAttributesOk = true;
+    bool bFunctionsOk = true;
+    if (ActorAttributesWidget)
+    {
+        bAttributesOk = ActorAttributesWidget->FlushDeferredRefreshForAutomation();
+    }
+    if (ActorFunctionsWidget)
+    {
+        bFunctionsOk = ActorFunctionsWidget->FlushDeferredRefreshForAutomation();
+    }
+    return bAttributesOk && bFunctionsOk;
 }

@@ -20,7 +20,9 @@
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
+#include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "TimerManager.h"
 
 namespace
 {
@@ -62,6 +64,8 @@ namespace
 
         return true;
     }
+
+    static constexpr int32 RI_PropertyDeferredBatchSize = 6;
 }
 
 void UInspectorPropertyCategoryButtonProxy::Initialize(UInspectorPropertiesSectionWidget* InOwner, const FString& InCategoryStateKey, bool bInAllowToggle)
@@ -103,6 +107,29 @@ void UInspectorPropertiesSectionWidget::SetOnlyModified(bool bInOnlyModified)
 int32 UInspectorPropertiesSectionWidget::GetEntryWidgetCountForAutomation() const
 {
     return LastVisiblePropertyRowCount + LastVisibleMaterialRowCount;
+}
+
+void UInspectorPropertiesSectionWidget::CancelDeferredRefresh()
+{
+    ++DeferredRefreshSerial;
+    bDeferredRefreshPending = false;
+    DeferredRefreshMode = ERIDeferredPropertyRefreshMode::None;
+    DeferredFlatItems.Reset();
+    DeferredCategories.Reset();
+    DeferredFlatIndex = 0;
+    DeferredCategoryIndex = 0;
+}
+
+bool UInspectorPropertiesSectionWidget::FlushDeferredRefreshForAutomation(int32 MaxIterations)
+{
+    int32 Iterations = 0;
+    while (bDeferredRefreshPending && Iterations < MaxIterations)
+    {
+        ProcessDeferredRefresh(DeferredRefreshSerial);
+        ++Iterations;
+    }
+
+    return !bDeferredRefreshPending;
 }
 
 bool UInspectorPropertiesSectionWidget::HasTouchScrollSupportForAutomation() const
@@ -707,6 +734,314 @@ void UInspectorPropertiesSectionWidget::BuildCategorizedPropertyRows(const TArra
     }
 }
 
+void UInspectorPropertiesSectionWidget::RefreshFromSubsystemDeferred()
+{
+    if (!EntriesBox || !WidgetTree)
+    {
+        return;
+    }
+
+    CancelDeferredRefresh();
+    RIInspectorTouchScroll::Configure(ScrollBox);
+    ResetEntryState();
+    RefreshHeaderFromSubsystem();
+    EntriesBox->AddChildToVerticalBox(
+        RICompactUI::MakeText(WidgetTree, TEXT("Loading attributes..."), RICompactUI::GetMutedFontSize(), false, RI_PropertySectionMutedColor(), true));
+
+    bDeferredRefreshPending = true;
+    DeferredRefreshMode = ERIDeferredPropertyRefreshMode::Collect;
+    ++DeferredRefreshSerial;
+    ScheduleDeferredRefreshTick();
+}
+
+void UInspectorPropertiesSectionWidget::ScheduleDeferredRefreshTick()
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        ProcessDeferredRefresh(DeferredRefreshSerial);
+        return;
+    }
+
+    FTimerDelegate Delegate;
+    Delegate.BindUObject(this, &UInspectorPropertiesSectionWidget::ProcessDeferredRefresh, DeferredRefreshSerial);
+    World->GetTimerManager().SetTimerForNextTick(Delegate);
+}
+
+void UInspectorPropertiesSectionWidget::ProcessDeferredRefresh(int32 Serial)
+{
+    if (Serial != DeferredRefreshSerial || !bDeferredRefreshPending || !EntriesBox || !WidgetTree)
+    {
+        return;
+    }
+
+    UInspectorWorldSubsystem* InspectorSubsystem = Subsystem.Get();
+    if (!InspectorSubsystem)
+    {
+        ResetEntryState();
+        RefreshHeaderFromSubsystem();
+        EntriesBox->AddChildToVerticalBox(
+            RICompactUI::MakeText(WidgetTree, TEXT("Inspector subsystem unavailable."), RICompactUI::GetMutedFontSize(), false, RI_PropertySectionMutedColor(), true));
+        FinishDeferredRefresh();
+        return;
+    }
+
+    if (DeferredRefreshMode == ERIDeferredPropertyRefreshMode::Collect)
+    {
+        ResetEntryState();
+        RefreshHeaderFromSubsystem();
+
+        const FString SearchText = InspectorSubsystem->GetCurrentActorSearchText();
+        const bool bSearchMode = !SearchText.IsEmpty();
+
+        TArray<UInspectorPropertyItem*> ActorTransformItems;
+        InspectorSubsystem->GetActorWorldTransformPropertyItems(ActorTransformItems);
+        if (UWidget* TransformBlock = CreateActorTransformBlock(ActorTransformItems))
+        {
+            if (UVerticalBoxSlot* TransformSlot = EntriesBox->AddChildToVerticalBox(TransformBlock))
+            {
+                TransformSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 8.f));
+            }
+        }
+
+        TArray<UObject*> Items;
+        InspectorSubsystem->GetPropertyItemsForSelectedEx(SearchText, bOnlyModified, Items);
+        if (RI_CanCategorizePropertyItems(Items))
+        {
+            PrepareDeferredCategorizedPropertyRows(Items, bSearchMode);
+            DeferredRefreshMode = ERIDeferredPropertyRefreshMode::Categories;
+        }
+        else
+        {
+            DeferredFlatItems.Reset();
+            for (UObject* ItemObject : Items)
+            {
+                if (ItemObject)
+                {
+                    DeferredFlatItems.Add(ItemObject);
+                }
+            }
+            DeferredFlatIndex = 0;
+            DeferredRefreshMode = ERIDeferredPropertyRefreshMode::Flat;
+        }
+    }
+
+    const bool bComplete = DeferredRefreshMode == ERIDeferredPropertyRefreshMode::Categories
+        ? BuildNextDeferredPropertyBatch()
+        : BuildNextDeferredFlatBatch();
+
+    if (bComplete)
+    {
+        AddDeferredEmptyStateIfNeeded();
+        FinishDeferredRefresh();
+        return;
+    }
+
+    ScheduleDeferredRefreshTick();
+}
+
+void UInspectorPropertiesSectionWidget::PrepareDeferredCategorizedPropertyRows(const TArray<UObject*>& Items, bool bSearchMode)
+{
+    UInspectorWorldSubsystem* InspectorSubsystem = Subsystem.Get();
+    if (!InspectorSubsystem || !WidgetTree || !EntriesBox)
+    {
+        return;
+    }
+
+    TMap<FString, int32> CategoryIndexByKey;
+    DeferredCategories.Reset();
+    LastCategoryOrder.Reset();
+    LastCategorySectionCount = 0;
+
+    for (UObject* ItemObject : Items)
+    {
+        UInspectorPropertyItem* PropertyItem = Cast<UInspectorPropertyItem>(ItemObject);
+        if (!PropertyItem)
+        {
+            continue;
+        }
+
+        const FString PrimaryCategory = PropertyItem->GetPrimaryCategoryName();
+        const FString CategoryStateKey = InspectorSubsystem->BuildPropertyCategoryStateKey(PropertyItem->GetTargetObject(), PrimaryCategory);
+        int32* ExistingIndex = CategoryIndexByKey.Find(CategoryStateKey);
+        if (!ExistingIndex)
+        {
+            FDeferredPropertyCategoryViewData NewCategoryData;
+            NewCategoryData.PrimaryCategory = PrimaryCategory;
+            NewCategoryData.CategoryStateKey = CategoryStateKey;
+            NewCategoryData.bForcedExpandedBySearch = bSearchMode;
+            NewCategoryData.bExpanded = bSearchMode
+                ? true
+                : InspectorSubsystem->GetPropertyCategoryExpanded(PropertyItem->GetTargetObject(), PrimaryCategory, true);
+            const int32 NewIndex = DeferredCategories.Add(MoveTemp(NewCategoryData));
+            CategoryIndexByKey.Add(CategoryStateKey, NewIndex);
+            ExistingIndex = CategoryIndexByKey.Find(CategoryStateKey);
+            LastCategoryOrder.Add(CategoryStateKey);
+        }
+
+        FDeferredPropertyCategoryViewData& CategoryData = DeferredCategories[*ExistingIndex];
+        CategoryData.Properties.Add(PropertyItem);
+        if (!CategoryFirstPropertyNameByKey.Contains(CategoryStateKey))
+        {
+            CategoryFirstPropertyNameByKey.Add(CategoryStateKey, PropertyItem->GetPropertyName());
+        }
+        PropertyCategoryStateKeyByItemKey.Add(BuildPropertyItemKey(PropertyItem), CategoryStateKey);
+    }
+
+    LastCategorySectionCount = DeferredCategories.Num();
+    DeferredCategoryIndex = 0;
+
+    for (const FDeferredPropertyCategoryViewData& CategoryData : DeferredCategories)
+    {
+        FPropertyCategoryViewData HeaderData;
+        HeaderData.PrimaryCategory = CategoryData.PrimaryCategory;
+        HeaderData.CategoryStateKey = CategoryData.CategoryStateKey;
+        HeaderData.bExpanded = CategoryData.bExpanded;
+        HeaderData.bForcedExpandedBySearch = CategoryData.bForcedExpandedBySearch;
+        for (const TWeakObjectPtr<UInspectorPropertyItem>& PropertyPtr : CategoryData.Properties)
+        {
+            if (UInspectorPropertyItem* PropertyItem = PropertyPtr.Get())
+            {
+                HeaderData.Properties.Add(PropertyItem);
+            }
+        }
+
+        if (UWidget* HeaderWidget = CreatePropertyCategoryHeader(HeaderData))
+        {
+            if (UVerticalBoxSlot* HeaderSlot = EntriesBox->AddChildToVerticalBox(HeaderWidget))
+            {
+                HeaderSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 2.f));
+            }
+        }
+
+        UVerticalBox* CategoryBody = WidgetTree->ConstructWidget<UVerticalBox>(
+            UVerticalBox::StaticClass(),
+            *FString::Printf(TEXT("RI_PropertyCategoryBody_%s"), *RI_SanitizeCategoryToken(CategoryData.PrimaryCategory)));
+        CategoryBodyByKey.Add(CategoryData.CategoryStateKey, CategoryBody);
+
+        if (UVerticalBoxSlot* BodySlot = EntriesBox->AddChildToVerticalBox(CategoryBody))
+        {
+            BodySlot->SetPadding(FMargin(8.f, 0.f, 0.f, 6.f));
+        }
+
+        SetCategoryExpandedVisual(CategoryData.CategoryStateKey, CategoryData.bExpanded);
+    }
+}
+
+bool UInspectorPropertiesSectionWidget::BuildNextDeferredPropertyBatch()
+{
+    int32 BuiltCount = 0;
+    while (DeferredCategoryIndex < DeferredCategories.Num() && BuiltCount < RI_PropertyDeferredBatchSize)
+    {
+        FDeferredPropertyCategoryViewData& CategoryData = DeferredCategories[DeferredCategoryIndex];
+        if (!CategoryData.bExpanded)
+        {
+            ++DeferredCategoryIndex;
+            continue;
+        }
+
+        UVerticalBox* CategoryBody = CategoryBodyByKey.FindRef(CategoryData.CategoryStateKey);
+        if (!CategoryBody)
+        {
+            ++DeferredCategoryIndex;
+            continue;
+        }
+
+        while (CategoryData.NextPropertyIndex < CategoryData.Properties.Num() && BuiltCount < RI_PropertyDeferredBatchSize)
+        {
+            UInspectorPropertyItem* PropertyItem = CategoryData.Properties[CategoryData.NextPropertyIndex].Get();
+            ++CategoryData.NextPropertyIndex;
+            if (!PropertyItem)
+            {
+                continue;
+            }
+
+            const FString SubcategoryPath = PropertyItem->GetSubcategoryPath();
+            if (!SubcategoryPath.IsEmpty() && !CategoryData.RenderedSubcategories.Contains(SubcategoryPath))
+            {
+                CategoryData.RenderedSubcategories.Add(SubcategoryPath);
+                if (UWidget* SubcategoryHeader = CreatePropertySubcategoryHeader(SubcategoryPath))
+                {
+                    if (UVerticalBoxSlot* HeaderSlot = CategoryBody->AddChildToVerticalBox(SubcategoryHeader))
+                    {
+                        HeaderSlot->SetPadding(FMargin(0.f, 2.f, 0.f, 3.f));
+                    }
+                }
+            }
+
+            if (UWidget* RowWidget = CreatePropertyRow(PropertyItem))
+            {
+                if (UVerticalBoxSlot* EntrySlot = CategoryBody->AddChildToVerticalBox(RowWidget))
+                {
+                    EntrySlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+                }
+                ++LastVisiblePropertyRowCount;
+                ++BuiltCount;
+            }
+        }
+
+        if (CategoryData.NextPropertyIndex >= CategoryData.Properties.Num())
+        {
+            ++DeferredCategoryIndex;
+        }
+    }
+
+    return DeferredCategoryIndex >= DeferredCategories.Num();
+}
+
+bool UInspectorPropertiesSectionWidget::BuildNextDeferredFlatBatch()
+{
+    int32 BuiltCount = 0;
+    while (DeferredFlatIndex < DeferredFlatItems.Num() && BuiltCount < RI_PropertyDeferredBatchSize)
+    {
+        UObject* ItemObject = DeferredFlatItems[DeferredFlatIndex].Get();
+        ++DeferredFlatIndex;
+        if (!ItemObject)
+        {
+            continue;
+        }
+
+        if (UWidget* RowWidget = CreatePropertyRow(ItemObject))
+        {
+            if (UVerticalBoxSlot* EntrySlot = EntriesBox->AddChildToVerticalBox(RowWidget))
+            {
+                EntrySlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+            }
+
+            if (Cast<UInspectorPropertyItem>(ItemObject))
+            {
+                ++LastVisiblePropertyRowCount;
+            }
+            else if (Cast<UInspectorMaterialParamItem>(ItemObject))
+            {
+                ++LastVisibleMaterialRowCount;
+            }
+            ++BuiltCount;
+        }
+    }
+
+    return DeferredFlatIndex >= DeferredFlatItems.Num();
+}
+
+void UInspectorPropertiesSectionWidget::AddDeferredEmptyStateIfNeeded()
+{
+    if ((LastVisiblePropertyRowCount + LastVisibleMaterialRowCount) == 0 && !bActorTransformBlockVisible)
+    {
+        EntriesBox->AddChildToVerticalBox(
+            RICompactUI::MakeText(WidgetTree, TEXT("No visible properties match the current selection."), RICompactUI::GetMutedFontSize(), false, RI_PropertySectionMutedColor(), true));
+    }
+}
+
+void UInspectorPropertiesSectionWidget::FinishDeferredRefresh()
+{
+    bDeferredRefreshPending = false;
+    DeferredRefreshMode = ERIDeferredPropertyRefreshMode::None;
+    DeferredFlatItems.Reset();
+    DeferredCategories.Reset();
+    DeferredFlatIndex = 0;
+    DeferredCategoryIndex = 0;
+}
+
 void UInspectorPropertiesSectionWidget::RefreshFromSubsystem()
 {
     if (!EntriesBox || !WidgetTree)
@@ -715,6 +1050,7 @@ void UInspectorPropertiesSectionWidget::RefreshFromSubsystem()
     }
 
     RIInspectorTouchScroll::Configure(ScrollBox);
+    CancelDeferredRefresh();
     ResetEntryState();
 
     UInspectorWorldSubsystem* InspectorSubsystem = Subsystem.Get();

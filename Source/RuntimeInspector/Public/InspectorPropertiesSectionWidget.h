@@ -46,6 +46,10 @@ public:
     void SetInspectorSubsystem(UInspectorWorldSubsystem* InSubsystem);
     void SetOnlyModified(bool bInOnlyModified);
     void RefreshFromSubsystem();
+    void RefreshFromSubsystemDeferred();
+    void CancelDeferredRefresh();
+    bool FlushDeferredRefreshForAutomation(int32 MaxIterations = 256);
+    bool IsDeferredRefreshPendingForAutomation() const { return bDeferredRefreshPending; }
     void RefreshValueDisplayFromSubsystem();
     bool RefreshItemDisplay(UObject* ItemObject);
     int32 GetEntryWidgetCountForAutomation() const;
@@ -80,6 +84,25 @@ private:
         TArray<FString> SubcategoryOrder;
     };
 
+    struct FDeferredPropertyCategoryViewData
+    {
+        FString PrimaryCategory;
+        FString CategoryStateKey;
+        bool bExpanded = true;
+        bool bForcedExpandedBySearch = false;
+        TArray<TWeakObjectPtr<UInspectorPropertyItem>> Properties;
+        TSet<FString> RenderedSubcategories;
+        int32 NextPropertyIndex = 0;
+    };
+
+    enum class ERIDeferredPropertyRefreshMode : uint8
+    {
+        None,
+        Collect,
+        Categories,
+        Flat
+    };
+
     void BuildWidgetTree();
     void RefreshHeaderFromSubsystem();
     UWidget* CreatePropertyRow(UObject* ItemObject);
@@ -89,6 +112,13 @@ private:
     void ResetEntryState();
     void BuildCategorizedPropertyRows(const TArray<UObject*>& Items, bool bSearchMode);
     void AddPropertyRowsToCategoryBody(UVerticalBox* CategoryBody, const FPropertyCategoryViewData& CategoryData);
+    void ScheduleDeferredRefreshTick();
+    void ProcessDeferredRefresh(int32 Serial);
+    void PrepareDeferredCategorizedPropertyRows(const TArray<UObject*>& Items, bool bSearchMode);
+    bool BuildNextDeferredPropertyBatch();
+    bool BuildNextDeferredFlatBatch();
+    void FinishDeferredRefresh();
+    void AddDeferredEmptyStateIfNeeded();
     void SetCategoryExpandedVisual(const FString& CategoryStateKey, bool bExpanded);
     void HandleCategoryToggleRequested(const FString& CategoryStateKey);
     FString FindCategoryStateKeyByPrimaryName(const FString& PrimaryCategory) const;
@@ -145,4 +175,12 @@ private:
     int32 LastVisiblePropertyRowCount = 0;
     int32 LastVisibleMaterialRowCount = 0;
     int32 LastCategorySectionCount = 0;
+
+    int32 DeferredRefreshSerial = 0;
+    bool bDeferredRefreshPending = false;
+    ERIDeferredPropertyRefreshMode DeferredRefreshMode = ERIDeferredPropertyRefreshMode::None;
+    TArray<TWeakObjectPtr<UObject>> DeferredFlatItems;
+    TArray<FDeferredPropertyCategoryViewData> DeferredCategories;
+    int32 DeferredFlatIndex = 0;
+    int32 DeferredCategoryIndex = 0;
 };

@@ -13695,8 +13695,12 @@ bool UInspectorWorldSubsystem::ExecuteLegacyToolNativeBridgeAction(FName BridgeI
             RootWidget->HandleComponentProxyClicked(TargetComponentName);
             RouteError = Controller->GetLastIntentLog();
         }
+        const bool bDeferredQueued = RootWidget && RootWidget->AreHostedActorSectionsDeferredRefreshPendingForAutomation();
+        const double RouteMs = RootWidget ? RootWidget->GetLastComponentFocusIntentMsForAutomation() : -1.0;
+        const bool bRoutePerfOk = RouteMs >= 0.0 && RouteMs < 250.0;
         UObject* FocusedObject = GetFocusedInspectObject();
         const bool bFocusOk = FocusedObject && FocusedObject->GetName().Equals(TargetComponentName, ESearchCase::IgnoreCase);
+        const bool bFlushOk = RootWidget ? RootWidget->FlushHostedActorSectionsDeferredRefreshForAutomation() : false;
         const FRIInspectorViewModel AfterViewModel = Controller ? Controller->GetCurrentViewModel() : FRIInspectorViewModel();
         bool bViewModelSelected = false;
         for (const FRIComponentNodeViewModel& Component : AfterViewModel.Components)
@@ -13708,14 +13712,17 @@ bool UInspectorWorldSubsystem::ExecuteLegacyToolNativeBridgeAction(FName BridgeI
             }
         }
 
-        bOutPassed = bRouteOk && bFocusOk && bViewModelSelected;
+        bOutPassed = bRouteOk && bFocusOk && bViewModelSelected && bDeferredQueued && bRoutePerfOk && bFlushOk;
         OutReport = FString::Printf(
-            TEXT("component_row_focus_route=%s | Component=%s Route=%d Focus=%d VM=%d Error=%s"),
+            TEXT("component_row_focus_route=%s | Component=%s Route=%d Focus=%d VM=%d Deferred=%d RouteMs=%.2f Flush=%d Error=%s"),
             bOutPassed ? TEXT("PASS") : TEXT("FAIL"),
             *TargetComponentName,
             bRouteOk ? 1 : 0,
             bFocusOk ? 1 : 0,
             bViewModelSelected ? 1 : 0,
+            bDeferredQueued ? 1 : 0,
+            RouteMs,
+            bFlushOk ? 1 : 0,
             *RouteError);
         CleanupDockContractActor(TestActor, bSpawnedActor, PreviousActor);
         return true;
