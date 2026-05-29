@@ -40,6 +40,9 @@ public:
     float GetValueControlHeightForAutomation() const;
     float GetFavoriteButtonHeightForAutomation() const;
     float GetColorButtonHeightForAutomation() const;
+    bool ToggleFavoriteForAutomation(FString& OutError);
+    bool HasOverflowLayoutForAutomation() const;
+    bool HasExpandedValueEditorForAutomation() const;
     bool CommitTextValueForAutomation(const FString& InValue, FString& OutError);
     bool IsStructuredVectorVisibleForAutomation() const;
     bool IsStructuredRotatorVisibleForAutomation() const;
@@ -60,6 +63,8 @@ private:
     void RefreshRow();
     FString GetDisplayedPropertyName(const UInspectorPropertyItem* Item) const;
     void RefreshTickPolicy();
+    void UpdateExpandedValueEditorFocusState();
+    void ShowExpandedValueEditor(bool bVisible);
     bool ApplyTextValue(const FString& InValue);
     bool ApplyVectorValueInternal(const FVector& InValue, bool bRefreshRow);
     bool ApplyVectorValue(const FVector& InValue);
@@ -106,6 +111,9 @@ private:
 
     UFUNCTION()
     void HandleNameClicked();
+
+    UFUNCTION()
+    void HandleExpandedValueCommitted(const FText& InText, ETextCommit::Type CommitMethod);
 
     UFUNCTION()
     void HandleStructuredAxisTextChanged(const FText& InText);
@@ -175,6 +183,12 @@ private:
     TObjectPtr<UTextBlock> NameText = nullptr;
 
     UPROPERTY(Transient)
+    TObjectPtr<UButton> NameButton = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<USizeBox> NameSizeBox = nullptr;
+
+    UPROPERTY(Transient)
     TObjectPtr<UTextBlock> ReadOnlyValueText = nullptr;
 
     UPROPERTY(Transient)
@@ -209,6 +223,12 @@ private:
 
     UPROPERTY(Transient)
     TObjectPtr<USizeBox> ValueTextBoxSizeBox = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UEditableTextBox> ExpandedValueTextBox = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<USizeBox> ExpandedValueTextBoxSizeBox = nullptr;
 
     UPROPERTY(Transient)
     TObjectPtr<USizeBox> BoolCheckBoxSizeBox = nullptr;
@@ -247,5 +267,6 @@ private:
     bool bAllowNavigation = true;
     bool bStripOwnerPrefixForDisplay = false;
     bool bStructuredPreviewPending = false;
+    bool bExpandedValueEditorActive = false;
     float StructuredPreviewAccum = 0.f;
 };

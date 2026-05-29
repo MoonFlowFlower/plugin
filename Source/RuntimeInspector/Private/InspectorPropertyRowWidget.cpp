@@ -3,6 +3,7 @@
 #include "InspectorCompactWidgetUtils.h"
 #include "InspectorPropertyItem.h"
 #include "InspectorWorldSubsystem.h"
+#include "RuntimeInspectorController.h"
 
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
@@ -67,10 +68,11 @@ namespace
     }
 
     static constexpr float RI_StructuredPreviewDelaySeconds = 0.12f;
-    static constexpr float RI_RowFavoriteButtonSize = 16.0f;
-    static constexpr float RI_RowFavoriteIconSize = 10.5f;
+    static constexpr float RI_RowFavoriteButtonSize = 22.0f;
+    static constexpr float RI_RowFavoriteIconSize = 12.0f;
+    static constexpr float RI_RowNameMaxWidth = 112.0f;
     static constexpr float RI_RowCheckBoxSize = 16.0f;
-    static constexpr float RI_RowValueWidth = 104.0f;
+    static constexpr float RI_RowValueWidth = 96.0f;
 }
 
 UInspectorPropertyRowWidget::UInspectorPropertyRowWidget(const FObjectInitializer& ObjectInitializer)
@@ -175,6 +177,40 @@ float UInspectorPropertyRowWidget::GetColorButtonHeightForAutomation() const
     return (ColorSizeBox && ColorButton && ColorButton->GetVisibility() == ESlateVisibility::Visible)
         ? ColorSizeBox->GetHeightOverride()
         : 0.f;
+}
+
+bool UInspectorPropertyRowWidget::ToggleFavoriteForAutomation(FString& OutError)
+{
+    UInspectorWorldSubsystem* InspectorSubsystem = Subsystem.Get();
+    UInspectorPropertyItem* Item = PropertyItem.Get();
+    if (!InspectorSubsystem || !Item)
+    {
+        OutError = TEXT("Property row favorite target unavailable");
+        return false;
+    }
+
+    if (URuntimeInspectorController* Controller = InspectorSubsystem->GetOrCreateRuntimeInspectorController())
+    {
+        return Controller->RequestToggleFavorite(Item, OutError);
+    }
+
+    OutError = TEXT("RuntimeInspector controller unavailable");
+    return false;
+}
+
+bool UInspectorPropertyRowWidget::HasOverflowLayoutForAutomation() const
+{
+    return FavoriteSizeBox
+        && FMath::IsNearlyEqual(FavoriteSizeBox->GetWidthOverride(), RI_RowFavoriteButtonSize)
+        && NameSizeBox
+        && FMath::IsNearlyEqual(NameSizeBox->GetMaxDesiredWidth(), RI_RowNameMaxWidth)
+        && ReadOnlyValueSizeBox
+        && FMath::IsNearlyEqual(ReadOnlyValueSizeBox->GetWidthOverride(), RI_RowValueWidth);
+}
+
+bool UInspectorPropertyRowWidget::HasExpandedValueEditorForAutomation() const
+{
+    return ExpandedValueTextBox && ExpandedValueTextBoxSizeBox;
 }
 
 bool UInspectorPropertyRowWidget::CommitTextValueForAutomation(const FString& InValue, FString& OutError)
@@ -335,18 +371,13 @@ void UInspectorPropertyRowWidget::NativeConstruct()
 
 FReply UInspectorPropertyRowWidget::NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
 {
-    if (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton && bAllowNavigation)
-    {
-        HandleNameClicked();
-        return FReply::Handled();
-    }
-
     return Super::NativeOnMouseButtonDown(InGeometry, InMouseEvent);
 }
 
 void UInspectorPropertyRowWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
     Super::NativeTick(MyGeometry, InDeltaTime);
+    UpdateExpandedValueEditorFocusState();
 
     UInspectorPropertyItem* Item = PropertyItem.Get();
     if (!Item || !Item->IsValidItem())
@@ -384,10 +415,44 @@ void UInspectorPropertyRowWidget::NativeTick(const FGeometry& MyGeometry, float 
 
 void UInspectorPropertyRowWidget::RefreshTickPolicy()
 {
-    const bool bShouldTick = bStructuredPreviewPending || HasStructuredEditorFocus();
+    const bool bCompactScalarEditorVisible = ValueTextBox && ValueTextBox->GetVisibility() == ESlateVisibility::Visible;
+    const bool bShouldTick = bStructuredPreviewPending || HasStructuredEditorFocus() || bCompactScalarEditorVisible || bExpandedValueEditorActive;
     if (TSharedPtr<SWidget> CachedWidget = GetCachedWidget())
     {
         CachedWidget->SetCanTick(bShouldTick);
+    }
+}
+
+void UInspectorPropertyRowWidget::UpdateExpandedValueEditorFocusState()
+{
+    if (!ValueTextBox || !ExpandedValueTextBox || ValueTextBox->GetVisibility() != ESlateVisibility::Visible)
+    {
+        return;
+    }
+
+    if (!bExpandedValueEditorActive && ValueTextBox->HasKeyboardFocus())
+    {
+        ShowExpandedValueEditor(true);
+        ExpandedValueTextBox->SetText(ValueTextBox->GetText());
+        ExpandedValueTextBox->SetKeyboardFocus();
+    }
+}
+
+void UInspectorPropertyRowWidget::ShowExpandedValueEditor(bool bVisible)
+{
+    bExpandedValueEditorActive = bVisible;
+    if (ExpandedValueTextBoxSizeBox)
+    {
+        ExpandedValueTextBoxSizeBox->SetVisibility(bVisible ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+    }
+
+    const bool bAnyStructuredEditorVisible =
+        (VectorEditorBox && VectorEditorBox->GetVisibility() == ESlateVisibility::Visible)
+        || (RotatorEditorBox && RotatorEditorBox->GetVisibility() == ESlateVisibility::Visible)
+        || (TransformEditorBox && TransformEditorBox->GetVisibility() == ESlateVisibility::Visible);
+    if (StructuredValueBox)
+    {
+        StructuredValueBox->SetVisibility((bVisible || bAnyStructuredEditorVisible) ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
     }
 }
 
@@ -416,7 +481,12 @@ void UInspectorPropertyRowWidget::BuildWidgetTree()
         false,
         RI_PropertyFavoriteActiveColor(),
         RI_PropertyMutedColor());
+    if (FavoriteIcon)
+    {
+        FavoriteIcon->SetVisibility(ESlateVisibility::HitTestInvisible);
+    }
     FavoriteSizeBox->SetContent(FavoriteIcon);
+    FavoriteSizeBox->SetVisibility(ESlateVisibility::HitTestInvisible);
     RICompactUI::CenterSizeBoxContent(FavoriteSizeBox);
     FavoriteButton->AddChild(FavoriteSizeBox);
     RICompactUI::ConfigureGhostIconButton(FavoriteButton);
@@ -455,10 +525,34 @@ void UInspectorPropertyRowWidget::BuildWidgetTree()
     }
     StructuredValueBox->SetVisibility(ESlateVisibility::Collapsed);
 
-    NameText = RICompactUI::MakeText(WidgetTree, TEXT("Property"), RICompactUI::GetLabelFontSize(), true, RI_PropertyTextColor(), false);
+    ExpandedValueTextBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("RI_PropertyRowExpandedTextBox"));
+    RICompactUI::ConfigureEditableTextBox(ExpandedValueTextBox, RI_PropertyTextColor(), RICompactUI::GetValueFontSize(), RICompactUI::ERIInputVisualStyle::Strong);
+    ExpandedValueTextBox->SetSelectAllTextWhenFocused(true);
+    ExpandedValueTextBox->OnTextCommitted.AddDynamic(this, &UInspectorPropertyRowWidget::HandleExpandedValueCommitted);
+    ExpandedValueTextBoxSizeBox = RICompactUI::WrapValueControl(WidgetTree, ExpandedValueTextBox);
+    ExpandedValueTextBoxSizeBox->SetVisibility(ESlateVisibility::Collapsed);
+    if (UVerticalBoxSlot* ExpandedSlot = StructuredValueBox->AddChildToVerticalBox(ExpandedValueTextBoxSizeBox))
+    {
+        ExpandedSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
+        ExpandedSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 3.f));
+    }
+
+    NameButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("RI_PropertyRowNameButton"));
+    RICompactUI::ConfigureSwatchButton(NameButton);
+    NameButton->OnClicked.AddDynamic(this, &UInspectorPropertyRowWidget::HandleNameClicked);
+    NameText = RICompactUI::MakeEllipsisText(WidgetTree, TEXT("Property"), RICompactUI::GetLabelFontSize(), true, RI_PropertyTextColor());
     NameText->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
-    NameText->SetClipping(EWidgetClipping::ClipToBounds);
-    if (UHorizontalBoxSlot* NameSlot = SummaryRowBox->AddChildToHorizontalBox(NameText))
+    NameButton->AddChild(NameText);
+    if (UButtonSlot* NameButtonSlot = Cast<UButtonSlot>(NameButton->GetContentSlot()))
+    {
+        NameButtonSlot->SetHorizontalAlignment(HAlign_Fill);
+        NameButtonSlot->SetVerticalAlignment(VAlign_Center);
+        NameButtonSlot->SetPadding(FMargin(0.f));
+    }
+    NameSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_PropertyRowNameSize"));
+    NameSizeBox->SetMaxDesiredWidth(RI_RowNameMaxWidth);
+    NameSizeBox->SetContent(NameButton);
+    if (UHorizontalBoxSlot* NameSlot = SummaryRowBox->AddChildToHorizontalBox(NameSizeBox))
     {
         FSlateChildSize SizeRule(ESlateSizeRule::Fill);
         SizeRule.Value = 1.0f;
@@ -467,10 +561,10 @@ void UInspectorPropertyRowWidget::BuildWidgetTree()
         NameSlot->SetPadding(FMargin(0.f, 0.f, 6.f, 0.f));
     }
 
-    ReadOnlyValueText = RICompactUI::MakeText(WidgetTree, TEXT(""), RICompactUI::GetValueFontSize(), false, RI_PropertyMutedColor(), true);
+    ReadOnlyValueText = RICompactUI::MakeEllipsisText(WidgetTree, TEXT(""), RICompactUI::GetValueFontSize(), false, RI_PropertyMutedColor());
     ReadOnlyValueText->SetJustification(ETextJustify::Right);
     ReadOnlyValueText->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
-    ReadOnlyValueSizeBox = RICompactUI::WrapValueControl(WidgetTree, ReadOnlyValueText, RI_RowValueWidth);
+    ReadOnlyValueSizeBox = RICompactUI::WrapValueControl(WidgetTree, ReadOnlyValueText, 0.f, RI_RowValueWidth);
     if (UHorizontalBoxSlot* ValueSlot = SummaryRowBox->AddChildToHorizontalBox(ReadOnlyValueSizeBox))
     {
         ValueSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
@@ -480,9 +574,11 @@ void UInspectorPropertyRowWidget::BuildWidgetTree()
 
     ValueTextBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("RI_PropertyRowTextBox"));
     RICompactUI::ConfigureEditableTextBox(ValueTextBox, RI_PropertyTextColor());
+    ValueTextBox->SetMinDesiredWidth(RI_RowValueWidth);
+    ValueTextBox->SetTextOverflowPolicy(ETextOverflowPolicy::Ellipsis);
     ValueTextBox->SetJustification(ETextJustify::Right);
     ValueTextBox->OnTextCommitted.AddDynamic(this, &UInspectorPropertyRowWidget::HandleValueCommitted);
-    ValueTextBoxSizeBox = RICompactUI::WrapValueControl(WidgetTree, ValueTextBox, RI_RowValueWidth);
+    ValueTextBoxSizeBox = RICompactUI::WrapValueControl(WidgetTree, ValueTextBox, 0.f, RI_RowValueWidth);
     if (UHorizontalBoxSlot* TextBoxSlot = SummaryRowBox->AddChildToHorizontalBox(ValueTextBoxSizeBox))
     {
         TextBoxSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
@@ -504,7 +600,7 @@ void UInspectorPropertyRowWidget::BuildWidgetTree()
     RICompactUI::ConfigureComboBoxString(EnumComboBox, RI_PropertyTextColor());
     EnumComboBox->OnGenerateWidgetEvent.BindDynamic(this, &UInspectorPropertyRowWidget::HandleGenerateEnumOptionWidget);
     EnumComboBox->OnSelectionChanged.AddDynamic(this, &UInspectorPropertyRowWidget::HandleEnumChanged);
-    EnumComboBoxSizeBox = RICompactUI::WrapValueControl(WidgetTree, EnumComboBox, RI_RowValueWidth);
+    EnumComboBoxSizeBox = RICompactUI::WrapValueControl(WidgetTree, EnumComboBox, 0.f, RI_RowValueWidth);
     if (UHorizontalBoxSlot* EnumSlot = SummaryRowBox->AddChildToHorizontalBox(EnumComboBoxSizeBox))
     {
         EnumSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
@@ -697,6 +793,7 @@ void UInspectorPropertyRowWidget::HideAllValueControls()
 {
     if (ReadOnlyValueText) ReadOnlyValueText->SetVisibility(ESlateVisibility::Collapsed);
     if (ValueTextBox) ValueTextBox->SetVisibility(ESlateVisibility::Collapsed);
+    ShowExpandedValueEditor(false);
     if (BoolCheckBox) BoolCheckBox->SetVisibility(ESlateVisibility::Collapsed);
     if (EnumComboBox) EnumComboBox->SetVisibility(ESlateVisibility::Collapsed);
     if (ColorButton) ColorButton->SetVisibility(ESlateVisibility::Collapsed);
@@ -734,8 +831,14 @@ void UInspectorPropertyRowWidget::RefreshRow()
 
     if (NameText)
     {
-        NameText->SetText(FText::FromString(GetDisplayedPropertyName(Item)));
-        NameText->SetToolTipText(FText::FromString(Item->GetPropertyName()));
+        const FString DisplayName = GetDisplayedPropertyName(Item);
+        NameText->SetText(FText::FromString(DisplayName));
+        RICompactUI::ConfigureEllipsisText(NameText, Item->GetPropertyName());
+    }
+    if (NameButton)
+    {
+        NameButton->SetIsEnabled(bAllowNavigation);
+        NameButton->SetToolTipText(bAllowNavigation ? FText::FromString(Item->GetPropertyName()) : FText::GetEmpty());
     }
 
     const FString CurrentValue = Item->GetValueText();
@@ -804,6 +907,7 @@ void UInspectorPropertyRowWidget::RefreshRow()
         {
             ReadOnlyValueText->SetVisibility(ESlateVisibility::Visible);
             ReadOnlyValueText->SetText(FText::FromString(CurrentValue));
+            RICompactUI::ConfigureEllipsisText(ReadOnlyValueText, CurrentValue);
         }
         return;
     }
@@ -841,6 +945,12 @@ void UInspectorPropertyRowWidget::RefreshRow()
     {
         ValueTextBox->SetVisibility(ESlateVisibility::Visible);
         ValueTextBox->SetText(FText::FromString(CurrentValue));
+        ValueTextBox->SetToolTipText(FText::FromString(CurrentValue));
+    }
+    if (ExpandedValueTextBox)
+    {
+        ExpandedValueTextBox->SetText(FText::FromString(CurrentValue));
+        ExpandedValueTextBox->SetToolTipText(FText::FromString(CurrentValue));
     }
 
     RefreshTickPolicy();
@@ -1442,8 +1552,28 @@ void UInspectorPropertyRowWidget::HandleValueCommitted(const FText& InText, ETex
     {
         return;
     }
+    if (bExpandedValueEditorActive && CommitMethod == ETextCommit::OnUserMovedFocus)
+    {
+        return;
+    }
 
     ApplyTextValue(InText.ToString());
+}
+
+void UInspectorPropertyRowWidget::HandleExpandedValueCommitted(const FText& InText, ETextCommit::Type CommitMethod)
+{
+    if (RI_ShouldSkipCommit(CommitMethod))
+    {
+        return;
+    }
+
+    const FString NewValue = InText.ToString();
+    if (ValueTextBox)
+    {
+        ValueTextBox->SetText(InText);
+    }
+    ShowExpandedValueEditor(false);
+    ApplyTextValue(NewValue);
 }
 
 void UInspectorPropertyRowWidget::HandleBoolChanged(bool bIsChecked)
@@ -1475,7 +1605,15 @@ void UInspectorPropertyRowWidget::HandleFavoriteClicked()
         return;
     }
 
-    InspectorSubsystem->ToggleFavoriteForAnyItem(Item);
+    FString Error;
+    if (URuntimeInspectorController* Controller = InspectorSubsystem->GetOrCreateRuntimeInspectorController())
+    {
+        Controller->RequestToggleFavorite(Item, Error);
+    }
+    else
+    {
+        InspectorSubsystem->ToggleFavoriteForAnyItem(Item);
+    }
     RefreshRow();
 }
 

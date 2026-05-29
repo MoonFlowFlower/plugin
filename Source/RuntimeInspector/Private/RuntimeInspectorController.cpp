@@ -537,6 +537,33 @@ bool URuntimeInspectorController::RequestNavigateToPinnedItem(UObject* Item, FSt
     return bOk;
 }
 
+bool URuntimeInspectorController::RequestToggleFavorite(UObject* Item, FString& OutError)
+{
+    OutError.Reset();
+    UInspectorWorldSubsystem* InspectorSubsystem = Subsystem.Get();
+    if (!InspectorSubsystem)
+    {
+        OutError = TEXT("RuntimeInspector subsystem unavailable");
+        return false;
+    }
+    if (!Item)
+    {
+        OutError = TEXT("Favorite item is invalid");
+        SetLastIntentLog(TEXT("ToggleFavorite rejected: invalid item"));
+        return false;
+    }
+
+    const bool bWasFavorite = InspectorSubsystem->IsFavoriteForAnyItem(Item);
+    InspectorSubsystem->ToggleFavoriteForAnyItem(Item);
+    const bool bIsFavorite = InspectorSubsystem->IsFavoriteForAnyItem(Item);
+    SetLastIntentLog(FString::Printf(
+        TEXT("ToggleFavorite %s %d->%d"),
+        *GetNameSafe(Item),
+        bWasFavorite ? 1 : 0,
+        bIsFavorite ? 1 : 0));
+    return bWasFavorite != bIsFavorite;
+}
+
 bool URuntimeInspectorController::RequestApplyStagedPatches(FRIApplyResult& OutResult)
 {
     if (UInspectorWorldSubsystem* InspectorSubsystem = Subsystem.Get())

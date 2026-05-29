@@ -425,6 +425,9 @@ static const FName RI_SelfTestId_ActorAttributesSection(TEXT("actor_attributes_s
 static const FName RI_SelfTestId_ComponentRowFocusRoute(TEXT("component_row_focus_route"));
 static const FName RI_SelfTestId_FavoriteRowNavigationRoute(TEXT("favorite_row_navigation_route"));
 static const FName RI_SelfTestId_FunctionRowParameterRunRoute(TEXT("function_row_parameter_run_route"));
+static const FName RI_SelfTestId_FavoriteStarToggleRoute(TEXT("favorite_star_toggle_route"));
+static const FName RI_SelfTestId_RowTextOverflowContract(TEXT("row_text_overflow_contract"));
+static const FName RI_SelfTestId_FunctionRunButtonVisualContract(TEXT("function_run_button_visual_contract"));
 static const FName RI_SelfTestId_SearchSyncsSubsystem(TEXT("search_syncs_subsystem"));
 static const FName RI_SelfTestId_TransformPatchGate(TEXT("transform_patch_gate"));
 static const FName RI_SelfTestId_ChangesPatchVisibility(TEXT("changes_patch_visibility"));
@@ -13903,6 +13906,273 @@ bool UInspectorWorldSubsystem::ExecuteLegacyToolNativeBridgeAction(FName BridgeI
             *GetNameSafe(ParameterItem),
             bParameterUiOk ? 1 : 0,
             *GetNameSafe(RunItem),
+            bRunOk ? 1 : 0,
+            *RunError);
+        CleanupDockContractActor(TestActor, bSpawnedActor, PreviousActor);
+        return true;
+    }
+
+    if (BridgeId == RI_SelfTestId_FavoriteStarToggleRoute)
+    {
+        if (!bOpen)
+        {
+            Open();
+        }
+
+        const TWeakObjectPtr<AActor> PreviousActor = SelectedActor;
+        bool bSpawnedActor = false;
+        AActor* TestActor = ResolveDockContractActor(bSpawnedActor);
+        if (TestActor && SelectedActor.Get() != TestActor)
+        {
+            SetSelectedActor(TestActor);
+        }
+
+        TArray<UObject*> PropertyItems;
+        GetPropertyItemsForSelectedEx(TEXT(""), false, PropertyItems);
+        UInspectorPropertyItem* PropertyCandidate = nullptr;
+        for (UObject* ItemObject : PropertyItems)
+        {
+            UInspectorPropertyItem* PropertyItem = Cast<UInspectorPropertyItem>(ItemObject);
+            if (PropertyItem && PropertyItem->GetTargetObject())
+            {
+                PropertyCandidate = PropertyItem;
+                break;
+            }
+        }
+
+        TArray<UInspectorFunctionItem*> FunctionItems;
+        GetFunctionItemsForSelected(TEXT(""), FunctionItems);
+        UInspectorFunctionItem* FunctionCandidate = nullptr;
+        for (UInspectorFunctionItem* FunctionItem : FunctionItems)
+        {
+            if (FunctionItem && FunctionItem->IsValidItem())
+            {
+                FunctionCandidate = FunctionItem;
+                break;
+            }
+        }
+
+        const bool bPropertyInitialFavorite = PropertyCandidate && IsFavoriteForAnyItem(PropertyCandidate);
+        const bool bFunctionInitialFavorite = FunctionCandidate && IsFavoriteForAnyItem(FunctionCandidate);
+        FString PropertyToggleError;
+        FString FunctionToggleError;
+        FString LeftToggleError;
+
+        RefreshDockRootWidget();
+        if (ActorPropertiesSectionWidget.IsValid())
+        {
+            ActorPropertiesSectionWidget->RefreshFromSubsystem();
+        }
+        if (ActorFunctionsSectionWidget.IsValid())
+        {
+            ActorFunctionsSectionWidget->RefreshFromSubsystem();
+        }
+
+        UInspectorPropertyRowWidget* PropertyRow = PropertyCandidate && ActorPropertiesSectionWidget.IsValid()
+            ? ActorPropertiesSectionWidget->FindPropertyRowForAutomation(PropertyCandidate)
+            : nullptr;
+        const bool bPropertyToggleOk = PropertyRow
+            && PropertyRow->ToggleFavoriteForAutomation(PropertyToggleError)
+            && IsFavoriteForAnyItem(PropertyCandidate) != bPropertyInitialFavorite;
+        if (PropertyCandidate && IsFavoriteForAnyItem(PropertyCandidate) != bPropertyInitialFavorite)
+        {
+            ToggleFavoriteForAnyItem(PropertyCandidate);
+        }
+
+        UInspectorFunctionRowWidget* FunctionRow = FunctionCandidate && ActorFunctionsSectionWidget.IsValid()
+            ? ActorFunctionsSectionWidget->FindFunctionRowForAutomation(FunctionCandidate)
+            : nullptr;
+        const bool bFunctionToggleOk = FunctionRow
+            && FunctionRow->ToggleFavoriteForAutomation(FunctionToggleError)
+            && IsFavoriteForAnyItem(FunctionCandidate) != bFunctionInitialFavorite;
+        if (FunctionCandidate && IsFavoriteForAnyItem(FunctionCandidate) != bFunctionInitialFavorite)
+        {
+            ToggleFavoriteForAnyItem(FunctionCandidate);
+        }
+
+        if (PropertyCandidate && !IsFavoriteForAnyItem(PropertyCandidate))
+        {
+            ToggleFavoriteForAnyItem(PropertyCandidate);
+        }
+        RefreshDockRootWidget();
+        UInspectorDockRootWidget* RootWidget = DockRootWidget.Get();
+        if (RootWidget && PropertyCandidate)
+        {
+            RootWidget->HandleFavoriteToggleProxyClicked(PropertyCandidate);
+            LeftToggleError = GetOrCreateRuntimeInspectorController()
+                ? GetOrCreateRuntimeInspectorController()->GetLastIntentLog()
+                : FString();
+        }
+        const bool bLeftToggleOk = PropertyCandidate && !IsFavoriteForAnyItem(PropertyCandidate);
+        if (PropertyCandidate && IsFavoriteForAnyItem(PropertyCandidate) != bPropertyInitialFavorite)
+        {
+            ToggleFavoriteForAnyItem(PropertyCandidate);
+        }
+        RefreshDockRootWidget();
+
+        bOutPassed = PropertyCandidate
+            && FunctionCandidate
+            && bPropertyToggleOk
+            && bFunctionToggleOk
+            && bLeftToggleOk;
+        OutReport = FString::Printf(
+            TEXT("favorite_star_toggle_route=%s | Property=%s RowToggle=%d Function=%s FunctionToggle=%d LeftToggle=%d Errors=%s | %s | %s"),
+            bOutPassed ? TEXT("PASS") : TEXT("FAIL"),
+            *GetNameSafe(PropertyCandidate),
+            bPropertyToggleOk ? 1 : 0,
+            *GetNameSafe(FunctionCandidate),
+            bFunctionToggleOk ? 1 : 0,
+            bLeftToggleOk ? 1 : 0,
+            *PropertyToggleError,
+            *FunctionToggleError,
+            *LeftToggleError);
+        CleanupDockContractActor(TestActor, bSpawnedActor, PreviousActor);
+        return true;
+    }
+
+    if (BridgeId == RI_SelfTestId_RowTextOverflowContract)
+    {
+        if (!bOpen)
+        {
+            Open();
+        }
+
+        const TWeakObjectPtr<AActor> PreviousActor = SelectedActor;
+        bool bSpawnedActor = false;
+        AActor* TestActor = ResolveDockContractActor(bSpawnedActor);
+        if (TestActor && SelectedActor.Get() != TestActor)
+        {
+            SetSelectedActor(TestActor);
+        }
+
+        TArray<UObject*> PropertyItems;
+        GetPropertyItemsForSelectedEx(TEXT(""), false, PropertyItems);
+        UInspectorPropertyItem* PropertyCandidate = nullptr;
+        for (UObject* ItemObject : PropertyItems)
+        {
+            UInspectorPropertyItem* PropertyItem = Cast<UInspectorPropertyItem>(ItemObject);
+            if (PropertyItem && PropertyItem->GetTargetObject())
+            {
+                PropertyCandidate = PropertyItem;
+                break;
+            }
+        }
+
+        TArray<UInspectorFunctionItem*> FunctionItems;
+        GetFunctionItemsForSelected(TEXT(""), FunctionItems);
+        UInspectorFunctionItem* FunctionCandidate = nullptr;
+        for (UInspectorFunctionItem* FunctionItem : FunctionItems)
+        {
+            if (FunctionItem && FunctionItem->IsValidItem())
+            {
+                FunctionCandidate = FunctionItem;
+                break;
+            }
+        }
+
+        RefreshDockRootWidget();
+        if (ActorPropertiesSectionWidget.IsValid())
+        {
+            ActorPropertiesSectionWidget->RefreshFromSubsystem();
+        }
+        if (ActorFunctionsSectionWidget.IsValid())
+        {
+            ActorFunctionsSectionWidget->RefreshFromSubsystem();
+        }
+
+        UInspectorPropertyRowWidget* PropertyRow = PropertyCandidate && ActorPropertiesSectionWidget.IsValid()
+            ? ActorPropertiesSectionWidget->FindPropertyRowForAutomation(PropertyCandidate)
+            : nullptr;
+        UInspectorFunctionRowWidget* FunctionRow = FunctionCandidate && ActorFunctionsSectionWidget.IsValid()
+            ? ActorFunctionsSectionWidget->FindFunctionRowForAutomation(FunctionCandidate)
+            : nullptr;
+        const FRIInspectorViewModel ViewModel = GetOrCreateRuntimeInspectorController()
+            ? GetOrCreateRuntimeInspectorController()->GetCurrentViewModel()
+            : FRIInspectorViewModel();
+        const bool bLeftRowsAvailable = ViewModel.Components.Num() > 0;
+        const bool bFavoriteRowsAvailable = ViewModel.Favorites.Num() > 0 || PropertyCandidate != nullptr;
+        const bool bPropertyOverflowOk = PropertyRow
+            && PropertyRow->HasOverflowLayoutForAutomation()
+            && PropertyRow->HasExpandedValueEditorForAutomation();
+        const bool bFunctionOverflowOk = FunctionRow && FunctionRow->HasOverflowLayoutForAutomation();
+
+        bOutPassed = bPropertyOverflowOk && bFunctionOverflowOk && bLeftRowsAvailable && bFavoriteRowsAvailable;
+        OutReport = FString::Printf(
+            TEXT("row_text_overflow_contract=%s | PropertyOverflow=%d ExpandedEditor=%d FunctionOverflow=%d Components=%d FavoritesCandidate=%d"),
+            bOutPassed ? TEXT("PASS") : TEXT("FAIL"),
+            bPropertyOverflowOk ? 1 : 0,
+            PropertyRow && PropertyRow->HasExpandedValueEditorForAutomation() ? 1 : 0,
+            bFunctionOverflowOk ? 1 : 0,
+            ViewModel.Components.Num(),
+            bFavoriteRowsAvailable ? 1 : 0);
+        CleanupDockContractActor(TestActor, bSpawnedActor, PreviousActor);
+        return true;
+    }
+
+    if (BridgeId == RI_SelfTestId_FunctionRunButtonVisualContract)
+    {
+        if (!bOpen)
+        {
+            Open();
+        }
+
+        const TWeakObjectPtr<AActor> PreviousActor = SelectedActor;
+        bool bSpawnedActor = false;
+        AActor* TestActor = ResolveDockContractActor(bSpawnedActor);
+        if (TestActor && SelectedActor.Get() != TestActor)
+        {
+            SetSelectedActor(TestActor);
+        }
+
+        TArray<UInspectorFunctionItem*> FunctionItems;
+        GetFunctionItemsForSelected(TEXT(""), FunctionItems);
+        UInspectorFunctionItem* RunItem = nullptr;
+        for (UInspectorFunctionItem* Item : FunctionItems)
+        {
+            if (!Item || !Item->IsValidItem())
+            {
+                continue;
+            }
+
+            const FString Name = Item->GetFunctionName();
+            if (Name.Contains(TEXT("Print"), ESearchCase::IgnoreCase)
+                || Name.Contains(TEXT("FlushNetDormancy"), ESearchCase::IgnoreCase)
+                || Name.Contains(TEXT("ForceNetUpdate"), ESearchCase::IgnoreCase))
+            {
+                RunItem = Item;
+                break;
+            }
+        }
+        if (!RunItem)
+        {
+            for (UInspectorFunctionItem* Item : FunctionItems)
+            {
+                if (Item && Item->IsValidItem())
+                {
+                    RunItem = Item;
+                    break;
+                }
+            }
+        }
+
+        RefreshDockRootWidget();
+        if (ActorFunctionsSectionWidget.IsValid())
+        {
+            ActorFunctionsSectionWidget->RefreshFromSubsystem();
+        }
+        UInspectorFunctionRowWidget* RunRow = RunItem && ActorFunctionsSectionWidget.IsValid()
+            ? ActorFunctionsSectionWidget->FindFunctionRowForAutomation(RunItem)
+            : nullptr;
+        FString RunError;
+        const bool bVisualOk = RunRow && RunRow->HasCompactRunButtonForAutomation();
+        const bool bRunOk = RunRow && RunRow->InvokeForAutomation(RunError);
+
+        bOutPassed = bVisualOk && bRunOk;
+        OutReport = FString::Printf(
+            TEXT("function_run_button_visual_contract=%s | Function=%s Visual=%d Run=%d Error=%s"),
+            bOutPassed ? TEXT("PASS") : TEXT("FAIL"),
+            *GetNameSafe(RunItem),
+            bVisualOk ? 1 : 0,
             bRunOk ? 1 : 0,
             *RunError);
         CleanupDockContractActor(TestActor, bSpawnedActor, PreviousActor);

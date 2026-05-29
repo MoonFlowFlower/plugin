@@ -43,6 +43,9 @@ public:
 
     float GetFavoriteButtonHeightForAutomation() const;
     float GetParameterInputHeightForAutomation() const;
+    bool ToggleFavoriteForAutomation(FString& OutError);
+    bool HasOverflowLayoutForAutomation() const;
+    bool HasCompactRunButtonForAutomation() const;
     bool NavigateForAutomation(FString& OutError);
 
 protected:
@@ -85,6 +88,9 @@ private:
 
     UPROPERTY(Transient)
     UButton* TitleButton = nullptr;
+
+    UPROPERTY(Transient)
+    USizeBox* TitleSizeBox = nullptr;
 
     UPROPERTY(Transient)
     UButton* FavoriteButton = nullptr;

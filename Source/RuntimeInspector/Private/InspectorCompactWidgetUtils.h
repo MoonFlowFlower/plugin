@@ -630,6 +630,31 @@ namespace RICompactUI
         return Text;
     }
 
+    inline void ConfigureEllipsisText(UTextBlock* Text, const FString& FullText = FString())
+    {
+        if (!Text)
+        {
+            return;
+        }
+
+        Text->SetAutoWrapText(false);
+        Text->SetClipping(EWidgetClipping::ClipToBounds);
+        Text->SetTextOverflowPolicy(ETextOverflowPolicy::Ellipsis);
+        Text->SetToolTipText(FullText.IsEmpty() ? FText::GetEmpty() : FText::FromString(FullText));
+    }
+
+    inline UTextBlock* MakeEllipsisText(
+        UWidgetTree* WidgetTree,
+        const FString& InText,
+        int32 Size,
+        bool bBold,
+        const FLinearColor& Color)
+    {
+        UTextBlock* Text = MakeText(WidgetTree, InText, Size, bBold, Color, false);
+        ConfigureEllipsisText(Text, InText);
+        return Text;
+    }
+
     inline UTexture2D* GetFavoriteIconTexture(bool bFavorited)
     {
         static TWeakObjectPtr<UTexture2D> OutlineTexture;
@@ -1066,6 +1091,57 @@ namespace RICompactUI
         UTextBlock* LabelText = MakeText(WidgetTree, Label, EffectiveFontSize, true, GetButtonTextColor(Style));
         LabelText->SetJustification(ETextJustify::Center);
         SizeBox->SetContent(LabelText);
+        Button->AddChild(SizeBox);
+        ConfigureButton(Button, Style, false);
+        return Button;
+    }
+
+    inline UButton* MakeCompactActionButton(
+        UWidgetTree* WidgetTree,
+        const FName& Name,
+        const FString& Label,
+        const TCHAR* IconAssetName,
+        ERIButtonVisualStyle Style,
+        float WidthOverride,
+        float HeightOverride,
+        float IconSize,
+        int32 FontSize = 0)
+    {
+        const int32 EffectiveFontSize = FontSize > 0 ? FontSize : GetValueFontSize();
+        UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), Name);
+        USizeBox* SizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+        SizeBox->SetWidthOverride(WidthOverride);
+        SizeBox->SetHeightOverride(HeightOverride > 0.f ? HeightOverride : GetButtonHeight());
+
+        UHorizontalBox* Content = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
+        if (UImage* Icon = MakeIcon(WidgetTree, NAME_None, IconAssetName, IconSize, GetButtonTextColor(Style)))
+        {
+            Icon->SetVisibility(ESlateVisibility::HitTestInvisible);
+            USizeBox* IconBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+            IconBox->SetWidthOverride(IconSize);
+            IconBox->SetHeightOverride(IconSize);
+            IconBox->SetVisibility(ESlateVisibility::HitTestInvisible);
+            IconBox->SetContent(Icon);
+            CenterSizeBoxContent(IconBox);
+            if (UHorizontalBoxSlot* IconSlot = Content->AddChildToHorizontalBox(IconBox))
+            {
+                IconSlot->SetPadding(FMargin(0.f, 0.f, 3.f, 0.f));
+                IconSlot->SetVerticalAlignment(VAlign_Center);
+                IconSlot->SetHorizontalAlignment(HAlign_Center);
+            }
+        }
+
+        UTextBlock* LabelText = MakeEllipsisText(WidgetTree, Label, EffectiveFontSize, true, GetButtonTextColor(Style));
+        LabelText->SetJustification(ETextJustify::Center);
+        LabelText->SetVisibility(ESlateVisibility::HitTestInvisible);
+        if (UHorizontalBoxSlot* LabelSlot = Content->AddChildToHorizontalBox(LabelText))
+        {
+            LabelSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+            LabelSlot->SetVerticalAlignment(VAlign_Center);
+            LabelSlot->SetHorizontalAlignment(HAlign_Fill);
+        }
+
+        SizeBox->SetContent(Content);
         Button->AddChild(SizeBox);
         ConfigureButton(Button, Style, false);
         return Button;

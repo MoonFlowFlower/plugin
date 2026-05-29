@@ -3,6 +3,7 @@
 #include "InspectorCompactWidgetUtils.h"
 #include "InspectorFunctionItem.h"
 #include "InspectorWorldSubsystem.h"
+#include "RuntimeInspectorController.h"
 
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
@@ -41,11 +42,13 @@ namespace
         return RICompactUI::GetWarningTextColor();
     }
 
-    static constexpr float RI_FunctionFavoriteButtonSize = 16.0f;
-    static constexpr float RI_FunctionFavoriteIconSize = 10.5f;
-    static constexpr float RI_FunctionRunButtonWidth = 42.0f;
-    static constexpr float RI_FunctionRunButtonHeight = 18.0f;
-    static constexpr float RI_FunctionParameterWidth = 88.0f;
+    static constexpr float RI_FunctionFavoriteButtonSize = 22.0f;
+    static constexpr float RI_FunctionFavoriteIconSize = 12.0f;
+    static constexpr float RI_FunctionTitleMaxWidth = 104.0f;
+    static constexpr float RI_FunctionRunButtonWidth = 54.0f;
+    static constexpr float RI_FunctionRunButtonHeight = 20.0f;
+    static constexpr float RI_FunctionParameterWidth = 82.0f;
+    static constexpr float RI_FunctionParameterLabelMaxWidth = 96.0f;
     static constexpr float RI_FunctionParameterCheckSize = 16.0f;
 }
 
@@ -102,6 +105,40 @@ float UInspectorFunctionRowWidget::GetParameterInputHeightForAutomation() const
 {
     const USizeBox* SizeBox = PrimaryParameterSizeBox.Get();
     return SizeBox ? SizeBox->GetHeightOverride() : 0.f;
+}
+
+bool UInspectorFunctionRowWidget::ToggleFavoriteForAutomation(FString& OutError)
+{
+    UInspectorWorldSubsystem* InspectorSubsystem = Subsystem.Get();
+    UInspectorFunctionItem* Item = FunctionItem.Get();
+    if (!InspectorSubsystem || !Item)
+    {
+        OutError = TEXT("Function row favorite target unavailable");
+        return false;
+    }
+
+    if (URuntimeInspectorController* Controller = InspectorSubsystem->GetOrCreateRuntimeInspectorController())
+    {
+        return Controller->RequestToggleFavorite(Item, OutError);
+    }
+
+    OutError = TEXT("RuntimeInspector controller unavailable");
+    return false;
+}
+
+bool UInspectorFunctionRowWidget::HasOverflowLayoutForAutomation() const
+{
+    return FavoriteSizeBox
+        && FMath::IsNearlyEqual(FavoriteSizeBox->GetWidthOverride(), RI_FunctionFavoriteButtonSize)
+        && TitleSizeBox
+        && FMath::IsNearlyEqual(TitleSizeBox->GetMaxDesiredWidth(), RI_FunctionTitleMaxWidth);
+}
+
+bool UInspectorFunctionRowWidget::HasCompactRunButtonForAutomation() const
+{
+    return InvokeButton
+        && RI_FunctionRunButtonWidth <= 56.0f
+        && RI_FunctionRunButtonHeight <= 22.0f;
 }
 
 bool UInspectorFunctionRowWidget::NavigateForAutomation(FString& OutError)
@@ -188,7 +225,12 @@ void UInspectorFunctionRowWidget::BuildWidgetTree()
         false,
         RI_FunctionFavoriteActiveColor(),
         RI_FunctionRowMutedColor());
+    if (FavoriteIcon)
+    {
+        FavoriteIcon->SetVisibility(ESlateVisibility::HitTestInvisible);
+    }
     FavoriteSizeBox->SetContent(FavoriteIcon);
+    FavoriteSizeBox->SetVisibility(ESlateVisibility::HitTestInvisible);
     RICompactUI::CenterSizeBoxContent(FavoriteSizeBox);
     FavoriteButton->AddChild(FavoriteSizeBox);
     RICompactUI::ConfigureGhostIconButton(FavoriteButton);
@@ -225,7 +267,8 @@ void UInspectorFunctionRowWidget::BuildWidgetTree()
     }
     TitleButton->SetBackgroundColor(FLinearColor::Transparent);
     TitleButton->OnClicked.AddDynamic(this, &UInspectorFunctionRowWidget::HandleTitleClicked);
-    TitleText = RICompactUI::MakeText(WidgetTree, TEXT("Function"), RICompactUI::GetLabelFontSize(), true, RI_FunctionRowTextColor(), false);
+    TitleText = RICompactUI::MakeEllipsisText(WidgetTree, TEXT("Function"), RICompactUI::GetLabelFontSize(), true, RI_FunctionRowTextColor());
+    TitleText->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
     TitleButton->AddChild(TitleText);
     if (UButtonSlot* TitleButtonSlot = Cast<UButtonSlot>(TitleButton->GetContentSlot()))
     {
@@ -233,7 +276,10 @@ void UInspectorFunctionRowWidget::BuildWidgetTree()
         TitleButtonSlot->SetVerticalAlignment(VAlign_Center);
         TitleButtonSlot->SetPadding(FMargin(0.f));
     }
-    if (UHorizontalBoxSlot* TitleSlot = HeaderRow->AddChildToHorizontalBox(TitleButton))
+    TitleSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_FunctionRowTitleSize"));
+    TitleSizeBox->SetMaxDesiredWidth(RI_FunctionTitleMaxWidth);
+    TitleSizeBox->SetContent(TitleButton);
+    if (UHorizontalBoxSlot* TitleSlot = HeaderRow->AddChildToHorizontalBox(TitleSizeBox))
     {
         TitleSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
         TitleSlot->SetVerticalAlignment(VAlign_Center);
@@ -247,13 +293,15 @@ void UInspectorFunctionRowWidget::BuildWidgetTree()
         OwnerSlot->SetVerticalAlignment(VAlign_Center);
     }
 
-    InvokeButton = RICompactUI::MakeLabeledButton(
+    InvokeButton = RICompactUI::MakeCompactActionButton(
         WidgetTree,
         TEXT("BTN_InvokeFunction"),
         TEXT("Run"),
-        RICompactUI::ERIButtonVisualStyle::Primary,
+        TEXT("play_triangle_white_64"),
+        RICompactUI::ERIButtonVisualStyle::TabActive,
         RI_FunctionRunButtonWidth,
         RI_FunctionRunButtonHeight,
+        9.5f,
         RICompactUI::GetValueFontSize());
     InvokeButton->OnClicked.AddDynamic(this, &UInspectorFunctionRowWidget::HandleInvokeClicked);
     if (UHorizontalBoxSlot* ButtonSlot = HeaderRow->AddChildToHorizontalBox(InvokeButton))
@@ -316,6 +364,7 @@ void UInspectorFunctionRowWidget::RefreshRow()
     if (TitleText)
     {
         TitleText->SetText(FText::FromString(Item->GetDisplayName()));
+        RICompactUI::ConfigureEllipsisText(TitleText, Item->GetQualifiedDisplayName());
     }
     if (TitleButton)
     {
@@ -350,8 +399,11 @@ void UInspectorFunctionRowWidget::RefreshRow()
         ParamBorder->SetContent(ParamRow);
 
         const FString LabelText = FString::Printf(TEXT("%s (%s)"), *Param.DisplayName, *Param.TypeLabel);
-        UTextBlock* Label = RICompactUI::MakeText(WidgetTree, LabelText, RICompactUI::GetMutedFontSize(), true, RI_FunctionRowMutedColor(), true);
-        if (UHorizontalBoxSlot* LabelSlot = ParamRow->AddChildToHorizontalBox(Label))
+        UTextBlock* Label = RICompactUI::MakeEllipsisText(WidgetTree, LabelText, RICompactUI::GetMutedFontSize(), true, RI_FunctionRowMutedColor());
+        USizeBox* LabelSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+        LabelSizeBox->SetMaxDesiredWidth(RI_FunctionParameterLabelMaxWidth);
+        LabelSizeBox->SetContent(Label);
+        if (UHorizontalBoxSlot* LabelSlot = ParamRow->AddChildToHorizontalBox(LabelSizeBox))
         {
             LabelSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
             LabelSlot->SetVerticalAlignment(VAlign_Center);
@@ -377,7 +429,7 @@ void UInspectorFunctionRowWidget::RefreshRow()
                 Combo->SetSelectedOption(Param.EnumOptions[0]);
             }
             Control = Combo;
-            WrappedControl = RICompactUI::WrapValueControl(WidgetTree, Combo, RI_FunctionParameterWidth);
+            WrappedControl = RICompactUI::WrapValueControl(WidgetTree, Combo, 0.f, RI_FunctionParameterWidth);
         }
         else if (Param.TypeLabel.Equals(TEXT("bool"), ESearchCase::IgnoreCase))
         {
@@ -393,9 +445,12 @@ void UInspectorFunctionRowWidget::RefreshRow()
         {
             UEditableTextBox* TextBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass());
             RICompactUI::ConfigureEditableTextBox(TextBox, RI_FunctionRowTextColor(), RICompactUI::GetValueFontSize(), RICompactUI::ERIInputVisualStyle::Strong);
+            TextBox->SetMinDesiredWidth(RI_FunctionParameterWidth);
+            TextBox->SetTextOverflowPolicy(ETextOverflowPolicy::Ellipsis);
             TextBox->SetText(FText::FromString(Param.DefaultText));
+            TextBox->SetToolTipText(FText::FromString(Param.DefaultText));
             Control = TextBox;
-            WrappedControl = RICompactUI::WrapValueControl(WidgetTree, TextBox, RI_FunctionParameterWidth);
+            WrappedControl = RICompactUI::WrapValueControl(WidgetTree, TextBox, 0.f, RI_FunctionParameterWidth);
         }
 
         if (Control)
@@ -543,7 +598,15 @@ void UInspectorFunctionRowWidget::HandleFavoriteClicked()
         return;
     }
 
-    InspectorSubsystem->ToggleFavoriteForAnyItem(Item);
+    FString Error;
+    if (URuntimeInspectorController* Controller = InspectorSubsystem->GetOrCreateRuntimeInspectorController())
+    {
+        Controller->RequestToggleFavorite(Item, Error);
+    }
+    else
+    {
+        InspectorSubsystem->ToggleFavoriteForAnyItem(Item);
+    }
     RefreshRow();
 }
 

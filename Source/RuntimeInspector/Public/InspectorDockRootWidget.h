@@ -84,6 +84,9 @@ public:
     UPROPERTY(Transient)
     TObjectPtr<UObject> SourceItem;
 
+    UPROPERTY(Transient)
+    bool bToggleFavorite = false;
+
     UFUNCTION()
     void HandleClicked();
 };
@@ -114,6 +117,7 @@ public:
     void HandlePatchRevertProxyClicked(FGuid PatchId);
     void HandleComponentProxyClicked(const FString& ComponentName);
     void HandleFavoriteProxyClicked(UObject* SourceItem);
+    void HandleFavoriteToggleProxyClicked(UObject* SourceItem);
 
 protected:
     virtual void NativeConstruct() override;

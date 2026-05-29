@@ -230,6 +230,36 @@
     "LegacyNativeBridgeId": "function_row_parameter_run_route"
   },
   {
+    "Id": "favorite_star_toggle_route",
+    "DisplayName": "Favorite Star Toggle Route",
+    "Category": "UI",
+    "Description": "Validates property, function, and left Favorites star clicks toggle favorites through the controller/subsystem route.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": true,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "favorite_star_toggle_route"
+  },
+  {
+    "Id": "row_text_overflow_contract",
+    "DisplayName": "Row Text Overflow Contract",
+    "Category": "UI",
+    "Description": "Validates narrow dock rows use fixed name/value zones, ellipsis text, and full-width scalar editing support.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": true,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "row_text_overflow_contract"
+  },
+  {
+    "Id": "function_run_button_visual_contract",
+    "DisplayName": "Function Run Button Visual Contract",
+    "Category": "UI",
+    "Description": "Validates function rows use the compact Run button visual while preserving the function invocation route.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": true,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "function_run_button_visual_contract"
+  },
+  {
     "Id": "search_syncs_subsystem",
     "DisplayName": "Search Syncs Subsystem",
     "Category": "UI",

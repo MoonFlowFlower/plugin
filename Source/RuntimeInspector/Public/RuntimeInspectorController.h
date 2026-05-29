@@ -40,6 +40,9 @@ public:
     bool RequestNavigateToPinnedItem(UObject* Item, FString& OutError);
 
     UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Controller")
+    bool RequestToggleFavorite(UObject* Item, FString& OutError);
+
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Controller")
     bool RequestApplyStagedPatches(FRIApplyResult& OutResult);
 
     UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Controller")

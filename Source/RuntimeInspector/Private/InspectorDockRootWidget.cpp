@@ -216,7 +216,14 @@ void UInspectorDockFavoriteActionProxy::HandleClicked()
 {
     if (Owner)
     {
-        Owner->HandleFavoriteProxyClicked(SourceItem);
+        if (bToggleFavorite)
+        {
+            Owner->HandleFavoriteToggleProxyClicked(SourceItem);
+        }
+        else
+        {
+            Owner->HandleFavoriteProxyClicked(SourceItem);
+        }
     }
 }
 
@@ -782,14 +789,13 @@ void UInspectorDockRootWidget::RefreshActorContext(const FRIInspectorViewModel& 
                 {
                     RI_AddHorizontal(Row, RowIcon, FMargin(0.f, 2.f, RICompactUI::GetInlineGap() + 1.f, 0.f));
                 }
-                UTextBlock* RowText = RICompactUI::MakeText(
+                const FString ComponentLabel = FString::Printf(TEXT("%s%s  |  %s"), *Prefix, *Component.DisplayName.ToString(), *Component.ClassName.ToString());
+                UTextBlock* RowText = RICompactUI::MakeEllipsisText(
                     WidgetTree,
-                    FString::Printf(TEXT("%s%s  |  %s"), *Prefix, *Component.DisplayName.ToString(), *Component.ClassName.ToString()),
+                    ComponentLabel,
                     RICompactUI::GetLabelFontSize(),
                     Component.bSelected,
-                    RowColor,
-                    true);
-                RowText->SetAutoWrapText(false);
+                    RowColor);
                 RI_AddHorizontal(Row, RowText, FMargin(0.f), ESlateSizeRule::Fill);
                 RowSurface->SetContent(Row);
                 RowButton->AddChild(RowSurface);
@@ -824,36 +830,68 @@ void UInspectorDockRootWidget::RefreshActorContext(const FRIInspectorViewModel& 
         {
             for (const FRIFavoriteViewModel& Favorite : ViewModel.Favorites)
             {
-                UButton* RowButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), NAME_None);
                 UBorder* RowSurface = RICompactUI::MakeSurfaceCard(
                     WidgetTree,
                     NAME_None,
                     RICompactUI::GetRowSurfaceBackgroundColor(),
                     RICompactUI::GetSurfaceCardPadding(true));
                 UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), NAME_None);
-                if (USizeBox* StarIcon = RI_MakeIconBox(WidgetTree, NAME_None, TEXT("star_white_solid_64"), 11.0f, RICompactUI::GetWarningTextColor()))
+
+                UButton* StarButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), NAME_None);
+                USizeBox* StarHitBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), NAME_None);
+                StarHitBox->SetWidthOverride(22.0f);
+                StarHitBox->SetHeightOverride(22.0f);
+                StarHitBox->SetVisibility(ESlateVisibility::HitTestInvisible);
+                if (USizeBox* StarIcon = RI_MakeIconBox(WidgetTree, NAME_None, TEXT("star_white_solid_64"), 12.0f, RICompactUI::GetWarningTextColor()))
                 {
-                    RI_AddHorizontal(Row, StarIcon, FMargin(0.f, 1.f, RICompactUI::GetInlineGap() + 1.f, 0.f));
+                    StarIcon->SetVisibility(ESlateVisibility::HitTestInvisible);
+                    StarHitBox->SetContent(StarIcon);
                 }
-                UTextBlock* RowText = RICompactUI::MakeText(
+                RICompactUI::CenterSizeBoxContent(StarHitBox);
+                StarButton->AddChild(StarHitBox);
+                RICompactUI::ConfigureGhostIconButton(StarButton);
+                if (UButtonSlot* StarSlot = Cast<UButtonSlot>(StarButton->GetContentSlot()))
+                {
+                    StarSlot->SetHorizontalAlignment(HAlign_Center);
+                    StarSlot->SetVerticalAlignment(VAlign_Center);
+                    StarSlot->SetPadding(FMargin(0.f));
+                }
+
+                UInspectorDockFavoriteActionProxy* ToggleProxy = NewObject<UInspectorDockFavoriteActionProxy>(this);
+                ToggleProxy->Owner = this;
+                ToggleProxy->SourceItem = Favorite.SourceItem;
+                ToggleProxy->bToggleFavorite = true;
+                ActionProxies.Add(ToggleProxy);
+                StarButton->OnClicked.AddDynamic(ToggleProxy, &UInspectorDockFavoriteActionProxy::HandleClicked);
+                RI_AddHorizontal(Row, StarButton, FMargin(0.f, 0.f, RICompactUI::GetInlineGap(), 0.f));
+
+                UButton* TextButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), NAME_None);
+                RICompactUI::ConfigureSwatchButton(TextButton);
+                const FString FavoriteLabel = FString::Printf(TEXT("%s  %s"), *Favorite.DisplayName.ToString(), *Favorite.ValueText.ToString());
+                UTextBlock* RowText = RICompactUI::MakeEllipsisText(
                     WidgetTree,
-                    FString::Printf(TEXT("%s  %s"), *Favorite.DisplayName.ToString(), *Favorite.ValueText.ToString()),
+                    FavoriteLabel,
                     RICompactUI::GetLabelFontSize(),
                     false,
-                    RICompactUI::GetSecondaryTextColor(),
-                    true);
-                RowText->SetAutoWrapText(false);
-                RI_AddHorizontal(Row, RowText, FMargin(0.f), ESlateSizeRule::Fill);
-                RowSurface->SetContent(Row);
-                RowButton->AddChild(RowSurface);
-                RICompactUI::ConfigureSwatchButton(RowButton);
+                    RICompactUI::GetSecondaryTextColor());
+                RowText->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+                TextButton->AddChild(RowText);
+                if (UButtonSlot* TextSlot = Cast<UButtonSlot>(TextButton->GetContentSlot()))
+                {
+                    TextSlot->SetHorizontalAlignment(HAlign_Fill);
+                    TextSlot->SetVerticalAlignment(VAlign_Center);
+                    TextSlot->SetPadding(FMargin(0.f));
+                }
 
-                UInspectorDockFavoriteActionProxy* Proxy = NewObject<UInspectorDockFavoriteActionProxy>(this);
-                Proxy->Owner = this;
-                Proxy->SourceItem = Favorite.SourceItem;
-                ActionProxies.Add(Proxy);
-                RowButton->OnClicked.AddDynamic(Proxy, &UInspectorDockFavoriteActionProxy::HandleClicked);
-                RI_AddVertical(FavoritesListBox, RowButton, FMargin(0.f, 0.f, 0.f, 3.f));
+                UInspectorDockFavoriteActionProxy* NavigateProxy = NewObject<UInspectorDockFavoriteActionProxy>(this);
+                NavigateProxy->Owner = this;
+                NavigateProxy->SourceItem = Favorite.SourceItem;
+                NavigateProxy->bToggleFavorite = false;
+                ActionProxies.Add(NavigateProxy);
+                TextButton->OnClicked.AddDynamic(NavigateProxy, &UInspectorDockFavoriteActionProxy::HandleClicked);
+                RI_AddHorizontal(Row, TextButton, FMargin(0.f), ESlateSizeRule::Fill);
+                RowSurface->SetContent(Row);
+                RI_AddVertical(FavoritesListBox, RowSurface, FMargin(0.f, 0.f, 0.f, 3.f));
             }
         }
     }
@@ -1193,6 +1231,24 @@ void UInspectorDockRootWidget::HandleFavoriteProxyClicked(UObject* SourceItem)
     {
         FString Error;
         Controller->RequestNavigateToPinnedItem(SourceItem, Error);
+        if (ActionStatusText)
+        {
+            ActionStatusText->SetText(FText::FromString(Controller->GetLastIntentLog()));
+        }
+    }
+    RefreshFromController();
+}
+
+void UInspectorDockRootWidget::HandleFavoriteToggleProxyClicked(UObject* SourceItem)
+{
+    if (Controller)
+    {
+        FString Error;
+        Controller->RequestToggleFavorite(SourceItem, Error);
+        if (ActionStatusText)
+        {
+            ActionStatusText->SetText(FText::FromString(Controller->GetLastIntentLog()));
+        }
     }
     RefreshFromController();
 }
