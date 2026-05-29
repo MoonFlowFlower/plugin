@@ -128,6 +128,8 @@ private:
     void RefreshLayoutForViewport();
     void RefreshActorContext(const FRIInspectorViewModel& ViewModel);
     void RefreshHostedActorSections(const FRIInspectorViewModel& ViewModel);
+    void RefreshAfterComponentFocus(const FString& ComponentName, bool bFocusSucceeded);
+    void RefreshComponentSelectionPresentation(const FString& ComponentName);
     void RefreshChangesTab(const FRIInspectorViewModel& ViewModel);
     void RefreshTabPresentation(const FRIInspectorViewModel& ViewModel);
     void RefreshActionBar(const FRIInspectorViewModel& ViewModel);
@@ -255,6 +257,9 @@ private:
 
     UPROPERTY(Transient)
     TArray<TObjectPtr<UObject>> ActionProxies;
+
+    TMap<FString, TWeakObjectPtr<UBorder>> ComponentRowSurfaces;
+    TMap<FString, TWeakObjectPtr<UTextBlock>> ComponentRowTexts;
 
     bool bWidgetTreeBuilt = false;
     bool bLeftPanelCompact = false;

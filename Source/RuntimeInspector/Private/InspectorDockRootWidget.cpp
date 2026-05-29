@@ -6,6 +6,7 @@
 #include "InspectorPropertiesSectionWidget.h"
 #include "InspectorSettingsPageWidget.h"
 #include "InspectorTestPageWidget.h"
+#include "RuntimeInspector.h"
 #include "RuntimeInspectorController.h"
 
 #include "Blueprint/UserWidget.h"
@@ -28,6 +29,7 @@
 #include "Components/VerticalBoxSlot.h"
 #include "Components/WidgetSwitcher.h"
 #include "Components/WidgetSwitcherSlot.h"
+#include "HAL/PlatformTime.h"
 #include "InspectorWorldSubsystem.h"
 
 namespace
@@ -749,6 +751,8 @@ void UInspectorDockRootWidget::RefreshActorContext(const FRIInspectorViewModel& 
     }
 
     ActionProxies.Reset();
+    ComponentRowSurfaces.Reset();
+    ComponentRowTexts.Reset();
 
     if (ComponentListBox)
     {
@@ -791,9 +795,13 @@ void UInspectorDockRootWidget::RefreshActorContext(const FRIInspectorViewModel& 
                 RowButton->AddChild(RowSurface);
                 RICompactUI::ConfigureSwatchButton(RowButton);
 
+                const FString RouteComponentName = Component.ComponentName.IsEmpty() ? Component.DisplayName.ToString() : Component.ComponentName;
+                ComponentRowSurfaces.Add(RouteComponentName, RowSurface);
+                ComponentRowTexts.Add(RouteComponentName, RowText);
+
                 UInspectorDockComponentActionProxy* Proxy = NewObject<UInspectorDockComponentActionProxy>(this);
                 Proxy->Owner = this;
-                Proxy->ComponentName = Component.ComponentName.IsEmpty() ? Component.DisplayName.ToString() : Component.ComponentName;
+                Proxy->ComponentName = RouteComponentName;
                 ActionProxies.Add(Proxy);
                 RowButton->OnClicked.AddDynamic(Proxy, &UInspectorDockComponentActionProxy::HandleClicked);
                 RI_AddVertical(ComponentListBox, RowButton, FMargin(0.f, 0.f, 0.f, 3.f));
@@ -846,6 +854,48 @@ void UInspectorDockRootWidget::RefreshActorContext(const FRIInspectorViewModel& 
                 ActionProxies.Add(Proxy);
                 RowButton->OnClicked.AddDynamic(Proxy, &UInspectorDockFavoriteActionProxy::HandleClicked);
                 RI_AddVertical(FavoritesListBox, RowButton, FMargin(0.f, 0.f, 0.f, 3.f));
+            }
+        }
+    }
+}
+
+void UInspectorDockRootWidget::RefreshAfterComponentFocus(const FString& ComponentName, bool bFocusSucceeded)
+{
+    CurrentViewModel.ActiveTab = ERIInspectorTab::Actor;
+    if (bFocusSucceeded)
+    {
+        RefreshComponentSelectionPresentation(ComponentName);
+    }
+    RefreshHostedActorSections(CurrentViewModel);
+    RefreshTabPresentation(CurrentViewModel);
+    RefreshActionBar(CurrentViewModel);
+    if (ActionStatusText && Controller)
+    {
+        ActionStatusText->SetText(FText::FromString(Controller->GetLastIntentLog()));
+    }
+}
+
+void UInspectorDockRootWidget::RefreshComponentSelectionPresentation(const FString& ComponentName)
+{
+    for (FRIComponentNodeViewModel& Component : CurrentViewModel.Components)
+    {
+        const FString RouteComponentName = Component.ComponentName.IsEmpty() ? Component.DisplayName.ToString() : Component.ComponentName;
+        Component.bSelected = RouteComponentName.Equals(ComponentName, ESearchCase::IgnoreCase);
+    }
+
+    for (const TPair<FString, TWeakObjectPtr<UBorder>>& RowPair : ComponentRowSurfaces)
+    {
+        const bool bSelected = RowPair.Key.Equals(ComponentName, ESearchCase::IgnoreCase);
+        const FLinearColor RowColor = bSelected ? RICompactUI::GetSuccessTextColor() : RICompactUI::GetSecondaryTextColor();
+        if (UBorder* Surface = RowPair.Value.Get())
+        {
+            Surface->SetBrushColor(bSelected ? RICompactUI::GetSelectedRowSurfaceBackgroundColor() : RICompactUI::GetRowSurfaceBackgroundColor());
+        }
+        if (const TWeakObjectPtr<UTextBlock>* TextPtr = ComponentRowTexts.Find(RowPair.Key))
+        {
+            if (UTextBlock* Text = TextPtr->Get())
+            {
+                RICompactUI::ApplyTextStyle(Text, RICompactUI::GetLabelFontSize(), bSelected, RowColor);
             }
         }
     }
@@ -1105,12 +1155,21 @@ void UInspectorDockRootWidget::HandlePatchRevertProxyClicked(FGuid PatchId)
 
 void UInspectorDockRootWidget::HandleComponentProxyClicked(const FString& ComponentName)
 {
+    const double StartSeconds = FPlatformTime::Seconds();
+    bool bFocusSucceeded = false;
+    FString Error;
     if (Controller)
     {
-        FString Error;
-        Controller->RequestFocusComponent(ComponentName, Error);
+        bFocusSucceeded = Controller->RequestFocusComponentWithRefreshPolicy(ComponentName, Error, false);
     }
-    RefreshFromController();
+    RefreshAfterComponentFocus(ComponentName, bFocusSucceeded);
+    UE_LOG(
+        LogRuntimeInspector,
+        Log,
+        TEXT("[RI][Perf] DockComponentFocusFast %.2f ms | Component=%s Result=%s"),
+        (FPlatformTime::Seconds() - StartSeconds) * 1000.0,
+        *ComponentName,
+        bFocusSucceeded ? TEXT("ok") : *Error);
 }
 
 void UInspectorDockRootWidget::HandleFavoriteProxyClicked(UObject* SourceItem)

@@ -13688,11 +13688,15 @@ bool UInspectorWorldSubsystem::ExecuteLegacyToolNativeBridgeAction(FName BridgeI
         }
 
         FString RouteError;
-        const bool bRouteOk = Controller && !TargetComponentName.IsEmpty()
-            && Controller->RequestFocusComponent(TargetComponentName, RouteError);
+        UInspectorDockRootWidget* RootWidget = DockRootWidget.Get();
+        const bool bRouteOk = RootWidget && Controller && !TargetComponentName.IsEmpty();
+        if (bRouteOk)
+        {
+            RootWidget->HandleComponentProxyClicked(TargetComponentName);
+            RouteError = Controller->GetLastIntentLog();
+        }
         UObject* FocusedObject = GetFocusedInspectObject();
         const bool bFocusOk = FocusedObject && FocusedObject->GetName().Equals(TargetComponentName, ESearchCase::IgnoreCase);
-        RefreshDockRootWidget();
         const FRIInspectorViewModel AfterViewModel = Controller ? Controller->GetCurrentViewModel() : FRIInspectorViewModel();
         bool bViewModelSelected = false;
         for (const FRIComponentNodeViewModel& Component : AfterViewModel.Components)
@@ -30755,6 +30759,11 @@ void UInspectorWorldSubsystem::SetSelectedGroupItem(UInspectorGroupItem* Item)
 
 bool UInspectorWorldSubsystem::FocusSelectedActorComponentByName(const FString& ComponentName, FString& OutError)
 {
+    return FocusSelectedActorComponentByNameWithRefreshPolicy(ComponentName, OutError, true);
+}
+
+bool UInspectorWorldSubsystem::FocusSelectedActorComponentByNameWithRefreshPolicy(const FString& ComponentName, FString& OutError, bool bRefreshPanel)
+{
     OutError.Reset();
 
 #if !RUNTIME_INSPECTOR_ENABLED
@@ -30823,7 +30832,10 @@ bool UInspectorWorldSubsystem::FocusSelectedActorComponentByName(const FString& 
     ViewMeshComp = nullptr;
     ViewMaterialSlot = INDEX_NONE;
     MarkActorPageStructureDirty();
-    RefreshPanel(EInspectorRefreshReason::StructureChanged);
+    if (bRefreshPanel)
+    {
+        RefreshPanel(EInspectorRefreshReason::StructureChanged);
+    }
     return true;
 #endif
 }

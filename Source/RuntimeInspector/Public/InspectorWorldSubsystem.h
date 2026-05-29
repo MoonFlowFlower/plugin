@@ -1011,6 +1011,7 @@ public:
 
     UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Selection")
     bool FocusSelectedActorComponentByName(const FString& ComponentName, FString& OutError);
+    bool FocusSelectedActorComponentByNameWithRefreshPolicy(const FString& ComponentName, FString& OutError, bool bRefreshPanel);
 
     UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Selection")
     bool NavigateToPinnedItem(UObject* ItemObject, FString& OutError);

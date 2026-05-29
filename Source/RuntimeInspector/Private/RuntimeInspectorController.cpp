@@ -492,6 +492,11 @@ bool URuntimeInspectorController::RequestRunFunction(FName FunctionName, FString
 
 bool URuntimeInspectorController::RequestFocusComponent(const FString& ComponentName, FString& OutError)
 {
+    return RequestFocusComponentWithRefreshPolicy(ComponentName, OutError, true);
+}
+
+bool URuntimeInspectorController::RequestFocusComponentWithRefreshPolicy(const FString& ComponentName, FString& OutError, bool bRefreshPanel)
+{
     OutError.Reset();
     UInspectorWorldSubsystem* InspectorSubsystem = Subsystem.Get();
     if (!InspectorSubsystem)
@@ -500,7 +505,7 @@ bool URuntimeInspectorController::RequestFocusComponent(const FString& Component
         return false;
     }
 
-    const bool bOk = InspectorSubsystem->FocusSelectedActorComponentByName(ComponentName, OutError);
+    const bool bOk = InspectorSubsystem->FocusSelectedActorComponentByNameWithRefreshPolicy(ComponentName, OutError, bRefreshPanel);
     ActiveTab = ERIInspectorTab::Actor;
     SetLastIntentLog(FString::Printf(
         TEXT("FocusComponent %s -> %s"),
