@@ -541,14 +541,15 @@ UWidget* UInspectorPropertiesSectionWidget::CreatePropertyCategoryHeader(const F
 
     UTextBlock* ToggleText = RICompactUI::MakeText(
         WidgetTree,
-        CategoryData.bExpanded ? TEXT("v") : TEXT(">"),
-        RICompactUI::GetLabelFontSize(),
+        CategoryData.bExpanded ? TEXT("-") : TEXT("+"),
+        RICompactUI::GetMutedFontSize(),
         true,
         RICompactUI::GetStrongTextColor());
+    ToggleText->SetJustification(ETextJustify::Center);
     if (UHorizontalBoxSlot* ToggleSlot = RowBox->AddChildToHorizontalBox(ToggleText))
     {
-        ToggleSlot->SetPadding(FMargin(2.f, 0.f, 6.f, 0.f));
-        ToggleSlot->SetHorizontalAlignment(HAlign_Left);
+        ToggleSlot->SetPadding(FMargin(1.f, 0.f, 6.f, 0.f));
+        ToggleSlot->SetHorizontalAlignment(HAlign_Center);
         ToggleSlot->SetVerticalAlignment(VAlign_Center);
         ToggleSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
     }
@@ -560,6 +561,7 @@ UWidget* UInspectorPropertiesSectionWidget::CreatePropertyCategoryHeader(const F
         true,
         RICompactUI::GetStrongTextColor(),
         true);
+    RICompactUI::ConfigureEllipsisText(LabelText, CategoryData.PrimaryCategory);
     if (UHorizontalBoxSlot* LabelSlot = RowBox->AddChildToHorizontalBox(LabelText))
     {
         LabelSlot->SetHorizontalAlignment(HAlign_Fill);
@@ -631,7 +633,7 @@ void UInspectorPropertiesSectionWidget::SetCategoryExpandedVisual(const FString&
 
     if (UTextBlock* ToggleText = CategoryToggleTextByKey.FindRef(CategoryStateKey))
     {
-        ToggleText->SetText(FText::FromString(bExpanded ? TEXT("v") : TEXT(">")));
+        ToggleText->SetText(FText::FromString(bExpanded ? TEXT("-") : TEXT("+")));
     }
 }
 

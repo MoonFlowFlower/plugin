@@ -172,7 +172,7 @@ namespace
         float IconSize,
         const FLinearColor& Tint)
     {
-        UImage* Icon = RICompactUI::MakeIcon(WidgetTree, Name, IconAssetName, IconSize, Tint);
+        UWidget* Icon = RICompactUI::MakeIconWidget(WidgetTree, Name, IconAssetName, IconSize, Tint);
         if (!Icon)
         {
             return nullptr;
@@ -317,7 +317,7 @@ void UInspectorDockRootWidget::BuildLeftPanel(UVerticalBox* OutPanel)
     UVerticalBox* ActorCardBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
     ActorCard->SetContent(ActorCardBox);
     UHorizontalBox* ActorTopRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_SelectedActorTopRow"));
-    if (USizeBox* ActorIcon = RI_MakeIconBox(WidgetTree, TEXT("RI_SelectedActorIcon"), TEXT("open_external_white_64"), 18.0f, RICompactUI::GetSuccessTextColor()))
+    if (USizeBox* ActorIcon = RI_MakeIconBox(WidgetTree, TEXT("RI_SelectedActorIcon"), TEXT("shape:object"), 16.0f, RICompactUI::GetSuccessTextColor()))
     {
         RI_AddHorizontal(ActorTopRow, ActorIcon, FMargin(0.f, 1.f, RICompactUI::GetInlineGap() + 3.f, 0.f));
     }
@@ -338,7 +338,7 @@ void UInspectorDockRootWidget::BuildLeftPanel(UVerticalBox* OutPanel)
     UBorder* StagedBanner = RI_MakeSectionCard(WidgetTree, TEXT("RI_StagedStateBanner"));
     StagedBanner->SetBrushColor(RICompactUI::GetContextStatusCellBackgroundColor());
     UHorizontalBox* StagedRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_StagedStateRow"));
-    if (USizeBox* StagedIcon = RI_MakeIconBox(WidgetTree, TEXT("RI_StagedStateIcon"), TEXT("delete_tag_white_64"), 13.0f, RICompactUI::GetWarningTextColor()))
+    if (USizeBox* StagedIcon = RI_MakeIconBox(WidgetTree, TEXT("RI_StagedStateIcon"), TEXT("shape:status"), 13.0f, RICompactUI::GetWarningTextColor()))
     {
         RI_AddHorizontal(StagedRow, StagedIcon, FMargin(0.f, 0.f, RICompactUI::GetInlineGap() + 2.f, 0.f));
     }
@@ -362,7 +362,7 @@ void UInspectorDockRootWidget::BuildLeftPanel(UVerticalBox* OutPanel)
     SearchSurface->SetContent(SearchRow);
     RI_AddVertical(OutPanel, SearchSurface, FMargin(0.f, 0.f, 0.f, RICompactUI::GetSectionGap()));
 
-    RI_AddVertical(OutPanel, RI_MakeIconSectionTitle(WidgetTree, TEXT("grid_white_tiling_256"), TEXT("Components"), RICompactUI::ERISectionVisualStyle::Standard, TEXT("RI_ComponentTreeTitle")));
+    RI_AddVertical(OutPanel, RI_MakeIconSectionTitle(WidgetTree, TEXT("shape:components"), TEXT("Components"), RICompactUI::ERISectionVisualStyle::Standard, TEXT("RI_ComponentTreeTitle")));
     UBorder* ComponentCard = RI_MakeSectionCard(WidgetTree, TEXT("RI_ComponentTreeCard"));
     UScrollBox* ComponentScrollBox = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("RI_ComponentTreeScroll"));
     ComponentListBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ComponentTree"));
@@ -405,7 +405,7 @@ void UInspectorDockRootWidget::BuildRightInspector(UVerticalBox* OutPanel)
     UBorder* HeaderSurface = RI_MakeSectionCard(WidgetTree, TEXT("RI_RightInspectorHeaderSurface"));
     HeaderSurface->SetBrushColor(RICompactUI::GetFooterBackgroundColor());
     UHorizontalBox* HeaderRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_RightInspectorHeaderRow"));
-    if (USizeBox* HeaderIcon = RI_MakeIconBox(WidgetTree, TEXT("RI_RightInspectorHeaderIcon"), TEXT("open_external_white_64"), 16.0f, RICompactUI::GetSuccessTextColor()))
+    if (USizeBox* HeaderIcon = RI_MakeIconBox(WidgetTree, TEXT("RI_RightInspectorHeaderIcon"), TEXT("shape:object"), 16.0f, RICompactUI::GetSuccessTextColor()))
     {
         RI_AddHorizontal(HeaderRow, HeaderIcon, FMargin(0.f, 1.f, RICompactUI::GetInlineGap() + 3.f, 0.f));
     }
@@ -456,11 +456,11 @@ void UInspectorDockRootWidget::BuildRightInspector(UVerticalBox* OutPanel)
     RI_AddHorizontal(ActionTopRow, OnlyModifyBox, FMargin(0.f, 0.f, RICompactUI::GetInlineGap(), 0.f), ESlateSizeRule::Fill);
 
     const int32 ActionFontSize = RICompactUI::GetMutedFontSize();
-    UButton* RefreshButton = MakeDockIconButton(TEXT("RI_ActionRefresh"), TEXT("Refresh"), TEXT("grid_white_tiling_256"), false, 52.0f, ActionFontSize, 8.0f);
-    ResetButton = MakeDockIconButton(TEXT("RI_ActionReset"), TEXT("Reset"), TEXT("delete_tag_white_64"), false, 44.0f, ActionFontSize, 8.0f);
+    UButton* RefreshButton = MakeDockIconButton(TEXT("RI_ActionRefresh"), TEXT("Refresh"), TEXT(""), false, 52.0f, ActionFontSize, 0.0f);
+    ResetButton = MakeDockIconButton(TEXT("RI_ActionReset"), TEXT("Reset"), TEXT(""), false, 44.0f, ActionFontSize, 0.0f);
     UndoButton = MakeDockButton(TEXT("RI_ActionUndo"), TEXT("Undo"), false, 42.0f, ActionFontSize);
     RedoButton = MakeDockButton(TEXT("RI_ActionRedo"), TEXT("Redo"), false, 42.0f, ActionFontSize);
-    ApplyButton = MakeDockIconButton(TEXT("RI_ActionApply"), TEXT("Apply"), TEXT("play_triangle_white_64"), true, 44.0f, ActionFontSize, 8.0f);
+    ApplyButton = MakeDockIconButton(TEXT("RI_ActionApply"), TEXT("Apply"), TEXT(""), true, 44.0f, ActionFontSize, 0.0f);
     RefreshButton->OnClicked.AddDynamic(this, &UInspectorDockRootWidget::HandleRefreshClicked);
     ResetButton->OnClicked.AddDynamic(this, &UInspectorDockRootWidget::HandleResetClicked);
     UndoButton->OnClicked.AddDynamic(this, &UInspectorDockRootWidget::HandleUndoClicked);
@@ -510,7 +510,7 @@ void UInspectorDockRootWidget::BuildChangesTab(UScrollBox* OutScrollBox)
 
     UVerticalBox* PageBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ChangesTabPage"));
     OutScrollBox->AddChild(PageBox);
-    RI_AddVertical(PageBox, RI_MakeIconSectionTitle(WidgetTree, TEXT("delete_tag_white_64"), TEXT("Staged Patches"), RICompactUI::ERISectionVisualStyle::Emphasis, TEXT("RI_ChangesTitle")));
+    RI_AddVertical(PageBox, RI_MakeIconSectionTitle(WidgetTree, TEXT("shape:status"), TEXT("Staged Patches"), RICompactUI::ERISectionVisualStyle::Emphasis, TEXT("RI_ChangesTitle")));
     UBorder* PatchCard = RI_MakeSectionCard(WidgetTree, TEXT("RI_PatchListCard"));
     PatchListBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_PatchList"));
     PatchCard->SetContent(PatchListBox);
@@ -770,7 +770,7 @@ void UInspectorDockRootWidget::RefreshActorContext(const FRIInspectorViewModel& 
         }
         else if (ViewModel.Components.Num() == 0)
         {
-            RI_AddVertical(ComponentListBox, RI_MakeIconLabel(WidgetTree, TEXT("grid_white_tiling_256"), TEXT("No components"), 11.0f, RICompactUI::GetLabelFontSize(), false, RICompactUI::GetMutedTextColor(), RICompactUI::GetMutedTextColor()));
+            RI_AddVertical(ComponentListBox, RI_MakeIconLabel(WidgetTree, TEXT("shape:components"), TEXT("No components"), 11.0f, RICompactUI::GetLabelFontSize(), false, RICompactUI::GetMutedTextColor(), RICompactUI::GetMutedTextColor()));
         }
         else
         {
@@ -785,7 +785,7 @@ void UInspectorDockRootWidget::RefreshActorContext(const FRIInspectorViewModel& 
                     RICompactUI::GetSurfaceCardPadding(true));
                 UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), NAME_None);
                 const FLinearColor RowColor = Component.bSelected ? RICompactUI::GetSuccessTextColor() : RICompactUI::GetSecondaryTextColor();
-                if (USizeBox* RowIcon = RI_MakeIconBox(WidgetTree, NAME_None, TEXT("Circle"), 9.0f, RowColor))
+                if (USizeBox* RowIcon = RI_MakeIconBox(WidgetTree, NAME_None, TEXT("glyph:>"), 9.0f, RowColor))
                 {
                     RI_AddHorizontal(Row, RowIcon, FMargin(0.f, 2.f, RICompactUI::GetInlineGap() + 1.f, 0.f));
                 }
@@ -979,7 +979,7 @@ void UInspectorDockRootWidget::RefreshChangesTab(const FRIInspectorViewModel& Vi
     PatchListBox->ClearChildren();
     if (ViewModel.StagedPatches.Num() == 0)
     {
-        RI_AddVertical(PatchListBox, RI_MakeIconLabel(WidgetTree, TEXT("delete_tag_white_64"), TEXT("No staged changes. Apply is gated until a patch row exists."), 11.0f, RICompactUI::GetLabelFontSize(), false, RICompactUI::GetMutedTextColor(), RICompactUI::GetMutedTextColor()));
+        RI_AddVertical(PatchListBox, RI_MakeIconLabel(WidgetTree, TEXT("shape:status"), TEXT("No staged changes. Apply is gated until a patch row exists."), 11.0f, RICompactUI::GetLabelFontSize(), false, RICompactUI::GetMutedTextColor(), RICompactUI::GetMutedTextColor()));
         return;
     }
 
@@ -991,7 +991,7 @@ void UInspectorDockRootWidget::RefreshChangesTab(const FRIInspectorViewModel& Vi
         RowCard->SetContent(Row);
 
         UHorizontalBox* Header = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
-        if (USizeBox* PatchIcon = RI_MakeIconBox(WidgetTree, NAME_None, TEXT("delete_tag_white_64"), 12.0f, RICompactUI::GetWarningTextColor()))
+        if (USizeBox* PatchIcon = RI_MakeIconBox(WidgetTree, NAME_None, TEXT("shape:status"), 12.0f, RICompactUI::GetWarningTextColor()))
         {
             RI_AddHorizontal(Header, PatchIcon, FMargin(0.f, 1.f, RICompactUI::GetInlineGap() + 2.f, 0.f));
         }
@@ -1004,7 +1004,7 @@ void UInspectorDockRootWidget::RefreshChangesTab(const FRIInspectorViewModel& Vi
             true),
             FMargin(0.f, 0.f, RICompactUI::GetInlineGap(), 0.f),
             ESlateSizeRule::Fill);
-        UButton* RevertButton = MakeDockIconButton(NAME_None, TEXT("Revert"), TEXT("delete_tag_white_64"));
+        UButton* RevertButton = MakeDockIconButton(NAME_None, TEXT("Revert"), TEXT(""));
         RevertButton->SetIsEnabled(Patch.bCanRevert);
         UInspectorDockPatchActionProxy* Proxy = NewObject<UInspectorDockPatchActionProxy>(this);
         Proxy->Owner = this;

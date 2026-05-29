@@ -297,11 +297,11 @@ void UInspectorFunctionRowWidget::BuildWidgetTree()
         WidgetTree,
         TEXT("BTN_InvokeFunction"),
         TEXT("Run"),
-        TEXT("play_triangle_white_64"),
-        RICompactUI::ERIButtonVisualStyle::TabActive,
+        TEXT(""),
+        RICompactUI::ERIButtonVisualStyle::Secondary,
         RI_FunctionRunButtonWidth,
         RI_FunctionRunButtonHeight,
-        9.5f,
+        0.0f,
         RICompactUI::GetValueFontSize());
     InvokeButton->OnClicked.AddDynamic(this, &UInspectorFunctionRowWidget::HandleInvokeClicked);
     if (UHorizontalBoxSlot* ButtonSlot = HeaderRow->AddChildToHorizontalBox(InvokeButton))
@@ -369,9 +369,7 @@ void UInspectorFunctionRowWidget::RefreshRow()
     if (TitleButton)
     {
         TitleButton->SetIsEnabled(bAllowNavigation);
-        TitleButton->SetToolTipText(bAllowNavigation
-            ? FText::FromString(TEXT("Navigate to this function."))
-            : FText::GetEmpty());
+        TitleButton->SetToolTipText(FText::GetEmpty());
     }
 
     if (OwnerText)

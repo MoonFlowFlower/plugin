@@ -15,6 +15,8 @@
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
 #include "Components/Image.h"
+#include "Components/Overlay.h"
+#include "Components/OverlaySlot.h"
 #include "Components/PanelWidget.h"
 #include "Components/SizeBox.h"
 #include "Components/SizeBoxSlot.h"
@@ -719,6 +721,221 @@ namespace RICompactUI
         return Image;
     }
 
+    inline bool TryGetGlyphIcon(const TCHAR* IconName, FString& OutGlyph)
+    {
+        OutGlyph.Reset();
+        if (!IconName || IconName[0] == TEXT('\0'))
+        {
+            return false;
+        }
+
+        const FString IconString(IconName);
+        static const FString GlyphPrefix(TEXT("glyph:"));
+        if (!IconString.StartsWith(GlyphPrefix, ESearchCase::CaseSensitive))
+        {
+            return false;
+        }
+
+        OutGlyph = IconString.Mid(GlyphPrefix.Len());
+        return !OutGlyph.IsEmpty();
+    }
+
+    inline bool TryGetShapeIcon(const TCHAR* IconName, FString& OutShape)
+    {
+        OutShape.Reset();
+        if (!IconName || IconName[0] == TEXT('\0'))
+        {
+            return false;
+        }
+
+        const FString IconString(IconName);
+        static const FString ShapePrefix(TEXT("shape:"));
+        if (!IconString.StartsWith(ShapePrefix, ESearchCase::CaseSensitive))
+        {
+            return false;
+        }
+
+        OutShape = IconString.Mid(ShapePrefix.Len());
+        return !OutShape.IsEmpty();
+    }
+
+    inline UTextBlock* MakeGlyphIcon(
+        UWidgetTree* WidgetTree,
+        const FName& Name,
+        const FString& Glyph,
+        float DesiredSize,
+        const FLinearColor& Tint)
+    {
+        if (!WidgetTree || Glyph.IsEmpty())
+        {
+            return nullptr;
+        }
+
+        UTextBlock* Icon = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), Name);
+        Icon->SetText(FText::FromString(Glyph));
+        Icon->SetAutoWrapText(false);
+        Icon->SetClipping(EWidgetClipping::ClipToBounds);
+        Icon->SetJustification(ETextJustify::Center);
+        Icon->SetVisibility(ESlateVisibility::HitTestInvisible);
+        ApplyTextStyle(Icon, FMath::Max(6, FMath::RoundToInt(DesiredSize)), true, Tint);
+        return Icon;
+    }
+
+    inline UWidget* MakeIconLine(
+        UWidgetTree* WidgetTree,
+        const FName& Name,
+        const FLinearColor& Tint,
+        float Width,
+        float Height)
+    {
+        if (!WidgetTree)
+        {
+            return nullptr;
+        }
+
+        UBorder* Line = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), Name);
+        FSlateBrush Brush;
+        Brush.DrawAs = ESlateBrushDrawType::RoundedBox;
+        Brush.TintColor = FSlateColor(Tint);
+        Brush.OutlineSettings.CornerRadii = FVector4(1.0f, 1.0f, 1.0f, 1.0f);
+        Line->SetBrush(Brush);
+        Line->SetPadding(FMargin(0.f));
+        Line->SetVisibility(ESlateVisibility::HitTestInvisible);
+
+        USizeBox* LineSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+        LineSize->SetWidthOverride(Width);
+        LineSize->SetHeightOverride(Height);
+        LineSize->SetContent(Line);
+        if (USizeBoxSlot* SizeBoxSlot = Cast<USizeBoxSlot>(LineSize->GetContentSlot()))
+        {
+            SizeBoxSlot->SetHorizontalAlignment(HAlign_Fill);
+            SizeBoxSlot->SetVerticalAlignment(VAlign_Fill);
+            SizeBoxSlot->SetPadding(FMargin(0.f));
+        }
+        LineSize->SetVisibility(ESlateVisibility::HitTestInvisible);
+        return LineSize;
+    }
+
+    inline void AddGeneratedIconPart(
+        UWidgetTree* WidgetTree,
+        UOverlay* Icon,
+        const FLinearColor& Tint,
+        float Width,
+        float Height,
+        const FMargin& Padding,
+        EHorizontalAlignment HorizontalAlignment,
+        EVerticalAlignment VerticalAlignment)
+    {
+        if (!WidgetTree || !Icon)
+        {
+            return;
+        }
+
+        UWidget* Part = MakeIconLine(WidgetTree, NAME_None, Tint, Width, Height);
+        if (!Part)
+        {
+            return;
+        }
+
+        if (UOverlaySlot* Slot = Icon->AddChildToOverlay(Part))
+        {
+            Slot->SetPadding(Padding);
+            Slot->SetHorizontalAlignment(HorizontalAlignment);
+            Slot->SetVerticalAlignment(VerticalAlignment);
+        }
+    }
+
+    inline UWidget* MakeShapeIcon(
+        UWidgetTree* WidgetTree,
+        const FName& Name,
+        const FString& Shape,
+        float DesiredSize,
+        const FLinearColor& Tint)
+    {
+        if (!WidgetTree || Shape.IsEmpty())
+        {
+            return nullptr;
+        }
+
+        UOverlay* Icon = WidgetTree->ConstructWidget<UOverlay>(UOverlay::StaticClass(), Name);
+        Icon->SetVisibility(ESlateVisibility::HitTestInvisible);
+
+        const float Size = FMath::Max(8.0f, DesiredSize);
+        USizeBox* IconRoot = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+        IconRoot->SetWidthOverride(Size);
+        IconRoot->SetHeightOverride(Size);
+        IconRoot->SetContent(Icon);
+        IconRoot->SetVisibility(ESlateVisibility::HitTestInvisible);
+        if (USizeBoxSlot* RootSlot = Cast<USizeBoxSlot>(IconRoot->GetContentSlot()))
+        {
+            RootSlot->SetHorizontalAlignment(HAlign_Fill);
+            RootSlot->SetVerticalAlignment(VAlign_Fill);
+            RootSlot->SetPadding(FMargin(0.f));
+        }
+
+        const float Stroke = FMath::Max(1.0f, FMath::RoundToFloat(Size * 0.1f));
+        const float Inset = FMath::Max(2.0f, FMath::RoundToFloat(Size * 0.18f));
+        const float ObjectSpan = FMath::Max(6.0f, Size - (Inset * 2.0f));
+
+        if (Shape.Equals(TEXT("object"), ESearchCase::IgnoreCase))
+        {
+            AddGeneratedIconPart(WidgetTree, Icon, Tint, ObjectSpan, Stroke, FMargin(0.f, Inset, 0.f, 0.f), HAlign_Center, VAlign_Top);
+            AddGeneratedIconPart(WidgetTree, Icon, Tint, ObjectSpan, Stroke, FMargin(0.f, 0.f, 0.f, Inset), HAlign_Center, VAlign_Bottom);
+            AddGeneratedIconPart(WidgetTree, Icon, Tint, Stroke, ObjectSpan, FMargin(Inset, 0.f, 0.f, 0.f), HAlign_Left, VAlign_Center);
+            AddGeneratedIconPart(WidgetTree, Icon, Tint, Stroke, ObjectSpan, FMargin(0.f, 0.f, Inset, 0.f), HAlign_Right, VAlign_Center);
+        }
+        else if (Shape.Equals(TEXT("components"), ESearchCase::IgnoreCase))
+        {
+            const float RowWidth = FMath::Max(7.0f, Size * 0.58f);
+            const float DotSize = FMath::Max(1.5f, Stroke * 1.5f);
+            const float RowGap = FMath::Max(3.0f, Size * 0.22f);
+            for (int32 Index = 0; Index < 3; ++Index)
+            {
+                const float YPadding = RowGap * static_cast<float>(Index);
+                AddGeneratedIconPart(WidgetTree, Icon, Tint, DotSize, DotSize, FMargin(Inset, YPadding, 0.f, 0.f), HAlign_Left, VAlign_Top);
+                AddGeneratedIconPart(WidgetTree, Icon, Tint, RowWidth, Stroke, FMargin(Inset + DotSize + Stroke * 2.0f, YPadding, 0.f, 0.f), HAlign_Left, VAlign_Top);
+            }
+        }
+        else if (Shape.Equals(TEXT("status"), ESearchCase::IgnoreCase))
+        {
+            AddGeneratedIconPart(WidgetTree, Icon, Tint, Stroke, Size * 0.48f, FMargin(0.f, Inset, 0.f, 0.f), HAlign_Center, VAlign_Top);
+            AddGeneratedIconPart(WidgetTree, Icon, Tint, Stroke * 1.4f, Stroke * 1.4f, FMargin(0.f, 0.f, 0.f, Inset), HAlign_Center, VAlign_Bottom);
+        }
+        else
+        {
+            AddGeneratedIconPart(WidgetTree, Icon, Tint, ObjectSpan, Stroke, FMargin(0.f), HAlign_Center, VAlign_Center);
+        }
+
+        return IconRoot;
+    }
+
+    inline UWidget* MakeIconWidget(
+        UWidgetTree* WidgetTree,
+        const FName& Name,
+        const TCHAR* IconName,
+        float DesiredSize,
+        const FLinearColor& Tint)
+    {
+        if (!IconName || IconName[0] == TEXT('\0'))
+        {
+            return nullptr;
+        }
+
+        FString Shape;
+        if (TryGetShapeIcon(IconName, Shape))
+        {
+            return MakeShapeIcon(WidgetTree, Name, Shape, DesiredSize, Tint);
+        }
+
+        FString Glyph;
+        if (TryGetGlyphIcon(IconName, Glyph))
+        {
+            return MakeGlyphIcon(WidgetTree, Name, Glyph, DesiredSize, Tint);
+        }
+
+        return MakeIcon(WidgetTree, Name, IconName, DesiredSize, Tint);
+    }
+
     inline void CenterSizeBoxContent(USizeBox* SizeBox)
     {
         if (!SizeBox)
@@ -1114,7 +1331,7 @@ namespace RICompactUI
         SizeBox->SetHeightOverride(HeightOverride > 0.f ? HeightOverride : GetButtonHeight());
 
         UHorizontalBox* Content = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
-        if (UImage* Icon = MakeIcon(WidgetTree, NAME_None, IconAssetName, IconSize, GetButtonTextColor(Style)))
+        if (UWidget* Icon = MakeIconWidget(WidgetTree, NAME_None, IconAssetName, IconSize, GetButtonTextColor(Style)))
         {
             Icon->SetVisibility(ESlateVisibility::HitTestInvisible);
             USizeBox* IconBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
