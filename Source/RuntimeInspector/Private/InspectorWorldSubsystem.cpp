@@ -16055,9 +16055,24 @@ bool UInspectorWorldSubsystem::RunColorPickerUIContractSelfTest(FString& OutRepo
     const bool bContract = PickerWidget->HasNativeColorPickerContractForAutomation();
     const bool bModal = ActiveConfirmDialogModalBlockerWidget.IsValid();
 
+    bool bRgbTypingPreserved = false;
+    bool bRgbTypingDeferred = false;
     bool bRgbInput = false;
     if (bBound)
     {
+        FLinearColor BeforeTyping = FLinearColor::Black;
+        const bool bHasBeforeTyping = TryGetActiveConfirmDialogColor(BeforeTyping);
+        if (UEditableTextBox* InputR = PickerWidget->GetInputR())
+        {
+            InputR->SetText(FText::FromString(TEXT("12")));
+            bRgbTypingPreserved = InputR->GetText().ToString() == TEXT("12");
+
+            FLinearColor DuringTyping = FLinearColor::Black;
+            bRgbTypingDeferred = bHasBeforeTyping
+                && TryGetActiveConfirmDialogColor(DuringTyping)
+                && DuringTyping.Equals(BeforeTyping, 0.001f);
+        }
+
         bRgbInput = PickerWidget->SetRgbChannelTextForAutomation(0, TEXT("128"));
     }
 
@@ -16065,9 +16080,40 @@ bool UInspectorWorldSubsystem::RunColorPickerUIContractSelfTest(FString& OutRepo
     const bool bRgbParsed = TryGetActiveConfirmDialogColor(AfterRgb)
         && FMath::IsNearlyEqual(AfterRgb.R, 128.0f / 255.0f, 0.02f);
 
+    bool bDragPreview = false;
+    if (bBound)
+    {
+        const bool bHueApplied = PickerWidget->ApplyHueForAutomation(210.0f);
+        const bool bSvApplied = PickerWidget->ApplySaturationValueForAutomation(0.55f, 0.70f);
+        const bool bOpacityApplied = PickerWidget->ApplyOpacityForAutomation(0.50f);
+
+        FLinearColor AfterDrag = FLinearColor::Black;
+        bDragPreview = bHueApplied
+            && bSvApplied
+            && bOpacityApplied
+            && TryGetActiveConfirmDialogColor(AfterDrag)
+            && FMath::IsNearlyEqual(AfterDrag.A, 0.50f, 0.02f)
+            && !AfterDrag.Equals(AfterRgb, 0.02f);
+    }
+
+    bool bHexTypingPreserved = false;
+    bool bHexTypingDeferred = false;
     bool bHexInput = false;
     if (bBound)
     {
+        FLinearColor BeforeHexTyping = FLinearColor::Black;
+        const bool bHasBeforeHexTyping = TryGetActiveConfirmDialogColor(BeforeHexTyping);
+        if (UEditableTextBox* InputHex = PickerWidget->GetInputHex())
+        {
+            InputHex->SetText(FText::FromString(TEXT("#00")));
+            bHexTypingPreserved = InputHex->GetText().ToString() == TEXT("#00");
+
+            FLinearColor DuringHexTyping = FLinearColor::Black;
+            bHexTypingDeferred = bHasBeforeHexTyping
+                && TryGetActiveConfirmDialogColor(DuringHexTyping)
+                && DuringHexTyping.Equals(BeforeHexTyping, 0.001f);
+        }
+
         bHexInput = PickerWidget->SetHexTextForAutomation(TEXT("#00FF00FF"));
     }
 
@@ -16085,16 +16131,34 @@ bool UInspectorWorldSubsystem::RunColorPickerUIContractSelfTest(FString& OutRepo
     ClearConfirmDialogBinding();
     const bool bModalCleared = !ActiveConfirmDialogModalBlockerWidget.IsValid();
 
-    const bool bPassed = bBound && bPageActive && bContract && bModal && bRgbInput && bRgbParsed && bHexInput && bHexParsed && bModalCleared;
+    const bool bPassed = bBound
+        && bPageActive
+        && bContract
+        && bModal
+        && bRgbTypingPreserved
+        && bRgbTypingDeferred
+        && bRgbInput
+        && bRgbParsed
+        && bDragPreview
+        && bHexTypingPreserved
+        && bHexTypingDeferred
+        && bHexInput
+        && bHexParsed
+        && bModalCleared;
     OutReport = FString::Printf(
-        TEXT("ColorPickerUIContract=%s | Bound=%d Page=%d Contract=%d Modal=%d RgbInput=%d RgbParsed=%d HexInput=%d HexParsed=%d ModalCleared=%d"),
+        TEXT("ColorPickerUIContract=%s | Bound=%d Page=%d Contract=%d Modal=%d RgbTypingPreserved=%d RgbTypingDeferred=%d RgbInput=%d RgbParsed=%d DragPreview=%d HexTypingPreserved=%d HexTypingDeferred=%d HexInput=%d HexParsed=%d ModalCleared=%d"),
         bPassed ? TEXT("PASS") : TEXT("FAIL"),
         bBound ? 1 : 0,
         bPageActive ? 1 : 0,
         bContract ? 1 : 0,
         bModal ? 1 : 0,
+        bRgbTypingPreserved ? 1 : 0,
+        bRgbTypingDeferred ? 1 : 0,
         bRgbInput ? 1 : 0,
         bRgbParsed ? 1 : 0,
+        bDragPreview ? 1 : 0,
+        bHexTypingPreserved ? 1 : 0,
+        bHexTypingDeferred ? 1 : 0,
         bHexInput ? 1 : 0,
         bHexParsed ? 1 : 0,
         bModalCleared ? 1 : 0);

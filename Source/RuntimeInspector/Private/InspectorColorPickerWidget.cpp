@@ -207,7 +207,8 @@ bool UInspectorColorPickerWidget::HasNativeColorPickerContractForAutomation() co
         && HueTexture
         && OpacityTexture
         && RgbInputsBox
-        && HsvInputsBox;
+        && HsvInputsBox
+        && HasHitTestSafeDragLayersForAutomation();
 }
 
 bool UInspectorColorPickerWidget::SetRgbChannelTextForAutomation(int32 ChannelIndex, const FString& InText)
@@ -228,7 +229,7 @@ bool UInspectorColorPickerWidget::SetRgbChannelTextForAutomation(int32 ChannelIn
     }
 
     Target->SetText(FText::FromString(InText));
-    HandleRgbTextChanged(Target->GetText());
+    ApplyRgbTextValues(true);
     return true;
 }
 
@@ -240,8 +241,36 @@ bool UInspectorColorPickerWidget::SetHexTextForAutomation(const FString& InText)
     }
 
     InputHex->SetText(FText::FromString(InText));
-    HandleHexTextChanged(InputHex->GetText());
+    ApplyHexTextValue(InputHex->GetText(), true);
     return true;
+}
+
+bool UInspectorColorPickerWidget::ApplySaturationValueForAutomation(float InSaturation, float InValue)
+{
+    SetColorFromHSV(Hue, InSaturation, InValue, Alpha, true);
+    return true;
+}
+
+bool UInspectorColorPickerWidget::ApplyHueForAutomation(float InHue)
+{
+    SetColorFromHSV(InHue, Saturation, Value, Alpha, true);
+    return true;
+}
+
+bool UInspectorColorPickerWidget::ApplyOpacityForAutomation(float InAlpha)
+{
+    SetColorFromHSV(Hue, Saturation, Value, InAlpha, true);
+    return true;
+}
+
+bool UInspectorColorPickerWidget::HasHitTestSafeDragLayersForAutomation() const
+{
+    return SaturationValueImage && SaturationValueImage->GetVisibility() == ESlateVisibility::HitTestInvisible
+        && HueImage && HueImage->GetVisibility() == ESlateVisibility::HitTestInvisible
+        && OpacityImage && OpacityImage->GetVisibility() == ESlateVisibility::HitTestInvisible
+        && SaturationValueMarker && SaturationValueMarker->GetVisibility() == ESlateVisibility::HitTestInvisible
+        && HueMarker && HueMarker->GetVisibility() == ESlateVisibility::HitTestInvisible
+        && OpacityMarker && OpacityMarker->GetVisibility() == ESlateVisibility::HitTestInvisible;
 }
 
 void UInspectorColorPickerWidget::BuildWidgetTree()
@@ -277,6 +306,7 @@ void UInspectorColorPickerWidget::BuildWidgetTree()
 
     SaturationValueCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("RI_ColorPickerSVCanvas"));
     SaturationValueImage = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("RI_ColorPickerSVImage"));
+    SaturationValueImage->SetVisibility(ESlateVisibility::HitTestInvisible);
     SaturationValueMarker = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("RI_ColorPickerSVMarker"));
     RI_SetRoundedBorder(SaturationValueMarker, FLinearColor::Transparent, 6.0f, 2.0f, RICompactUI::GetStrongTextColor());
     SaturationValueMarker->SetVisibility(ESlateVisibility::HitTestInvisible);
@@ -300,6 +330,7 @@ void UInspectorColorPickerWidget::BuildWidgetTree()
 
     HueCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("RI_ColorPickerHueCanvas"));
     HueImage = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("RI_ColorPickerHueImage"));
+    HueImage->SetVisibility(ESlateVisibility::HitTestInvisible);
     HueMarker = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("RI_ColorPickerHueMarker"));
     RI_SetRoundedBorder(HueMarker, RICompactUI::GetStrongTextColor(), 2.0f);
     HueMarker->SetVisibility(ESlateVisibility::HitTestInvisible);
@@ -326,6 +357,7 @@ void UInspectorColorPickerWidget::BuildWidgetTree()
     RI_AddVertical(LeftBox, OpacityLabel, FMargin(0.0f, 10.0f, 0.0f, 4.0f));
     OpacityCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("RI_ColorPickerOpacityCanvas"));
     OpacityImage = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("RI_ColorPickerOpacityImage"));
+    OpacityImage->SetVisibility(ESlateVisibility::HitTestInvisible);
     OpacityMarker = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("RI_ColorPickerOpacityMarker"));
     RI_SetRoundedBorder(OpacityMarker, RICompactUI::GetStrongTextColor(), 3.0f);
     OpacityMarker->SetVisibility(ESlateVisibility::HitTestInvisible);
@@ -450,48 +482,45 @@ void UInspectorColorPickerWidget::BuildWidgetTree()
     {
         if (TextBox)
         {
-            TextBox->OnTextChanged.AddDynamic(this, &UInspectorColorPickerWidget::HandleRgbTextChanged);
+            TextBox->OnTextCommitted.AddDynamic(this, &UInspectorColorPickerWidget::HandleRgbTextCommitted);
         }
     }
     for (UEditableTextBox* TextBox : { InputH.Get(), InputS.Get(), InputV.Get(), InputHsvA.Get() })
     {
         if (TextBox)
         {
-            TextBox->OnTextChanged.AddDynamic(this, &UInspectorColorPickerWidget::HandleHsvTextChanged);
+            TextBox->OnTextCommitted.AddDynamic(this, &UInspectorColorPickerWidget::HandleHsvTextCommitted);
         }
     }
     if (InputHex)
     {
-        InputHex->OnTextChanged.AddDynamic(this, &UInspectorColorPickerWidget::HandleHexTextChanged);
+        InputHex->OnTextCommitted.AddDynamic(this, &UInspectorColorPickerWidget::HandleHexTextCommitted);
     }
 
     RefreshAll(true);
 }
 
-FReply UInspectorColorPickerWidget::NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
+FReply UInspectorColorPickerWidget::NativeOnPreviewMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
 {
-    const FVector2D ScreenPosition = InMouseEvent.GetScreenSpacePosition();
-    if (IsWidgetUnderScreenPosition(SaturationValueCanvas.Get(), ScreenPosition))
+    if (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
     {
-        ActiveDragRegion = ERIColorPickerDragRegion::SaturationValue;
-    }
-    else if (IsWidgetUnderScreenPosition(HueCanvas.Get(), ScreenPosition))
-    {
-        ActiveDragRegion = ERIColorPickerDragRegion::Hue;
-    }
-    else if (IsWidgetUnderScreenPosition(OpacityCanvas.Get(), ScreenPosition))
-    {
-        ActiveDragRegion = ERIColorPickerDragRegion::Opacity;
-    }
-    else
-    {
-        ActiveDragRegion = ERIColorPickerDragRegion::None;
+        if (BeginPointerDragAtScreenPosition(InMouseEvent.GetScreenSpacePosition()))
+        {
+            return FReply::Handled().CaptureMouse(TakeWidget());
+        }
     }
 
-    if (ActiveDragRegion != ERIColorPickerDragRegion::None)
+    return Super::NativeOnPreviewMouseButtonDown(InGeometry, InMouseEvent);
+}
+
+FReply UInspectorColorPickerWidget::NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
+{
+    if (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
     {
-        ApplyDragAtScreenPosition(ScreenPosition, ActiveDragRegion, true);
-        return FReply::Handled().CaptureMouse(TakeWidget());
+        if (BeginPointerDragAtScreenPosition(InMouseEvent.GetScreenSpacePosition()))
+        {
+            return FReply::Handled().CaptureMouse(TakeWidget());
+        }
     }
 
     return Super::NativeOnMouseButtonDown(InGeometry, InMouseEvent);
@@ -777,6 +806,34 @@ void UInspectorColorPickerWidget::BroadcastPreviewIfNeeded()
     OnPreviewColorChanged.Broadcast(CurrentColor);
 }
 
+bool UInspectorColorPickerWidget::BeginPointerDragAtScreenPosition(const FVector2D& ScreenPosition)
+{
+    if (IsWidgetUnderScreenPosition(SaturationValueCanvas.Get(), ScreenPosition))
+    {
+        ActiveDragRegion = ERIColorPickerDragRegion::SaturationValue;
+    }
+    else if (IsWidgetUnderScreenPosition(HueCanvas.Get(), ScreenPosition))
+    {
+        ActiveDragRegion = ERIColorPickerDragRegion::Hue;
+    }
+    else if (IsWidgetUnderScreenPosition(OpacityCanvas.Get(), ScreenPosition))
+    {
+        ActiveDragRegion = ERIColorPickerDragRegion::Opacity;
+    }
+    else
+    {
+        ActiveDragRegion = ERIColorPickerDragRegion::None;
+    }
+
+    if (ActiveDragRegion == ERIColorPickerDragRegion::None)
+    {
+        return false;
+    }
+
+    ApplyDragAtScreenPosition(ScreenPosition, ActiveDragRegion, true);
+    return true;
+}
+
 bool UInspectorColorPickerWidget::ApplyDragAtScreenPosition(const FVector2D& ScreenPosition, ERIColorPickerDragRegion Region, bool bBroadcastPreview)
 {
     if (Region == ERIColorPickerDragRegion::SaturationValue && SaturationValueCanvas)
@@ -846,6 +903,73 @@ bool UInspectorColorPickerWidget::IsWidgetUnderScreenPosition(const UWidget* Wid
     const FVector2D LocalSize = Geometry.GetLocalSize();
     return LocalPosition.X >= 0.0f && LocalPosition.Y >= 0.0f
         && LocalPosition.X <= LocalSize.X && LocalPosition.Y <= LocalSize.Y;
+}
+
+void UInspectorColorPickerWidget::ApplyRgbTextValues(bool bBroadcastPreview)
+{
+    if (bUpdatingFields)
+    {
+        return;
+    }
+
+    float NewR = CurrentColor.R;
+    float NewG = CurrentColor.G;
+    float NewB = CurrentColor.B;
+    float NewA = CurrentColor.A;
+    bool bChanged = false;
+    bChanged |= ParseRgbChannelText(InputR ? InputR->GetText() : FText::GetEmpty(), CurrentColor.R, NewR);
+    bChanged |= ParseRgbChannelText(InputG ? InputG->GetText() : FText::GetEmpty(), CurrentColor.G, NewG);
+    bChanged |= ParseRgbChannelText(InputB ? InputB->GetText() : FText::GetEmpty(), CurrentColor.B, NewB);
+    bChanged |= ParseRgbChannelText(InputA ? InputA->GetText() : FText::GetEmpty(), CurrentColor.A, NewA);
+    if (!bChanged)
+    {
+        RefreshTextFields();
+        return;
+    }
+
+    SetColorInternal(FLinearColor(NewR, NewG, NewB, NewA), bBroadcastPreview, true);
+}
+
+void UInspectorColorPickerWidget::ApplyHsvTextValues(bool bBroadcastPreview)
+{
+    if (bUpdatingFields)
+    {
+        return;
+    }
+
+    float NewHue = Hue;
+    float NewSaturation = Saturation;
+    float NewValue = Value;
+    float NewAlpha = Alpha;
+    bool bChanged = false;
+    bChanged |= ParseHsvChannelText(InputH ? InputH->GetText() : FText::GetEmpty(), 0, Hue, NewHue);
+    bChanged |= ParseHsvChannelText(InputS ? InputS->GetText() : FText::GetEmpty(), 1, Saturation, NewSaturation);
+    bChanged |= ParseHsvChannelText(InputV ? InputV->GetText() : FText::GetEmpty(), 2, Value, NewValue);
+    bChanged |= ParseRgbChannelText(InputHsvA ? InputHsvA->GetText() : FText::GetEmpty(), Alpha, NewAlpha);
+    if (!bChanged)
+    {
+        RefreshTextFields();
+        return;
+    }
+
+    SetColorFromHSV(NewHue, NewSaturation, NewValue, NewAlpha, bBroadcastPreview);
+}
+
+void UInspectorColorPickerWidget::ApplyHexTextValue(const FText& InText, bool bBroadcastPreview)
+{
+    if (bUpdatingFields)
+    {
+        return;
+    }
+
+    FLinearColor ParsedColor;
+    if (!ParseHexText(InText, ParsedColor))
+    {
+        RefreshTextFields();
+        return;
+    }
+
+    SetColorInternal(ParsedColor, bBroadcastPreview, true);
 }
 
 void UInspectorColorPickerWidget::LinearRgbToHSV(const FLinearColor& InColor, float& OutHue, float& OutSaturation, float& OutValue)
@@ -1092,10 +1216,12 @@ UButton* UInspectorColorPickerWidget::MakeRecentColorButton(int32 Index, const F
 
     UBorder* SwatchBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
     RI_SetRoundedBorder(SwatchBorder, Color, 3.0f, 1.0f, RICompactUI::GetInputPalette(RICompactUI::ERIInputVisualStyle::Strong).Focused);
+    SwatchBorder->SetVisibility(ESlateVisibility::HitTestInvisible);
     USizeBox* SizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
     SizeBox->SetWidthOverride(22.0f);
     SizeBox->SetHeightOverride(22.0f);
     SizeBox->SetContent(SwatchBorder);
+    SizeBox->SetVisibility(ESlateVisibility::HitTestInvisible);
     Button->AddChild(SizeBox);
 
     switch (Index)
@@ -1129,68 +1255,19 @@ void UInspectorColorPickerWidget::HandleCloseClicked()
     OnColorCanceled.Broadcast();
 }
 
-void UInspectorColorPickerWidget::HandleRgbTextChanged(const FText& InText)
+void UInspectorColorPickerWidget::HandleRgbTextCommitted(const FText& InText, ETextCommit::Type CommitMethod)
 {
-    if (bUpdatingFields)
-    {
-        return;
-    }
-
-    float NewR = CurrentColor.R;
-    float NewG = CurrentColor.G;
-    float NewB = CurrentColor.B;
-    float NewA = CurrentColor.A;
-    bool bChanged = false;
-    bChanged |= ParseRgbChannelText(InputR ? InputR->GetText() : FText::GetEmpty(), CurrentColor.R, NewR);
-    bChanged |= ParseRgbChannelText(InputG ? InputG->GetText() : FText::GetEmpty(), CurrentColor.G, NewG);
-    bChanged |= ParseRgbChannelText(InputB ? InputB->GetText() : FText::GetEmpty(), CurrentColor.B, NewB);
-    bChanged |= ParseRgbChannelText(InputA ? InputA->GetText() : FText::GetEmpty(), CurrentColor.A, NewA);
-    if (!bChanged)
-    {
-        return;
-    }
-
-    SetColorInternal(FLinearColor(NewR, NewG, NewB, NewA), true, true);
+    ApplyRgbTextValues(true);
 }
 
-void UInspectorColorPickerWidget::HandleHsvTextChanged(const FText& InText)
+void UInspectorColorPickerWidget::HandleHsvTextCommitted(const FText& InText, ETextCommit::Type CommitMethod)
 {
-    if (bUpdatingFields)
-    {
-        return;
-    }
-
-    float NewHue = Hue;
-    float NewSaturation = Saturation;
-    float NewValue = Value;
-    float NewAlpha = Alpha;
-    bool bChanged = false;
-    bChanged |= ParseHsvChannelText(InputH ? InputH->GetText() : FText::GetEmpty(), 0, Hue, NewHue);
-    bChanged |= ParseHsvChannelText(InputS ? InputS->GetText() : FText::GetEmpty(), 1, Saturation, NewSaturation);
-    bChanged |= ParseHsvChannelText(InputV ? InputV->GetText() : FText::GetEmpty(), 2, Value, NewValue);
-    bChanged |= ParseRgbChannelText(InputHsvA ? InputHsvA->GetText() : FText::GetEmpty(), Alpha, NewAlpha);
-    if (!bChanged)
-    {
-        return;
-    }
-
-    SetColorFromHSV(NewHue, NewSaturation, NewValue, NewAlpha, true);
+    ApplyHsvTextValues(true);
 }
 
-void UInspectorColorPickerWidget::HandleHexTextChanged(const FText& InText)
+void UInspectorColorPickerWidget::HandleHexTextCommitted(const FText& InText, ETextCommit::Type CommitMethod)
 {
-    if (bUpdatingFields)
-    {
-        return;
-    }
-
-    FLinearColor ParsedColor;
-    if (!ParseHexText(InText, ParsedColor))
-    {
-        return;
-    }
-
-    SetColorInternal(ParsedColor, true, true);
+    ApplyHexTextValue(InText, true);
 }
 
 void UInspectorColorPickerWidget::HandleRgbModeClicked()

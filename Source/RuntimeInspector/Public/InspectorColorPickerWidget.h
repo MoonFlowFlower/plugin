@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
+#include "Types/SlateEnums.h"
 #include "InspectorColorPickerWidget.generated.h"
 
 class UBorder;
@@ -54,9 +55,14 @@ public:
     bool HasNativeColorPickerContractForAutomation() const;
     bool SetRgbChannelTextForAutomation(int32 ChannelIndex, const FString& InText);
     bool SetHexTextForAutomation(const FString& InText);
+    bool ApplySaturationValueForAutomation(float InSaturation, float InValue);
+    bool ApplyHueForAutomation(float InHue);
+    bool ApplyOpacityForAutomation(float InAlpha);
+    bool HasHitTestSafeDragLayersForAutomation() const;
 
 protected:
     virtual TSharedRef<SWidget> RebuildWidget() override;
+    virtual FReply NativeOnPreviewMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
     virtual FReply NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
     virtual FReply NativeOnMouseMove(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
     virtual FReply NativeOnMouseButtonUp(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
@@ -92,8 +98,12 @@ private:
     void SetColorFromHSV(float InHue, float InSaturation, float InValue, float InAlpha, bool bBroadcastPreview);
     void SetColorInternal(const FLinearColor& InColor, bool bBroadcastPreview, bool bRegenerateTextures);
     void BroadcastPreviewIfNeeded();
+    bool BeginPointerDragAtScreenPosition(const FVector2D& ScreenPosition);
     bool ApplyDragAtScreenPosition(const FVector2D& ScreenPosition, ERIColorPickerDragRegion Region, bool bBroadcastPreview);
     bool IsWidgetUnderScreenPosition(const UWidget* Widget, const FVector2D& ScreenPosition) const;
+    void ApplyRgbTextValues(bool bBroadcastPreview);
+    void ApplyHsvTextValues(bool bBroadcastPreview);
+    void ApplyHexTextValue(const FText& InText, bool bBroadcastPreview);
 
     static void LinearRgbToHSV(const FLinearColor& InColor, float& OutHue, float& OutSaturation, float& OutValue);
     static FLinearColor HSVToLinearRgb(float InHue, float InSaturation, float InValue, float InAlpha);
@@ -120,13 +130,13 @@ private:
     void HandleCloseClicked();
 
     UFUNCTION()
-    void HandleRgbTextChanged(const FText& InText);
+    void HandleRgbTextCommitted(const FText& InText, ETextCommit::Type CommitMethod);
 
     UFUNCTION()
-    void HandleHsvTextChanged(const FText& InText);
+    void HandleHsvTextCommitted(const FText& InText, ETextCommit::Type CommitMethod);
 
     UFUNCTION()
-    void HandleHexTextChanged(const FText& InText);
+    void HandleHexTextCommitted(const FText& InText, ETextCommit::Type CommitMethod);
 
     UFUNCTION()
     void HandleRgbModeClicked();
