@@ -405,6 +405,7 @@ static constexpr float RI_DefaultPanelViewportSafetyMargin = 16.0f;
 static const TCHAR* RI_ConfirmDialogClassPath = TEXT("/RuntimeInspector/UI/WBP_ConfirmDialog.WBP_ConfirmDialog_C");
 static const FName RI_SelfTestId_ConfirmDialog(TEXT("confirm_dialog_color_input"));
 static const FName RI_SelfTestId_ColorPickerUIContract(TEXT("color_picker_ui_contract"));
+static const FName RI_SelfTestId_ColorPickerPreviewPerf(TEXT("color_picker_preview_perf"));
 static const FName RI_SelfTestId_SettingsPreview(TEXT("settings_preview"));
 static const FName RI_SelfTestId_SettingsSavePersistence(TEXT("settings_save_persistence"));
 static const FName RI_SelfTestId_StarLiveEditAndRun(TEXT("star_live_edit_and_run"));
@@ -12351,11 +12352,11 @@ bool UInspectorWorldSubsystem::ApplyInspectorItemColor(UObject* ItemObject, cons
     OutError = TEXT("RuntimeInspector disabled");
     return false;
 #else
-    return ApplyInspectorItemColorInternal(ItemObject, InColor, OutError, false);
+    return ApplyInspectorItemColorInternal(ItemObject, InColor, OutError, false, ERIColorEditApplyMode::Commit);
 #endif
 }
 
-bool UInspectorWorldSubsystem::ApplyInspectorItemColorInternal(UObject* ItemObject, const FLinearColor& InColor, FString& OutError, bool bSuppressHistory)
+bool UInspectorWorldSubsystem::ApplyInspectorItemColorInternal(UObject* ItemObject, const FLinearColor& InColor, FString& OutError, bool bSuppressHistory, ERIColorEditApplyMode ApplyMode)
 {
     OutError.Reset();
 
@@ -12365,28 +12366,6 @@ bool UInspectorWorldSubsystem::ApplyInspectorItemColorInternal(UObject* ItemObje
 #else
     TGuardValue<bool> GuardPreviewHistory(bApplyingColorDialogPreview, bSuppressHistory);
 
-    const auto RefreshVisibleItemDisplay = [this, ItemObject]()
-    {
-        FLinearColor UpdatedColor = FLinearColor::Black;
-        const bool bHasUpdatedColor = TryGetInspectorItemColor(ItemObject, UpdatedColor);
-
-        if (UInspectorPropertiesSectionWidget* SectionWidget = ActorPropertiesSectionWidget.Get())
-        {
-            SectionWidget->RefreshItemDisplay(ItemObject);
-        }
-
-        if (UUserWidget* Panel = PanelWidget.Get())
-        {
-            RI_RefreshPropertyList(Panel, EInspectorRefreshReason::ValuesChanged);
-            RefreshPanel(EInspectorRefreshReason::ValuesChanged);
-            RI_RefreshLegacyPropertyPanelWidgets(Panel);
-            if (bHasUpdatedColor)
-            {
-                RI_SyncLegacyPropertyListSwatch(Panel, ItemObject, UpdatedColor);
-            }
-        }
-    };
-
     if (UInspectorPropertyItem* PropertyItem = Cast<UInspectorPropertyItem>(ItemObject))
     {
         if (PropertyItem->GetValueType() == EInspectorValueType::LinearColor)
@@ -12394,7 +12373,7 @@ bool UInspectorWorldSubsystem::ApplyInspectorItemColorInternal(UObject* ItemObje
             const bool bApplied = PropertyItem->SetLinearColor(InColor, OutError);
             if (bApplied)
             {
-                RefreshVisibleItemDisplay();
+                RefreshColorEditItemDisplay(ItemObject, ApplyMode);
             }
             return bApplied;
         }
@@ -12404,7 +12383,7 @@ bool UInspectorWorldSubsystem::ApplyInspectorItemColorInternal(UObject* ItemObje
             const bool bApplied = PropertyItem->SetColor(InColor.ToFColorSRGB(), OutError);
             if (bApplied)
             {
-                RefreshVisibleItemDisplay();
+                RefreshColorEditItemDisplay(ItemObject, ApplyMode);
             }
             return bApplied;
         }
@@ -12418,7 +12397,7 @@ bool UInspectorWorldSubsystem::ApplyInspectorItemColorInternal(UObject* ItemObje
         const bool bApplied = MaterialItem->SetVector(InColor, OutError);
         if (bApplied)
         {
-            RefreshVisibleItemDisplay();
+            RefreshColorEditItemDisplay(ItemObject, ApplyMode);
         }
         return bApplied;
     }
@@ -12426,6 +12405,62 @@ bool UInspectorWorldSubsystem::ApplyInspectorItemColorInternal(UObject* ItemObje
     OutError = TEXT("Unsupported color item");
     return false;
 #endif
+}
+
+void UInspectorWorldSubsystem::RefreshColorEditItemDisplay(UObject* ItemObject, ERIColorEditApplyMode ApplyMode)
+{
+#if RUNTIME_INSPECTOR_ENABLED
+    FLinearColor UpdatedColor = FLinearColor::Black;
+    const bool bHasUpdatedColor = TryGetInspectorItemColor(ItemObject, UpdatedColor);
+
+    if (UInspectorPropertiesSectionWidget* SectionWidget = ActorPropertiesSectionWidget.Get())
+    {
+        SectionWidget->RefreshItemDisplay(ItemObject);
+    }
+
+    if (ApplyMode == ERIColorEditApplyMode::Preview)
+    {
+        ++ColorPreviewCount;
+        LastColorPreviewUiRefreshMode = TEXT("PreviewRowOnly");
+        if (bHasUpdatedColor)
+        {
+            if (UUserWidget* Panel = PanelWidget.Get())
+            {
+                RI_SyncLegacyPropertyListSwatch(Panel, ItemObject, UpdatedColor);
+            }
+        }
+        return;
+    }
+
+    ++ColorFullRefreshCount;
+    LastColorPreviewUiRefreshMode = ApplyMode == ERIColorEditApplyMode::Restore
+        ? TEXT("RestoreFull")
+        : TEXT("CommitFull");
+
+    if (UUserWidget* Panel = PanelWidget.Get())
+    {
+        RI_RefreshPropertyList(Panel, EInspectorRefreshReason::ValuesChanged);
+        RefreshPanel(EInspectorRefreshReason::ValuesChanged);
+        RI_RefreshLegacyPropertyPanelWidgets(Panel);
+        if (bHasUpdatedColor)
+        {
+            RI_SyncLegacyPropertyListSwatch(Panel, ItemObject, UpdatedColor);
+        }
+    }
+#else
+    (void)ItemObject;
+    (void)ApplyMode;
+#endif
+}
+
+void UInspectorWorldSubsystem::ResetColorPickerPerfDiagnostics()
+{
+    LastColorPreviewApplySeconds = -1.0;
+    LastColorPreviewMs = 0.0;
+    MaxColorPreviewMs = 0.0;
+    LastColorPreviewUiRefreshMode = TEXT("None");
+    ColorPreviewCount = 0;
+    ColorFullRefreshCount = 0;
 }
 
 bool UInspectorWorldSubsystem::OpenColorEditorForItemInternal(UObject* ItemObject)
@@ -12474,11 +12509,12 @@ bool UInspectorWorldSubsystem::OpenColorEditorForItemInternal(UObject* ItemObjec
     bHasActiveColorEditLastPreviewColor = true;
     ActiveColorEditOriginalColor = InitialColor;
     ActiveColorEditLastPreviewColor = InitialColor;
+    ResetColorPickerPerfDiagnostics();
     return true;
 #endif
 }
 
-void UInspectorWorldSubsystem::ApplyActiveColorEditItemIfNeeded(const FLinearColor& InColor)
+void UInspectorWorldSubsystem::ApplyActiveColorEditItemIfNeeded(const FLinearColor& InColor, bool bForce)
 {
 #if RUNTIME_INSPECTOR_ENABLED
     UObject* ItemObject = ActiveColorEditItem.Get();
@@ -12487,11 +12523,29 @@ void UInspectorWorldSubsystem::ApplyActiveColorEditItemIfNeeded(const FLinearCol
         return;
     }
 
-    FString Error;
-    if (!ApplyInspectorItemColorInternal(ItemObject, InColor, Error, true))
+    if (bHasActiveColorEditLastPreviewColor && InColor.Equals(ActiveColorEditLastPreviewColor, 0.001f))
     {
         return;
     }
+
+    constexpr double RI_ColorPreviewMinIntervalSeconds = 1.0 / 30.0;
+    const double NowSeconds = FPlatformTime::Seconds();
+    if (!bForce
+        && LastColorPreviewApplySeconds > 0.0
+        && (NowSeconds - LastColorPreviewApplySeconds) < RI_ColorPreviewMinIntervalSeconds)
+    {
+        return;
+    }
+
+    FString Error;
+    const double StartSeconds = FPlatformTime::Seconds();
+    if (!ApplyInspectorItemColorInternal(ItemObject, InColor, Error, true, ERIColorEditApplyMode::Preview))
+    {
+        return;
+    }
+    LastColorPreviewApplySeconds = NowSeconds;
+    LastColorPreviewMs = (FPlatformTime::Seconds() - StartSeconds) * 1000.0;
+    MaxColorPreviewMs = FMath::Max(MaxColorPreviewMs, LastColorPreviewMs);
 
     bActiveColorEditPreviewDirty = bHasActiveColorEditOriginalColor
         && !InColor.Equals(ActiveColorEditOriginalColor, KINDA_SMALL_NUMBER);
@@ -12565,13 +12619,13 @@ void UInspectorWorldSubsystem::FinalizeActiveColorEdit(bool bAccept)
     FString Error;
     if (!bAccept || !bHasFinalDelta)
     {
-        ApplyInspectorItemColorInternal(ItemObject, ActiveColorEditOriginalColor, Error, true);
+        ApplyInspectorItemColorInternal(ItemObject, ActiveColorEditOriginalColor, Error, true, ERIColorEditApplyMode::Restore);
         return;
     }
 
-    ApplyInspectorItemColorInternal(ItemObject, ActiveColorEditOriginalColor, Error, true);
+    ApplyInspectorItemColorInternal(ItemObject, ActiveColorEditOriginalColor, Error, true, ERIColorEditApplyMode::Preview);
     Error.Reset();
-    ApplyInspectorItemColorInternal(ItemObject, PreviewColor, Error, false);
+    ApplyInspectorItemColorInternal(ItemObject, PreviewColor, Error, false, ERIColorEditApplyMode::Commit);
 #endif
 }
 
@@ -12609,7 +12663,7 @@ void UInspectorWorldSubsystem::HandleActiveColorPickerPreviewChanged(FLinearColo
 void UInspectorWorldSubsystem::HandleActiveColorPickerAccepted(FLinearColor InColor)
 {
 #if RUNTIME_INSPECTOR_ENABLED
-    ApplyActiveColorEditItemIfNeeded(InColor);
+    ApplyActiveColorEditItemIfNeeded(InColor, true);
     RememberRecentColorPickerColor(InColor);
     HandleActiveConfirmDialogAccepted();
 #endif
@@ -13531,6 +13585,12 @@ bool UInspectorWorldSubsystem::ExecuteLegacyToolNativeBridgeAction(FName BridgeI
     if (BridgeId == RI_SelfTestId_ColorPickerUIContract)
     {
         bOutPassed = RunColorPickerUIContractSelfTest(OutReport);
+        return true;
+    }
+
+    if (BridgeId == RI_SelfTestId_ColorPickerPreviewPerf)
+    {
+        bOutPassed = RunColorPickerPreviewPerfSelfTest(OutReport);
         return true;
     }
 
@@ -15532,6 +15592,7 @@ bool UInspectorWorldSubsystem::RunConfirmDialogColorInputSelfTest(FString& OutRe
             TestWidget->RemoveFromParent();
         }
 
+        SetPropertyView_Full();
         if (bWasOpen)
         {
             FString RestorePageError;
@@ -15636,12 +15697,20 @@ bool UInspectorWorldSubsystem::RunConfirmDialogColorInputSelfTest(FString& OutRe
     bool bMaterialSwatchOk = false;
     bool bMaterialPreviewOk = false;
     bool bMaterialApplyOk = false;
+    bool bMaterialPreviewNoFullRefresh = false;
+    bool bMaterialPreviewPerfOk = false;
+    bool bMaterialFinalFullRefreshOk = false;
     bool bInjectedMaterialRowFound = false;
     bool bInjectedMaterialSwatchVisible = false;
     bool bLegacyMaterialEntryFound = false;
     bool bLegacyMaterialColorButtonFound = false;
+    int32 MaterialPreviewCount = 0;
+    int32 MaterialPreviewFullRefreshCount = 0;
+    int32 MaterialFinalFullRefreshCount = 0;
+    double MaterialPreviewMsMax = 0.0;
     FLinearColor InjectedMaterialSwatchColor = FLinearColor::Black;
     FLinearColor LegacyMaterialButtonColor = FLinearColor::Black;
+    FString MaterialPreviewMode = TEXT("None");
     FString MaterialVectorName = TEXT("None");
     FString MaterialHexApplied = TEXT("None");
 
@@ -15759,10 +15828,29 @@ bool UInspectorWorldSubsystem::RunConfirmDialogColorInputSelfTest(FString& OutRe
                     bMaterialColorPageOk = TryActivateConfirmDialogColorPage(MaterialDialog) && IsConfirmDialogColorPageActive(MaterialDialog);
                     bMaterialModalOk = ActiveConfirmDialogModalBlockerWidget.IsValid();
 
+                    ResetColorPickerPerfDiagnostics();
                     if (TrySetActiveConfirmDialogColor(UpdatedMaterialColor))
                     {
                         SyncActiveConfirmDialogColorPreview();
                     }
+                    const FLinearColor IntermediateMaterialColor = RI_MakeDistinctSelfTestColor(UpdatedMaterialColor);
+                    if (TrySetActiveConfirmDialogColor(IntermediateMaterialColor))
+                    {
+                        ApplyActiveColorEditItemIfNeeded(IntermediateMaterialColor, true);
+                    }
+                    if (TrySetActiveConfirmDialogColor(UpdatedMaterialColor))
+                    {
+                        ApplyActiveColorEditItemIfNeeded(UpdatedMaterialColor, true);
+                    }
+                    MaterialPreviewCount = ColorPreviewCount;
+                    MaterialPreviewFullRefreshCount = ColorFullRefreshCount;
+                    MaterialPreviewMsMax = MaxColorPreviewMs;
+                    MaterialPreviewMode = LastColorPreviewUiRefreshMode;
+                    bMaterialPreviewNoFullRefresh = MaterialPreviewCount >= 2
+                        && MaterialPreviewFullRefreshCount == 0
+                        && MaterialPreviewMode == TEXT("PreviewRowOnly");
+                    bMaterialPreviewPerfOk = MaterialPreviewCount >= 2
+                        && MaterialPreviewMsMax <= 100.0;
 
                     auto DoesDisplayedSwatchMatch = [this, TestMaterialItem, UpdatedMaterialColor, ColorNear](UListViewBase* PropertyList) -> bool
                     {
@@ -15953,6 +16041,8 @@ bool UInspectorWorldSubsystem::RunConfirmDialogColorInputSelfTest(FString& OutRe
                     FLinearColor AppliedColor = FLinearColor::Black;
                     bMaterialApplyOk = TestMaterialItem->GetVector(AppliedColor, MaterialError) && ColorNear(AppliedColor, UpdatedMaterialColor, 0.02f);
                     HandleActiveConfirmDialogAccepted();
+                    MaterialFinalFullRefreshCount = ColorFullRefreshCount;
+                    bMaterialFinalFullRefreshOk = MaterialFinalFullRefreshCount > MaterialPreviewFullRefreshCount;
                     bMaterialModalClearedOk = !ActiveConfirmDialogModalBlockerWidget.IsValid();
                     bMaterialPanelEnabledOk = !PanelWidget.IsValid() || PanelWidget->GetIsEnabled();
 
@@ -15973,10 +16063,13 @@ bool UInspectorWorldSubsystem::RunConfirmDialogColorInputSelfTest(FString& OutRe
         && bMaterialPanelEnabledOk
         && bMaterialSwatchOk
         && bMaterialPreviewOk
-        && bMaterialApplyOk;
+        && bMaterialApplyOk
+        && bMaterialPreviewNoFullRefresh
+        && bMaterialPreviewPerfOk
+        && bMaterialFinalFullRefreshOk;
 
     OutReport = FString::Printf(
-        TEXT("ConfirmDialogColorInputSelfTest=%s | DirectPage=%d | InitialUI=(%.3f, %.3f, %.3f, %.3f) | AfterRUI=%.3f HexAfterR=%s | AfterHexUI=(%.3f, %.3f, %.3f, %.3f) GAfterHex=%s HexAfterHex=%s | MaterialDialog=%d Page=%d Modal=%d ModalCleared=%d PanelEnabled=%d Swatch=%d Preview=%d Apply=%d InjectedRow=%d InjectedSwatch=%d InjectedColor=(%.3f,%.3f,%.3f,%.3f) LegacyEntry=%d LegacyButton=%d LegacyColor=(%.3f,%.3f,%.3f,%.3f) Item=%s Hex=%s"),
+        TEXT("ConfirmDialogColorInputSelfTest=%s | DirectPage=%d | InitialUI=(%.3f, %.3f, %.3f, %.3f) | AfterRUI=%.3f HexAfterR=%s | AfterHexUI=(%.3f, %.3f, %.3f, %.3f) GAfterHex=%s HexAfterHex=%s | MaterialDialog=%d Page=%d Modal=%d ModalCleared=%d PanelEnabled=%d Swatch=%d Preview=%d Apply=%d PreviewNoFullRefresh=%d PreviewPerf=%d PreviewMsMax=%.2f PreviewMode=%s PreviewCount=%d PreviewFullRefresh=%d FinalFullRefresh=%d InjectedRow=%d InjectedSwatch=%d InjectedColor=(%.3f,%.3f,%.3f,%.3f) LegacyEntry=%d LegacyButton=%d LegacyColor=(%.3f,%.3f,%.3f,%.3f) Item=%s Hex=%s"),
         bOverallSuccess ? TEXT("PASS") : TEXT("FAIL"),
         bDirectColorPageOk ? 1 : 0,
         InitialR, InitialG, InitialB, InitialA,
@@ -15993,6 +16086,13 @@ bool UInspectorWorldSubsystem::RunConfirmDialogColorInputSelfTest(FString& OutRe
         bMaterialSwatchOk ? 1 : 0,
         bMaterialPreviewOk ? 1 : 0,
         bMaterialApplyOk ? 1 : 0,
+        bMaterialPreviewNoFullRefresh ? 1 : 0,
+        bMaterialPreviewPerfOk ? 1 : 0,
+        MaterialPreviewMsMax,
+        *MaterialPreviewMode,
+        MaterialPreviewCount,
+        MaterialPreviewFullRefreshCount,
+        bMaterialFinalFullRefreshOk ? 1 : 0,
         bInjectedMaterialRowFound ? 1 : 0,
         bInjectedMaterialSwatchVisible ? 1 : 0,
         InjectedMaterialSwatchColor.R,
@@ -16053,6 +16153,8 @@ bool UInspectorWorldSubsystem::RunColorPickerUIContractSelfTest(FString& OutRepo
     const bool bBound = TryBindActiveConfirmDialog(PickerWidget);
     const bool bPageActive = TryActivateConfirmDialogColorPage(PickerWidget) && IsConfirmDialogColorPageActive(PickerWidget);
     const bool bContract = PickerWidget->HasNativeColorPickerContractForAutomation();
+    const bool bFixedRadius = PickerWidget->HasFixedRadiusBrushesForAutomation();
+    const bool bCompactLayout = PickerWidget->HasCompactLayoutForAutomation();
     const bool bModal = ActiveConfirmDialogModalBlockerWidget.IsValid();
 
     bool bRgbTypingPreserved = false;
@@ -16134,6 +16236,8 @@ bool UInspectorWorldSubsystem::RunColorPickerUIContractSelfTest(FString& OutRepo
     const bool bPassed = bBound
         && bPageActive
         && bContract
+        && bFixedRadius
+        && bCompactLayout
         && bModal
         && bRgbTypingPreserved
         && bRgbTypingDeferred
@@ -16146,11 +16250,13 @@ bool UInspectorWorldSubsystem::RunColorPickerUIContractSelfTest(FString& OutRepo
         && bHexParsed
         && bModalCleared;
     OutReport = FString::Printf(
-        TEXT("ColorPickerUIContract=%s | Bound=%d Page=%d Contract=%d Modal=%d RgbTypingPreserved=%d RgbTypingDeferred=%d RgbInput=%d RgbParsed=%d DragPreview=%d HexTypingPreserved=%d HexTypingDeferred=%d HexInput=%d HexParsed=%d ModalCleared=%d"),
+        TEXT("ColorPickerUIContract=%s | Bound=%d Page=%d Contract=%d FixedRadius=%d Compact=%d Modal=%d RgbTypingPreserved=%d RgbTypingDeferred=%d RgbInput=%d RgbParsed=%d DragPreview=%d HexTypingPreserved=%d HexTypingDeferred=%d HexInput=%d HexParsed=%d ModalCleared=%d"),
         bPassed ? TEXT("PASS") : TEXT("FAIL"),
         bBound ? 1 : 0,
         bPageActive ? 1 : 0,
         bContract ? 1 : 0,
+        bFixedRadius ? 1 : 0,
+        bCompactLayout ? 1 : 0,
         bModal ? 1 : 0,
         bRgbTypingPreserved ? 1 : 0,
         bRgbTypingDeferred ? 1 : 0,
@@ -16162,6 +16268,34 @@ bool UInspectorWorldSubsystem::RunColorPickerUIContractSelfTest(FString& OutRepo
         bHexInput ? 1 : 0,
         bHexParsed ? 1 : 0,
         bModalCleared ? 1 : 0);
+    UE_LOG(LogRuntimeInspector, Log, TEXT("[RI] %s"), *OutReport);
+    return bPassed;
+#endif
+}
+
+bool UInspectorWorldSubsystem::RunColorPickerPreviewPerfSelfTest(FString& OutReport)
+{
+#if !RUNTIME_INSPECTOR_ENABLED
+    OutReport = TEXT("RuntimeInspector disabled");
+    return false;
+#else
+    FString SourceReport;
+    const bool bSourcePassed = RunConfirmDialogColorInputSelfTest(SourceReport);
+    const bool bPreviewNoFullRefresh = SourceReport.Contains(TEXT("PreviewNoFullRefresh=1"));
+    const bool bPreviewPerf = SourceReport.Contains(TEXT("PreviewPerf=1"));
+    const bool bFinalFullRefresh = SourceReport.Contains(TEXT("FinalFullRefresh=1"));
+    const bool bPassed = bSourcePassed
+        && bPreviewNoFullRefresh
+        && bPreviewPerf
+        && bFinalFullRefresh;
+
+    OutReport = FString::Printf(
+        TEXT("ColorPickerPreviewPerf=%s | PreviewNoFullRefresh=%d PreviewPerf=%d FinalFullRefresh=%d | %s"),
+        bPassed ? TEXT("PASS") : TEXT("FAIL"),
+        bPreviewNoFullRefresh ? 1 : 0,
+        bPreviewPerf ? 1 : 0,
+        bFinalFullRefresh ? 1 : 0,
+        *SourceReport);
     UE_LOG(LogRuntimeInspector, Log, TEXT("[RI] %s"), *OutReport);
     return bPassed;
 #endif

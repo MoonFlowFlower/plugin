@@ -257,6 +257,9 @@ public:
     bool RunColorPickerUIContractSelfTest(FString& OutReport);
 
     UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Debug")
+    bool RunColorPickerPreviewPerfSelfTest(FString& OutReport);
+
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Debug")
     FString RunConfirmDialogColorInputSelfTestSimple();
 
     UFUNCTION(BlueprintPure, Category = "RuntimeInspector|Debug")
@@ -1200,9 +1203,17 @@ private:
     bool TryParseConfirmDialogHexColor(const FText& InText, FLinearColor& OutColor) const;
     bool TryGetInspectorItemColor(UObject* ItemObject, FLinearColor& OutColor) const;
     bool ApplyInspectorItemColor(UObject* ItemObject, const FLinearColor& InColor, FString& OutError);
-    bool ApplyInspectorItemColorInternal(UObject* ItemObject, const FLinearColor& InColor, FString& OutError, bool bSuppressHistory);
+    enum class ERIColorEditApplyMode : uint8
+    {
+        Preview,
+        Commit,
+        Restore
+    };
+    bool ApplyInspectorItemColorInternal(UObject* ItemObject, const FLinearColor& InColor, FString& OutError, bool bSuppressHistory, ERIColorEditApplyMode ApplyMode);
     bool OpenColorEditorForItemInternal(UObject* ItemObject);
-    void ApplyActiveColorEditItemIfNeeded(const FLinearColor& InColor);
+    void ApplyActiveColorEditItemIfNeeded(const FLinearColor& InColor, bool bForce = false);
+    void RefreshColorEditItemDisplay(UObject* ItemObject, ERIColorEditApplyMode ApplyMode);
+    void ResetColorPickerPerfDiagnostics();
     void RememberRecentColorPickerColor(const FLinearColor& InColor);
     void SyncActiveConfirmDialogColorPreview();
     void FinalizeActiveColorEdit(bool bAccept);
@@ -1306,6 +1317,12 @@ private:
     bool bHasActiveColorEditLastPreviewColor = false;
     FLinearColor ActiveColorEditOriginalColor = FLinearColor::Black;
     FLinearColor ActiveColorEditLastPreviewColor = FLinearColor::Black;
+    double LastColorPreviewApplySeconds = -1.0;
+    double LastColorPreviewMs = 0.0;
+    double MaxColorPreviewMs = 0.0;
+    FString LastColorPreviewUiRefreshMode = TEXT("None");
+    int32 ColorPreviewCount = 0;
+    int32 ColorFullRefreshCount = 0;
 
     // ����Ժ��������������Ӳ����һ��Ĭ��·��
     UPROPERTY()

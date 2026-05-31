@@ -20,6 +20,16 @@
     "LegacyNativeBridgeId": "color_picker_ui_contract"
   },
   {
+    "Id": "color_picker_preview_perf",
+    "DisplayName": "Color Picker Preview Perf",
+    "Category": "UI",
+    "Description": "Validates color picker preview uses row-only refresh and performs one full refresh on final apply/cancel.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": true,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "color_picker_preview_perf"
+  },
+  {
     "Id": "settings_preview",
     "DisplayName": "Settings Preview",
     "Category": "Settings",

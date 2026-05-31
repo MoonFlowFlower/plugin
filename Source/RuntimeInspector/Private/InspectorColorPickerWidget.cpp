@@ -31,13 +31,14 @@
 namespace
 {
     static constexpr int32 RI_ColorPickerSVTextureSize = 192;
-    static constexpr int32 RI_ColorPickerHueTextureWidth = 18;
-    static constexpr int32 RI_ColorPickerOpacityTextureWidth = 248;
-    static constexpr int32 RI_ColorPickerStripHeight = 16;
-    static constexpr float RI_ColorPickerSVWidgetSize = 210.0f;
-    static constexpr float RI_ColorPickerHueWidgetWidth = 18.0f;
-    static constexpr float RI_ColorPickerModalWidth = 640.0f;
-    static constexpr float RI_ColorPickerModalHeight = 430.0f;
+    static constexpr int32 RI_ColorPickerHueTextureWidth = 16;
+    static constexpr int32 RI_ColorPickerOpacityTextureWidth = 206;
+    static constexpr int32 RI_ColorPickerStripHeight = 14;
+    static constexpr float RI_ColorPickerSVWidgetSize = 180.0f;
+    static constexpr float RI_ColorPickerHueWidgetWidth = 16.0f;
+    static constexpr float RI_ColorPickerModalWidth = 560.0f;
+    static constexpr float RI_ColorPickerModalHeight = 390.0f;
+    static constexpr float RI_ColorPickerModalRadius = 8.0f;
 
     static void RI_SetRoundedBorder(UBorder* Border, const FLinearColor& FillColor, float Radius = 5.0f, float OutlineWidth = 0.0f, const FLinearColor& OutlineColor = FLinearColor::Transparent)
     {
@@ -52,7 +53,13 @@ namespace
         Brush.OutlineSettings.CornerRadii = FVector4(Radius, Radius, Radius, Radius);
         Brush.OutlineSettings.Width = OutlineWidth;
         Brush.OutlineSettings.Color = FSlateColor(OutlineColor);
+        Brush.OutlineSettings.RoundingType = ESlateBrushRoundingType::FixedRadius;
         Border->SetBrush(Brush);
+    }
+
+    static bool RI_UsesFixedRadius(const UBorder* Border)
+    {
+        return Border && Border->Background.OutlineSettings.RoundingType == ESlateBrushRoundingType::FixedRadius;
     }
 
     static void RI_SetImageTexture(UImage* Image, UTexture2D* Texture, const FVector2D& ImageSize)
@@ -208,7 +215,9 @@ bool UInspectorColorPickerWidget::HasNativeColorPickerContractForAutomation() co
         && OpacityTexture
         && RgbInputsBox
         && HsvInputsBox
-        && HasHitTestSafeDragLayersForAutomation();
+        && HasHitTestSafeDragLayersForAutomation()
+        && HasFixedRadiusBrushesForAutomation()
+        && HasCompactLayoutForAutomation();
 }
 
 bool UInspectorColorPickerWidget::SetRgbChannelTextForAutomation(int32 ChannelIndex, const FString& InText)
@@ -273,6 +282,25 @@ bool UInspectorColorPickerWidget::HasHitTestSafeDragLayersForAutomation() const
         && OpacityMarker && OpacityMarker->GetVisibility() == ESlateVisibility::HitTestInvisible;
 }
 
+bool UInspectorColorPickerWidget::HasFixedRadiusBrushesForAutomation() const
+{
+    return RI_UsesFixedRadius(ModalBorder.Get())
+        && RI_UsesFixedRadius(CurrentPreviewBorder.Get())
+        && RI_UsesFixedRadius(PreviousPreviewBorder.Get())
+        && RI_UsesFixedRadius(SaturationValueMarker.Get())
+        && RI_UsesFixedRadius(HueMarker.Get())
+        && RI_UsesFixedRadius(OpacityMarker.Get());
+}
+
+bool UInspectorColorPickerWidget::HasCompactLayoutForAutomation() const
+{
+    return RI_ColorPickerModalWidth <= 580.0f
+        && RI_ColorPickerModalHeight <= 400.0f
+        && RI_ColorPickerSVWidgetSize <= 184.0f
+        && RI_ColorPickerHueWidgetWidth <= 16.0f
+        && RI_ColorPickerOpacityTextureWidth <= 210;
+}
+
 void UInspectorColorPickerWidget::BuildWidgetTree()
 {
     if (!WidgetTree)
@@ -282,11 +310,11 @@ void UInspectorColorPickerWidget::BuildWidgetTree()
 
     RootCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("RI_ColorPickerRoot"));
     ModalBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("RI_ColorPickerModal"));
-    ModalBorder->SetPadding(FMargin(14.0f, 12.0f));
+    ModalBorder->SetPadding(FMargin(14.0f, 11.0f));
     RI_SetRoundedBorder(
         ModalBorder,
         RICompactUI::GetPageBackgroundColor(),
-        RICompactUI::GetThemeMetrics().CornerRadius + 2.0f,
+        RI_ColorPickerModalRadius,
         RICompactUI::GetThemeMetrics().BorderWidth,
         RICompactUI::GetInputPalette(RICompactUI::ERIInputVisualStyle::Strong).Focused);
 
@@ -294,10 +322,10 @@ void UInspectorColorPickerWidget::BuildWidgetTree()
     ModalBorder->SetContent(ModalBox);
 
     UHorizontalBox* HeaderRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_ColorPickerHeader"));
-    RI_AddHorizontal(HeaderRow, MakeLabel(TEXT("Color Picker"), 14, true), FMargin(0.0f), ESlateSizeRule::Fill);
+    RI_AddHorizontal(HeaderRow, MakeLabel(TEXT("Color Picker"), 15, true), FMargin(0.0f), ESlateSizeRule::Fill);
     CloseButton = MakePickerButton(TEXT("RI_ColorPickerClose"), TEXT("X"), false);
     RI_AddHorizontal(HeaderRow, CloseButton, FMargin(8.0f, 0.0f, 0.0f, 0.0f));
-    RI_AddVertical(ModalBox, HeaderRow, FMargin(0.0f, 0.0f, 0.0f, 10.0f));
+    RI_AddVertical(ModalBox, HeaderRow, FMargin(0.0f, 0.0f, 0.0f, 8.0f));
 
     UHorizontalBox* BodyRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_ColorPickerBody"));
 
@@ -354,7 +382,7 @@ void UInspectorColorPickerWidget::BuildWidgetTree()
     RI_AddVertical(LeftBox, SpectrumRow);
 
     UTextBlock* OpacityLabel = MakeLabel(TEXT("Opacity"), RICompactUI::GetLabelFontSize(), false);
-    RI_AddVertical(LeftBox, OpacityLabel, FMargin(0.0f, 10.0f, 0.0f, 4.0f));
+    RI_AddVertical(LeftBox, OpacityLabel, FMargin(0.0f, 8.0f, 0.0f, 4.0f));
     OpacityCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("RI_ColorPickerOpacityCanvas"));
     OpacityImage = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("RI_ColorPickerOpacityImage"));
     OpacityImage->SetVisibility(ESlateVisibility::HitTestInvisible);
@@ -378,7 +406,7 @@ void UInspectorColorPickerWidget::BuildWidgetTree()
     OpacityBox->SetContent(OpacityCanvas);
     RI_AddVertical(LeftBox, OpacityBox);
 
-    RI_AddVertical(LeftBox, MakeLabel(TEXT("Recent Colors"), RICompactUI::GetLabelFontSize(), false), FMargin(0.0f, 12.0f, 0.0f, 5.0f));
+    RI_AddVertical(LeftBox, MakeLabel(TEXT("Recent Colors"), RICompactUI::GetLabelFontSize(), false), FMargin(0.0f, 10.0f, 0.0f, 5.0f));
     RecentSwatchBox = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_ColorPickerRecentSwatches"));
     RI_AddVertical(LeftBox, RecentSwatchBox);
 
@@ -387,16 +415,16 @@ void UInspectorColorPickerWidget::BuildWidgetTree()
     UVerticalBox* CurrentPreviewStack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
     RI_AddVertical(CurrentPreviewStack, MakeLabel(TEXT("Preview"), RICompactUI::GetMutedFontSize(), false), FMargin(0.0f, 0.0f, 0.0f, 4.0f));
     UBorder* CurrentPreviewRaw = nullptr;
-    RI_AddVertical(CurrentPreviewStack, MakeColorBlock(TEXT("RI_ColorPickerCurrentPreview"), 58.0f, 54.0f, CurrentPreviewRaw));
+    RI_AddVertical(CurrentPreviewStack, MakeColorBlock(TEXT("RI_ColorPickerCurrentPreview"), 44.0f, 44.0f, CurrentPreviewRaw));
     CurrentPreviewBorder = CurrentPreviewRaw;
     RI_AddHorizontal(PreviewRow, CurrentPreviewStack, FMargin(0.0f, 0.0f, 10.0f, 0.0f));
     UVerticalBox* PreviousPreviewStack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
     RI_AddVertical(PreviousPreviewStack, MakeLabel(TEXT("Previous"), RICompactUI::GetMutedFontSize(), false), FMargin(0.0f, 0.0f, 0.0f, 4.0f));
     UBorder* PreviousPreviewRaw = nullptr;
-    RI_AddVertical(PreviousPreviewStack, MakeColorBlock(TEXT("RI_ColorPickerPreviousPreview"), 58.0f, 54.0f, PreviousPreviewRaw));
+    RI_AddVertical(PreviousPreviewStack, MakeColorBlock(TEXT("RI_ColorPickerPreviousPreview"), 44.0f, 44.0f, PreviousPreviewRaw));
     PreviousPreviewBorder = PreviousPreviewRaw;
     RI_AddHorizontal(PreviewRow, PreviousPreviewStack);
-    RI_AddVertical(RightBox, PreviewRow, FMargin(0.0f, 0.0f, 0.0f, 10.0f));
+    RI_AddVertical(RightBox, PreviewRow, FMargin(0.0f, 0.0f, 0.0f, 8.0f));
 
     UHorizontalBox* ModeRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_ColorPickerModeRow"));
     RgbModeButton = MakeModeButton(TEXT("RI_ColorPickerRgbMode"), TEXT("RGB"), ERIColorPickerInputMode::RGB);
@@ -430,12 +458,16 @@ void UInspectorColorPickerWidget::BuildWidgetTree()
     RI_AddVertical(RightBox, RgbInputsBox);
     RI_AddVertical(RightBox, HsvInputsBox);
     RI_AddVertical(RightBox, MakeLabel(TEXT("HEX"), RICompactUI::GetLabelFontSize(), false), FMargin(0.0f, 5.0f, 0.0f, 4.0f));
-    RI_AddVertical(RightBox, InputHex);
+    USizeBox* HexInputSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_ColorPickerHexInputSize"));
+    HexInputSize->SetWidthOverride(166.0f);
+    HexInputSize->SetHeightOverride(22.0f);
+    HexInputSize->SetContent(InputHex);
+    RI_AddVertical(RightBox, HexInputSize);
 
     USizeBox* LeftSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-    LeftSize->SetWidthOverride(330.0f);
+    LeftSize->SetWidthOverride(224.0f);
     LeftSize->SetContent(LeftBox);
-    RI_AddHorizontal(BodyRow, LeftSize, FMargin(0.0f, 0.0f, 18.0f, 0.0f));
+    RI_AddHorizontal(BodyRow, LeftSize, FMargin(0.0f, 0.0f, 16.0f, 0.0f));
     RI_AddHorizontal(BodyRow, RightBox, FMargin(0.0f), ESlateSizeRule::Fill);
     RI_AddVertical(ModalBox, BodyRow, FMargin(0.0f), ESlateSizeRule::Fill);
 
@@ -446,7 +478,7 @@ void UInspectorColorPickerWidget::BuildWidgetTree()
     ApplyButton = MakePickerButton(TEXT("RI_ColorPickerApply"), TEXT("Apply"), true);
     RI_AddHorizontal(FooterRow, CancelButton, FMargin(0.0f, 0.0f, 10.0f, 0.0f));
     RI_AddHorizontal(FooterRow, ApplyButton);
-    RI_AddVertical(ModalBox, FooterRow, FMargin(0.0f, 12.0f, 0.0f, 0.0f));
+    RI_AddVertical(ModalBox, FooterRow, FMargin(0.0f, 10.0f, 0.0f, 0.0f));
 
     if (UCanvasPanelSlot* ModalSlot = RootCanvas->AddChildToCanvas(ModalBorder))
     {
@@ -1154,20 +1186,21 @@ UEditableTextBox* UInspectorColorPickerWidget::MakeInputBox(const FName& Name, c
     TextBox->SetText(FText::FromString(InitialText));
     TextBox->SetJustification(ETextJustify::Center);
     TextBox->SetSelectAllTextWhenFocused(true);
-    TextBox->SetMinDesiredWidth(84.0f);
+    TextBox->SetMinDesiredWidth(72.0f);
     RICompactUI::ConfigureEditableTextBox(TextBox, RICompactUI::GetStrongTextColor(), RICompactUI::GetValueFontSize(), RICompactUI::ERIInputVisualStyle::Strong);
     return TextBox;
 }
 
 UButton* UInspectorColorPickerWidget::MakePickerButton(const FName& Name, const FString& Label, bool bPrimary) const
 {
+    const bool bCloseButton = Name == TEXT("RI_ColorPickerClose");
     return RICompactUI::MakeLabeledButton(
         WidgetTree,
         Name,
         Label,
         bPrimary ? RICompactUI::ERIButtonVisualStyle::Primary : RICompactUI::ERIButtonVisualStyle::Secondary,
-        bPrimary ? 112.0f : 96.0f,
-        28.0f,
+        bCloseButton ? 32.0f : (bPrimary ? 112.0f : 96.0f),
+        bCloseButton ? 26.0f : 28.0f,
         RICompactUI::GetLabelFontSize());
 }
 
@@ -1193,7 +1226,11 @@ UWidget* UInspectorColorPickerWidget::MakeChannelRow(const FString& Label, UEdit
     LabelBox->SetContent(LabelText);
     RICompactUI::CenterSizeBoxContent(LabelBox);
     RI_AddHorizontal(Row, LabelBox, FMargin(0.0f, 0.0f, 5.0f, 0.0f));
-    RI_AddHorizontal(Row, Input, FMargin(0.0f), ESlateSizeRule::Fill);
+    USizeBox* InputSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+    InputSize->SetWidthOverride(104.0f);
+    InputSize->SetHeightOverride(22.0f);
+    InputSize->SetContent(Input);
+    RI_AddHorizontal(Row, InputSize);
     return Row;
 }
 
@@ -1218,8 +1255,8 @@ UButton* UInspectorColorPickerWidget::MakeRecentColorButton(int32 Index, const F
     RI_SetRoundedBorder(SwatchBorder, Color, 3.0f, 1.0f, RICompactUI::GetInputPalette(RICompactUI::ERIInputVisualStyle::Strong).Focused);
     SwatchBorder->SetVisibility(ESlateVisibility::HitTestInvisible);
     USizeBox* SizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-    SizeBox->SetWidthOverride(22.0f);
-    SizeBox->SetHeightOverride(22.0f);
+    SizeBox->SetWidthOverride(18.0f);
+    SizeBox->SetHeightOverride(18.0f);
     SizeBox->SetContent(SwatchBorder);
     SizeBox->SetVisibility(ESlateVisibility::HitTestInvisible);
     Button->AddChild(SizeBox);

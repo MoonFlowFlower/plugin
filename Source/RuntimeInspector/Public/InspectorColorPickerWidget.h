@@ -59,6 +59,8 @@ public:
     bool ApplyHueForAutomation(float InHue);
     bool ApplyOpacityForAutomation(float InAlpha);
     bool HasHitTestSafeDragLayersForAutomation() const;
+    bool HasFixedRadiusBrushesForAutomation() const;
+    bool HasCompactLayoutForAutomation() const;
 
 protected:
     virtual TSharedRef<SWidget> RebuildWidget() override;
