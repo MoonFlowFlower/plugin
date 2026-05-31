@@ -13806,7 +13806,13 @@ bool UInspectorWorldSubsystem::ExecuteLegacyToolNativeBridgeAction(FName BridgeI
             SetSelectedActor(TestActor);
         }
 
+        FString ActorPageError;
+        SetVisiblePageByName(TEXT("Actor"), ActorPageError);
         RefreshDockRootWidget();
+        if (UInspectorDockRootWidget* RootWidget = DockRootWidget.Get())
+        {
+            RootWidget->FlushHostedActorSectionsDeferredRefreshForAutomation();
+        }
         const int32 AttributeRows = ActorPropertiesSectionWidget.IsValid()
             ? ActorPropertiesSectionWidget->GetEntryWidgetCountForAutomation()
             : INDEX_NONE;
@@ -14101,6 +14107,13 @@ bool UInspectorWorldSubsystem::ExecuteLegacyToolNativeBridgeAction(FName BridgeI
             SetSelectedActor(TestActor);
         }
 
+        FString ActorPageError;
+        SetVisiblePageByName(TEXT("Actor"), ActorPageError);
+        if (URuntimeInspectorController* Controller = GetOrCreateRuntimeInspectorController())
+        {
+            Controller->SetSearchText(FText::GetEmpty());
+        }
+
         TArray<UObject*> PropertyItems;
         GetPropertyItemsForSelectedEx(TEXT(""), false, PropertyItems);
         UInspectorPropertyItem* PropertyCandidate = nullptr;
@@ -14133,6 +14146,10 @@ bool UInspectorWorldSubsystem::ExecuteLegacyToolNativeBridgeAction(FName BridgeI
         FString LeftToggleError;
 
         RefreshDockRootWidget();
+        if (UInspectorDockRootWidget* RootWidget = DockRootWidget.Get())
+        {
+            RootWidget->FlushHostedActorSectionsDeferredRefreshForAutomation();
+        }
         if (ActorPropertiesSectionWidget.IsValid())
         {
             ActorPropertiesSectionWidget->RefreshFromSubsystem();
@@ -14151,6 +14168,10 @@ bool UInspectorWorldSubsystem::ExecuteLegacyToolNativeBridgeAction(FName BridgeI
         if (PropertyCandidate && IsFavoriteForAnyItem(PropertyCandidate) != bPropertyInitialFavorite)
         {
             ToggleFavoriteForAnyItem(PropertyCandidate);
+        }
+        if (UInspectorDockRootWidget* RootWidget = DockRootWidget.Get())
+        {
+            RootWidget->FlushHostedActorSectionsDeferredRefreshForAutomation();
         }
 
         UInspectorFunctionRowWidget* FunctionRow = FunctionCandidate && ActorFunctionsSectionWidget.IsValid()
@@ -15807,6 +15828,10 @@ bool UInspectorWorldSubsystem::RunConfirmDialogColorInputSelfTest(FString& OutRe
                 if (UMeshComponent* ViewMeshComponent = TestMaterialItem->GetMeshComponent())
                 {
                     SetPropertyView_MaterialOnly(ViewMeshComponent, TestMaterialItem->GetSlotIndex());
+                    if (UInspectorDockRootWidget* RootWidget = DockRootWidget.Get())
+                    {
+                        RootWidget->FlushHostedActorSectionsDeferredRefreshForAutomation();
+                    }
                     if (UUserWidget* Panel = PanelWidget.Get())
                     {
                         Panel->TakeWidget();
@@ -24475,7 +24500,12 @@ void UInspectorWorldSubsystem::RefreshPanel(EInspectorRefreshReason Reason)
     const double StartSeconds = FPlatformTime::Seconds();
     if (IsDockRootActive())
     {
-        RefreshDockRootWidget();
+        if (UInspectorDockRootWidget* RootWidget = DockRootWidget.Get())
+        {
+            RootWidget->RefreshFromController(Reason);
+            RegisterDockHostedPages(RootWidget->GetHostedFilePage(), RootWidget->GetHostedSettingsPage(), RootWidget->GetHostedTestPage());
+            RegisterDockHostedActorSections(RootWidget->GetHostedActorAttributes(), RootWidget->GetHostedActorFunctions());
+        }
         const ERIVisiblePage VisiblePage = GetVisiblePage();
         UE_LOG(
             LogRuntimeInspector,

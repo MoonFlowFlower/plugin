@@ -23,6 +23,7 @@ class UTextBlock;
 class URuntimeInspectorController;
 class UVerticalBox;
 class UWidgetSwitcher;
+enum class EInspectorRefreshReason : uint8;
 
 UCLASS()
 class RUNTIMEINSPECTOR_API UInspectorDockFunctionRunProxy : public UObject
@@ -99,6 +100,7 @@ class RUNTIMEINSPECTOR_API UInspectorDockRootWidget : public UUserWidget
 public:
     void SetController(URuntimeInspectorController* InController);
     void RefreshFromController();
+    void RefreshFromController(EInspectorRefreshReason Reason);
     void SetActiveTab(ERIInspectorTab InTab);
     ERIInspectorTab GetActiveTab() const { return CurrentViewModel.ActiveTab; }
     bool IsOnlyModifyEnabled() const { return CurrentViewModel.bOnlyModify; }

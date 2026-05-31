@@ -677,6 +677,11 @@ UButton* UInspectorDockRootWidget::MakeDockIconButton(const FName& Name, const F
 
 void UInspectorDockRootWidget::RefreshFromController()
 {
+    RefreshFromController(EInspectorRefreshReason::StructureChanged);
+}
+
+void UInspectorDockRootWidget::RefreshFromController(EInspectorRefreshReason Reason)
+{
     BuildWidgetTreeIfNeeded();
     BuildHostedPageTabs();
     if (!Controller)
@@ -688,14 +693,24 @@ void UInspectorDockRootWidget::RefreshFromController()
     RefreshLayoutForViewport();
     RefreshActorContext(CurrentViewModel);
     RefreshViewportOverlay(CurrentViewModel);
-    RefreshHostedActorSections(CurrentViewModel);
+    if (CurrentViewModel.ActiveTab == ERIInspectorTab::Actor)
+    {
+        RefreshHostedActorSectionsDeferred(CurrentViewModel);
+    }
     RefreshChangesTab(CurrentViewModel);
     RefreshTabPresentation(CurrentViewModel);
     RefreshActionBar(CurrentViewModel);
 
-    if (FilePageWidget)
+    if (FilePageWidget && CurrentViewModel.ActiveTab == ERIInspectorTab::Changes)
     {
-        FilePageWidget->RefreshFastFromSubsystem();
+        if (Reason == EInspectorRefreshReason::ValuesChanged)
+        {
+            FilePageWidget->RefreshFastFromSubsystem();
+        }
+        else
+        {
+            FilePageWidget->RefreshFromSubsystem();
+        }
     }
     if (SettingsPageWidget && CurrentViewModel.ActiveTab == ERIInspectorTab::Settings)
     {
@@ -1098,7 +1113,7 @@ void UInspectorDockRootWidget::SetActiveTab(ERIInspectorTab InTab)
     {
         Controller->SetActiveTab(InTab);
     }
-    RefreshFromController();
+    RefreshFromController(EInspectorRefreshReason::UIStateChanged);
 }
 
 void UInspectorDockRootWidget::SetTabButtonStyle(UButton* Button, bool bActive) const
@@ -1120,7 +1135,7 @@ void UInspectorDockRootWidget::HandleOnlyModifyChanged(bool bIsChecked)
     {
         Controller->SetOnlyModify(bIsChecked);
     }
-    RefreshFromController();
+    RefreshFromController(EInspectorRefreshReason::UIStateChanged);
 }
 
 void UInspectorDockRootWidget::HandleRefreshClicked()
@@ -1129,7 +1144,7 @@ void UInspectorDockRootWidget::HandleRefreshClicked()
     {
         Controller->RequestRefresh();
     }
-    RefreshFromController();
+    RefreshFromController(EInspectorRefreshReason::StructureChanged);
 }
 
 void UInspectorDockRootWidget::HandleResetClicked()
@@ -1139,7 +1154,7 @@ void UInspectorDockRootWidget::HandleResetClicked()
         FString Error;
         Controller->RequestReset(Error);
     }
-    RefreshFromController();
+    RefreshFromController(EInspectorRefreshReason::ValuesChanged);
 }
 
 void UInspectorDockRootWidget::HandleUndoClicked()
@@ -1148,7 +1163,7 @@ void UInspectorDockRootWidget::HandleUndoClicked()
     {
         Controller->RequestUndo();
     }
-    RefreshFromController();
+    RefreshFromController(EInspectorRefreshReason::UndoRedo);
 }
 
 void UInspectorDockRootWidget::HandleRedoClicked()
@@ -1157,7 +1172,7 @@ void UInspectorDockRootWidget::HandleRedoClicked()
     {
         Controller->RequestRedo();
     }
-    RefreshFromController();
+    RefreshFromController(EInspectorRefreshReason::UndoRedo);
 }
 
 void UInspectorDockRootWidget::HandleApplyClicked()
@@ -1167,7 +1182,7 @@ void UInspectorDockRootWidget::HandleApplyClicked()
         FRIApplyResult Result;
         Controller->RequestApplyStagedPatches(Result);
     }
-    RefreshFromController();
+    RefreshFromController(EInspectorRefreshReason::ValuesChanged);
 }
 
 void UInspectorDockRootWidget::HandleSearchTextChanged(const FText& InText)
@@ -1181,7 +1196,7 @@ void UInspectorDockRootWidget::HandleSearchTextChanged(const FText& InText)
     {
         Controller->SetSearchText(InText);
     }
-    RefreshFromController();
+    RefreshFromController(EInspectorRefreshReason::UIStateChanged);
 }
 
 void UInspectorDockRootWidget::HandleFunctionRunProxyClicked(FName FunctionName)
@@ -1191,7 +1206,7 @@ void UInspectorDockRootWidget::HandleFunctionRunProxyClicked(FName FunctionName)
         FString Error;
         Controller->RequestRunFunction(FunctionName, Error);
     }
-    RefreshFromController();
+    RefreshFromController(EInspectorRefreshReason::ValuesChanged);
 }
 
 void UInspectorDockRootWidget::HandlePatchRevertProxyClicked(FGuid PatchId)
@@ -1201,7 +1216,7 @@ void UInspectorDockRootWidget::HandlePatchRevertProxyClicked(FGuid PatchId)
         FRIApplyResult Result;
         Controller->RequestRevertPatch(PatchId, Result);
     }
-    RefreshFromController();
+    RefreshFromController(EInspectorRefreshReason::ValuesChanged);
 }
 
 void UInspectorDockRootWidget::HandleComponentProxyClicked(const FString& ComponentName)
@@ -1236,7 +1251,7 @@ void UInspectorDockRootWidget::HandleFavoriteProxyClicked(UObject* SourceItem)
             ActionStatusText->SetText(FText::FromString(Controller->GetLastIntentLog()));
         }
     }
-    RefreshFromController();
+    RefreshFromController(EInspectorRefreshReason::StructureChanged);
 }
 
 void UInspectorDockRootWidget::HandleFavoriteToggleProxyClicked(UObject* SourceItem)
@@ -1250,7 +1265,7 @@ void UInspectorDockRootWidget::HandleFavoriteToggleProxyClicked(UObject* SourceI
             ActionStatusText->SetText(FText::FromString(Controller->GetLastIntentLog()));
         }
     }
-    RefreshFromController();
+    RefreshFromController(EInspectorRefreshReason::UIStateChanged);
 }
 
 FString UInspectorDockRootWidget::GetDockLayoutDebugSummary() const
