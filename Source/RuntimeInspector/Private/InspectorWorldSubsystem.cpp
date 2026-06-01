@@ -4532,8 +4532,11 @@ void UInspectorWorldSubsystem::OpenToPage(ERIVisiblePage InitialPage)
         }
     }
     int32 OpenRefreshCount = 0;
+    int32 OpenFastRefreshCount = 0;
     double AddToViewportMs = 0.0;
     double FirstRefreshMs = 0.0;
+    double OpenShellMs = 0.0;
+    bool bOpenHydrationPending = false;
     if (UInspectorDockRootWidget* RootWidget = DockRootWidget.Get())
     {
         const double AddStartSeconds = FPlatformTime::Seconds();
@@ -4544,9 +4547,12 @@ void UInspectorWorldSubsystem::OpenToPage(ERIVisiblePage InitialPage)
         RootWidget->SetVisibility(ESlateVisibility::Visible);
         AddToViewportMs = (FPlatformTime::Seconds() - AddStartSeconds) * 1000.0;
         const double RefreshStartSeconds = FPlatformTime::Seconds();
-        RootWidget->RefreshFromController(EInspectorRefreshReason::StructureChanged);
-        FirstRefreshMs = (FPlatformTime::Seconds() - RefreshStartSeconds) * 1000.0;
+        RootWidget->RefreshFromController(EInspectorRefreshReason::StructureChanged, ERIViewModelHydrationMode::ShellOnly);
+        OpenShellMs = (FPlatformTime::Seconds() - RefreshStartSeconds) * 1000.0;
+        FirstRefreshMs = OpenShellMs;
+        bOpenHydrationPending = RootWidget->IsOpenHydrationPendingForAutomation();
         ++OpenRefreshCount;
+        ++OpenFastRefreshCount;
     }
     bHasCompletedInitialActorPanelRefresh = false;
     CancelDeferredOpenActorRefresh();
@@ -4563,22 +4569,27 @@ void UInspectorWorldSubsystem::OpenToPage(ERIVisiblePage InitialPage)
     UE_LOG(
         LogRuntimeInspector,
         Log,
-        TEXT("[RI][Perf] OpenStages Ensure=%.2f ms AddToViewport=%.2f ms FirstRefresh=%.2f ms OpenRefreshCount=%d"),
+        TEXT("[RI][Perf] OpenStages Ensure=%.2f ms AddToViewport=%.2f ms FirstRefresh=%.2f ms OpenShellMs=%.2f ms OpenRefreshCount=%d OpenFastRefreshCount=%d OpenHydrationPending=%d"),
         EnsureMs,
         AddToViewportMs,
         FirstRefreshMs,
-        OpenRefreshCount);
+        OpenShellMs,
+        OpenRefreshCount,
+        OpenFastRefreshCount,
+        bOpenHydrationPending ? 1 : 0);
     UE_LOG(
         LogRuntimeInspector,
         Log,
-        TEXT("[RI][Perf] Open %.2f ms | InitialPage=%d OpenRefreshCount=%d"),
+        TEXT("[RI][Perf] Open %.2f ms | InitialPage=%d OpenRefreshCount=%d OpenFastRefreshCount=%d OpenHydrationPending=%d"),
         (FPlatformTime::Seconds() - StartSeconds) * 1000.0,
         static_cast<int32>(InitialPage),
-        OpenRefreshCount);
+        OpenRefreshCount,
+        OpenFastRefreshCount,
+        bOpenHydrationPending ? 1 : 0);
     RecordValidationCaptureMetric(
         TEXT("Open"),
         (FPlatformTime::Seconds() - StartSeconds) * 1000.0,
-        FString::Printf(TEXT("InitialPage=%d OpenRefreshCount=%d"), static_cast<int32>(InitialPage), OpenRefreshCount));
+        FString::Printf(TEXT("InitialPage=%d OpenRefreshCount=%d OpenFastRefreshCount=%d OpenHydrationPending=%d"), static_cast<int32>(InitialPage), OpenRefreshCount, OpenFastRefreshCount, bOpenHydrationPending ? 1 : 0));
 #endif
 }
 
@@ -4594,6 +4605,7 @@ void UInspectorWorldSubsystem::Close()
     bInspectorOpen = false;
     if (UInspectorDockRootWidget* ExistingDockRoot = DockRootWidget.Get())
     {
+        ExistingDockRoot->CancelOpenHydrationRefresh();
         ExistingDockRoot->RemoveFromParent();
     }
     DockRootWidgetStrong = nullptr;

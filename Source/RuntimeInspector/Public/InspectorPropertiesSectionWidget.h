@@ -44,6 +44,7 @@ public:
     UInspectorPropertiesSectionWidget(const FObjectInitializer& ObjectInitializer);
 
     void SetInspectorSubsystem(UInspectorWorldSubsystem* InSubsystem);
+    void SetAutoRefreshOnConstruct(bool bInAutoRefreshOnConstruct) { bAutoRefreshOnConstruct = bInAutoRefreshOnConstruct; }
     void SetOnlyModified(bool bInOnlyModified);
     void RefreshFromSubsystem();
     void RefreshFromSubsystemDeferred();
@@ -99,6 +100,8 @@ private:
     {
         None,
         Collect,
+        Transform,
+        CategoryHeaders,
         Categories,
         Flat
     };
@@ -115,6 +118,8 @@ private:
     void ScheduleDeferredRefreshTick();
     void ProcessDeferredRefresh(int32 Serial);
     void PrepareDeferredCategorizedPropertyRows(const TArray<UObject*>& Items, bool bSearchMode);
+    bool BuildDeferredActorTransformBlock();
+    bool BuildNextDeferredCategoryHeaderBatch();
     bool BuildNextDeferredPropertyBatch();
     bool BuildNextDeferredFlatBatch();
     void FinishDeferredRefresh();
@@ -159,6 +164,7 @@ private:
 
     TWeakObjectPtr<UInspectorWorldSubsystem> Subsystem;
     bool bOnlyModified = false;
+    bool bAutoRefreshOnConstruct = true;
     TMap<FString, TObjectPtr<UVerticalBox>> CategoryBodyByKey;
     TMap<FString, TObjectPtr<UTextBlock>> CategoryToggleTextByKey;
     TMap<FString, TObjectPtr<UTextBlock>> CategoryLabelTextByKey;
@@ -179,6 +185,8 @@ private:
     int32 DeferredRefreshSerial = 0;
     bool bDeferredRefreshPending = false;
     ERIDeferredPropertyRefreshMode DeferredRefreshMode = ERIDeferredPropertyRefreshMode::None;
+    ERIDeferredPropertyRefreshMode DeferredRefreshModeAfterTransform = ERIDeferredPropertyRefreshMode::None;
+    TArray<TWeakObjectPtr<UInspectorPropertyItem>> DeferredActorTransformItems;
     TArray<TWeakObjectPtr<UObject>> DeferredFlatItems;
     TArray<FDeferredPropertyCategoryViewData> DeferredCategories;
     int32 DeferredFlatIndex = 0;

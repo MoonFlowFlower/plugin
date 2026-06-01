@@ -19,6 +19,7 @@ public:
 
     UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Controller")
     FRIInspectorViewModel GetCurrentViewModel() const;
+    FRIInspectorViewModel GetCurrentViewModel(ERIViewModelHydrationMode HydrationMode) const;
 
     UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Controller")
     void SelectActor(AActor* Actor);

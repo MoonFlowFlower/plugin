@@ -3,6 +3,7 @@
 #include "InspectorCompactWidgetUtils.h"
 #include "InspectorFunctionItem.h"
 #include "InspectorFunctionRowWidget.h"
+#include "RuntimeInspector.h"
 #include "InspectorTouchScrollBox.h"
 #include "InspectorWorldSubsystem.h"
 
@@ -15,6 +16,7 @@
 #include "Components/VerticalBoxSlot.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "HAL/PlatformTime.h"
 #include "TimerManager.h"
 
 namespace
@@ -130,7 +132,10 @@ void UInspectorFunctionsSectionWidget::NativeConstruct()
 {
     Super::NativeConstruct();
     RIInspectorTouchScroll::Configure(FunctionsScrollBox);
-    RefreshFromSubsystem();
+    if (bAutoRefreshOnConstruct)
+    {
+        RefreshFromSubsystem();
+    }
 }
 
 void UInspectorFunctionsSectionWidget::BuildWidgetTree()
@@ -295,6 +300,7 @@ void UInspectorFunctionsSectionWidget::ScheduleDeferredRefreshTick()
 
 void UInspectorFunctionsSectionWidget::ProcessDeferredRefresh(int32 Serial)
 {
+    const double TickStartSeconds = FPlatformTime::Seconds();
     if (Serial != DeferredRefreshSerial || !bDeferredRefreshPending || !WidgetTree || !FunctionsEntriesBox)
     {
         return;
@@ -312,6 +318,7 @@ void UInspectorFunctionsSectionWidget::ProcessDeferredRefresh(int32 Serial)
 
     if (bDeferredRefreshCollectPending)
     {
+        const double CollectStartSeconds = FPlatformTime::Seconds();
         FunctionsEntriesBox->ClearChildren();
         TArray<UInspectorFunctionItem*> Items;
         InspectorSubsystem->GetFunctionItemsForSelected(InspectorSubsystem->GetCurrentActorSearchText(), Items);
@@ -324,6 +331,13 @@ void UInspectorFunctionsSectionWidget::ProcessDeferredRefresh(int32 Serial)
         }
         DeferredFunctionIndex = 0;
         bDeferredRefreshCollectPending = false;
+
+        UE_LOG(
+            LogRuntimeInspector,
+            Log,
+            TEXT("[RI][Perf] HydrationCollectMs %.2f | Section=Functions Items=%d"),
+            (FPlatformTime::Seconds() - CollectStartSeconds) * 1000.0,
+            DeferredFunctionItems.Num());
 
         if (DeferredFunctionItems.Num() == 0)
         {
@@ -341,10 +355,24 @@ void UInspectorFunctionsSectionWidget::ProcessDeferredRefresh(int32 Serial)
 
     if (BuildNextDeferredFunctionBatch())
     {
+        UE_LOG(
+            LogRuntimeInspector,
+            Log,
+            TEXT("[RI][Perf] HydrationRowsMs %.2f | Section=Functions Complete=1 Rows=%d Pending=%d"),
+            (FPlatformTime::Seconds() - TickStartSeconds) * 1000.0,
+            GetEntryWidgetCountForAutomation(),
+            bDeferredRefreshPending ? 1 : 0);
         FinishDeferredRefresh();
         return;
     }
 
+    UE_LOG(
+        LogRuntimeInspector,
+        Log,
+        TEXT("[RI][Perf] HydrationRowsMs %.2f | Section=Functions Complete=0 Rows=%d Pending=%d"),
+        (FPlatformTime::Seconds() - TickStartSeconds) * 1000.0,
+        GetEntryWidgetCountForAutomation(),
+        bDeferredRefreshPending ? 1 : 0);
     ScheduleDeferredRefreshTick();
 }
 

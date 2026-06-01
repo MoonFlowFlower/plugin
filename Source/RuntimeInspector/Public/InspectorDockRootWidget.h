@@ -102,11 +102,14 @@ public:
     void SetController(URuntimeInspectorController* InController);
     void RefreshFromController();
     void RefreshFromController(EInspectorRefreshReason Reason);
+    void RefreshFromController(EInspectorRefreshReason Reason, ERIViewModelHydrationMode HydrationMode);
     void SetActiveTab(ERIInspectorTab InTab);
     ERIInspectorTab GetActiveTab() const { return CurrentViewModel.ActiveTab; }
     bool IsOnlyModifyEnabled() const { return CurrentViewModel.bOnlyModify; }
     FString GetDockLayoutDebugSummary() const;
     bool AreHostedActorSectionsDeferredRefreshPendingForAutomation() const;
+    bool IsOpenHydrationPendingForAutomation() const { return bOpenHydrationPending; }
+    void CancelOpenHydrationRefresh();
     bool FlushHostedActorSectionsDeferredRefreshForAutomation();
     double GetLastComponentFocusIntentMsForAutomation() const { return LastComponentFocusIntentMs; }
 
@@ -134,6 +137,8 @@ private:
     void BuildChangesTab(UScrollBox* OutScrollBox);
     void BuildHostedPageTabs();
     void BuildHostedActorSections(UInspectorWorldSubsystem* InspectorSubsystem);
+    void ScheduleOpenHydrationRefresh();
+    void ProcessOpenHydrationRefresh(int32 Serial);
 
     void RefreshLayoutForViewport();
     void RefreshActorContext(const FRIInspectorViewModel& ViewModel);
@@ -281,8 +286,13 @@ private:
     TMap<FString, TWeakObjectPtr<UTextBlock>> ComponentRowTexts;
 
     double LastComponentFocusIntentMs = 0.0;
+    double LastViewModelRefreshMs = 0.0;
+    double LastHostedCreateMs = 0.0;
+    double LastOpenHydrationViewModelMs = 0.0;
 
     bool bWidgetTreeBuilt = false;
     bool bLeftPanelCompact = false;
     bool bSuppressSearchTextChanged = false;
+    bool bOpenHydrationPending = false;
+    int32 OpenHydrationSerial = 0;
 };

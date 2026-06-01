@@ -13,6 +13,14 @@ enum class ERIInspectorTab : uint8
 };
 
 UENUM(BlueprintType)
+enum class ERIViewModelHydrationMode : uint8
+{
+    Full,
+    DockHydrated,
+    ShellOnly
+};
+
+UENUM(BlueprintType)
 enum class ERISelectionState : uint8
 {
     None,

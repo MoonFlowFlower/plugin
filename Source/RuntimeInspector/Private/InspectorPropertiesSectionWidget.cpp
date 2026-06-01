@@ -6,6 +6,7 @@
 #include "InspectorMaterialParamRowWidget.h"
 #include "InspectorPropertyItem.h"
 #include "InspectorPropertyRowWidget.h"
+#include "RuntimeInspector.h"
 #include "InspectorTouchScrollBox.h"
 #include "InspectorWorldSubsystem.h"
 
@@ -22,6 +23,7 @@
 #include "Components/VerticalBoxSlot.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "HAL/PlatformTime.h"
 #include "TimerManager.h"
 
 namespace
@@ -65,7 +67,8 @@ namespace
         return true;
     }
 
-    static constexpr int32 RI_PropertyDeferredBatchSize = 6;
+    static constexpr int32 RI_PropertyDeferredBatchSize = 2;
+    static constexpr int32 RI_PropertyDeferredCategoryHeaderBatchSize = 3;
 }
 
 void UInspectorPropertyCategoryButtonProxy::Initialize(UInspectorPropertiesSectionWidget* InOwner, const FString& InCategoryStateKey, bool bInAllowToggle)
@@ -114,6 +117,8 @@ void UInspectorPropertiesSectionWidget::CancelDeferredRefresh()
     ++DeferredRefreshSerial;
     bDeferredRefreshPending = false;
     DeferredRefreshMode = ERIDeferredPropertyRefreshMode::None;
+    DeferredRefreshModeAfterTransform = ERIDeferredPropertyRefreshMode::None;
+    DeferredActorTransformItems.Reset();
     DeferredFlatItems.Reset();
     DeferredCategories.Reset();
     DeferredFlatIndex = 0;
@@ -276,7 +281,14 @@ void UInspectorPropertiesSectionWidget::NativeConstruct()
     }
 
     RIInspectorTouchScroll::Configure(ScrollBox);
-    RefreshFromSubsystem();
+    if (bAutoRefreshOnConstruct)
+    {
+        RefreshFromSubsystem();
+    }
+    else
+    {
+        RefreshHeaderFromSubsystem();
+    }
 }
 
 void UInspectorPropertiesSectionWidget::BuildWidgetTree()
@@ -772,6 +784,7 @@ void UInspectorPropertiesSectionWidget::ScheduleDeferredRefreshTick()
 
 void UInspectorPropertiesSectionWidget::ProcessDeferredRefresh(int32 Serial)
 {
+    const double TickStartSeconds = FPlatformTime::Seconds();
     if (Serial != DeferredRefreshSerial || !bDeferredRefreshPending || !EntriesBox || !WidgetTree)
     {
         return;
@@ -790,6 +803,7 @@ void UInspectorPropertiesSectionWidget::ProcessDeferredRefresh(int32 Serial)
 
     if (DeferredRefreshMode == ERIDeferredPropertyRefreshMode::Collect)
     {
+        const double CollectStartSeconds = FPlatformTime::Seconds();
         ResetEntryState();
         RefreshHeaderFromSubsystem();
 
@@ -798,11 +812,12 @@ void UInspectorPropertiesSectionWidget::ProcessDeferredRefresh(int32 Serial)
 
         TArray<UInspectorPropertyItem*> ActorTransformItems;
         InspectorSubsystem->GetActorWorldTransformPropertyItems(ActorTransformItems);
-        if (UWidget* TransformBlock = CreateActorTransformBlock(ActorTransformItems))
+        DeferredActorTransformItems.Reset();
+        for (UInspectorPropertyItem* TransformItem : ActorTransformItems)
         {
-            if (UVerticalBoxSlot* TransformSlot = EntriesBox->AddChildToVerticalBox(TransformBlock))
+            if (TransformItem)
             {
-                TransformSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 8.f));
+                DeferredActorTransformItems.Add(TransformItem);
             }
         }
 
@@ -811,7 +826,7 @@ void UInspectorPropertiesSectionWidget::ProcessDeferredRefresh(int32 Serial)
         if (RI_CanCategorizePropertyItems(Items))
         {
             PrepareDeferredCategorizedPropertyRows(Items, bSearchMode);
-            DeferredRefreshMode = ERIDeferredPropertyRefreshMode::Categories;
+            DeferredRefreshMode = ERIDeferredPropertyRefreshMode::CategoryHeaders;
         }
         else
         {
@@ -826,14 +841,68 @@ void UInspectorPropertiesSectionWidget::ProcessDeferredRefresh(int32 Serial)
             DeferredFlatIndex = 0;
             DeferredRefreshMode = ERIDeferredPropertyRefreshMode::Flat;
         }
+
+        if (DeferredActorTransformItems.Num() > 0)
+        {
+            DeferredRefreshModeAfterTransform = DeferredRefreshMode;
+            DeferredRefreshMode = ERIDeferredPropertyRefreshMode::Transform;
+        }
+        UE_LOG(
+            LogRuntimeInspector,
+            Log,
+            TEXT("[RI][Perf] HydrationCollectMs %.2f | Section=Attributes Items=%d Mode=%d"),
+            (FPlatformTime::Seconds() - CollectStartSeconds) * 1000.0,
+            LastVisiblePropertyRowCount + LastVisibleMaterialRowCount,
+            static_cast<int32>(DeferredRefreshMode));
+        ScheduleDeferredRefreshTick();
+        return;
     }
 
-    const bool bComplete = DeferredRefreshMode == ERIDeferredPropertyRefreshMode::Categories
-        ? BuildNextDeferredPropertyBatch()
-        : BuildNextDeferredFlatBatch();
+    bool bComplete = false;
+    if (DeferredRefreshMode == ERIDeferredPropertyRefreshMode::Transform)
+    {
+        bComplete = BuildDeferredActorTransformBlock();
+    }
+    else if (DeferredRefreshMode == ERIDeferredPropertyRefreshMode::CategoryHeaders)
+    {
+        bComplete = BuildNextDeferredCategoryHeaderBatch();
+    }
+    else
+    {
+        bComplete = DeferredRefreshMode == ERIDeferredPropertyRefreshMode::Categories
+            ? BuildNextDeferredPropertyBatch()
+            : BuildNextDeferredFlatBatch();
+    }
+
+    UE_LOG(
+        LogRuntimeInspector,
+        Log,
+        TEXT("[RI][Perf] HydrationRowsMs %.2f | Section=Attributes Complete=%d Rows=%d Pending=%d"),
+        (FPlatformTime::Seconds() - TickStartSeconds) * 1000.0,
+        bComplete ? 1 : 0,
+        LastVisiblePropertyRowCount + LastVisibleMaterialRowCount,
+        bDeferredRefreshPending ? 1 : 0);
 
     if (bComplete)
     {
+        if (DeferredRefreshMode == ERIDeferredPropertyRefreshMode::Transform)
+        {
+            DeferredRefreshMode = DeferredRefreshModeAfterTransform == ERIDeferredPropertyRefreshMode::None
+                ? ERIDeferredPropertyRefreshMode::Flat
+                : DeferredRefreshModeAfterTransform;
+            DeferredRefreshModeAfterTransform = ERIDeferredPropertyRefreshMode::None;
+            ScheduleDeferredRefreshTick();
+            return;
+        }
+
+        if (DeferredRefreshMode == ERIDeferredPropertyRefreshMode::CategoryHeaders)
+        {
+            DeferredCategoryIndex = 0;
+            DeferredRefreshMode = ERIDeferredPropertyRefreshMode::Categories;
+            ScheduleDeferredRefreshTick();
+            return;
+        }
+
         AddDeferredEmptyStateIfNeeded();
         FinishDeferredRefresh();
         return;
@@ -893,8 +962,38 @@ void UInspectorPropertiesSectionWidget::PrepareDeferredCategorizedPropertyRows(c
     LastCategorySectionCount = DeferredCategories.Num();
     DeferredCategoryIndex = 0;
 
-    for (const FDeferredPropertyCategoryViewData& CategoryData : DeferredCategories)
+}
+
+bool UInspectorPropertiesSectionWidget::BuildDeferredActorTransformBlock()
+{
+    TArray<UInspectorPropertyItem*> ActorTransformItems;
+    ActorTransformItems.Reserve(DeferredActorTransformItems.Num());
+    for (const TWeakObjectPtr<UInspectorPropertyItem>& TransformItem : DeferredActorTransformItems)
     {
+        if (UInspectorPropertyItem* Item = TransformItem.Get())
+        {
+            ActorTransformItems.Add(Item);
+        }
+    }
+
+    DeferredActorTransformItems.Reset();
+    if (UWidget* TransformBlock = CreateActorTransformBlock(ActorTransformItems))
+    {
+        if (UVerticalBoxSlot* TransformSlot = EntriesBox->AddChildToVerticalBox(TransformBlock))
+        {
+            TransformSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 8.f));
+        }
+    }
+    return true;
+}
+
+bool UInspectorPropertiesSectionWidget::BuildNextDeferredCategoryHeaderBatch()
+{
+    int32 BuiltCount = 0;
+    while (DeferredCategoryIndex < DeferredCategories.Num() && BuiltCount < RI_PropertyDeferredCategoryHeaderBatchSize)
+    {
+        const FDeferredPropertyCategoryViewData& CategoryData = DeferredCategories[DeferredCategoryIndex];
+
         FPropertyCategoryViewData HeaderData;
         HeaderData.PrimaryCategory = CategoryData.PrimaryCategory;
         HeaderData.CategoryStateKey = CategoryData.CategoryStateKey;
@@ -927,7 +1026,11 @@ void UInspectorPropertiesSectionWidget::PrepareDeferredCategorizedPropertyRows(c
         }
 
         SetCategoryExpandedVisual(CategoryData.CategoryStateKey, CategoryData.bExpanded);
+        ++DeferredCategoryIndex;
+        ++BuiltCount;
     }
+
+    return DeferredCategoryIndex >= DeferredCategories.Num();
 }
 
 bool UInspectorPropertiesSectionWidget::BuildNextDeferredPropertyBatch()
@@ -1038,6 +1141,8 @@ void UInspectorPropertiesSectionWidget::FinishDeferredRefresh()
 {
     bDeferredRefreshPending = false;
     DeferredRefreshMode = ERIDeferredPropertyRefreshMode::None;
+    DeferredRefreshModeAfterTransform = ERIDeferredPropertyRefreshMode::None;
+    DeferredActorTransformItems.Reset();
     DeferredFlatItems.Reset();
     DeferredCategories.Reset();
     DeferredFlatIndex = 0;

@@ -22,6 +22,7 @@ public:
     UInspectorFunctionsSectionWidget(const FObjectInitializer& ObjectInitializer);
 
     void SetInspectorSubsystem(UInspectorWorldSubsystem* InSubsystem);
+    void SetAutoRefreshOnConstruct(bool bInAutoRefreshOnConstruct) { bAutoRefreshOnConstruct = bInAutoRefreshOnConstruct; }
     void RefreshFromSubsystem();
     void RefreshFromSubsystemDeferred();
     void CancelDeferredRefresh();
@@ -68,6 +69,7 @@ private:
     UScrollBox* FunctionsScrollBox = nullptr;
 
     int32 DeferredRefreshSerial = 0;
+    bool bAutoRefreshOnConstruct = true;
     bool bDeferredRefreshPending = false;
     bool bDeferredRefreshCollectPending = false;
     TArray<TWeakObjectPtr<UInspectorFunctionItem>> DeferredFunctionItems;

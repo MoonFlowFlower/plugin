@@ -109,6 +109,11 @@ FRIInspectorViewModel URuntimeInspectorController::BuildEmptyViewModel() const
 
 FRIInspectorViewModel URuntimeInspectorController::GetCurrentViewModel() const
 {
+    return GetCurrentViewModel(ERIViewModelHydrationMode::Full);
+}
+
+FRIInspectorViewModel URuntimeInspectorController::GetCurrentViewModel(ERIViewModelHydrationMode HydrationMode) const
+{
     UInspectorWorldSubsystem* InspectorSubsystem = Subsystem.Get();
     if (!InspectorSubsystem)
     {
@@ -195,70 +200,76 @@ FRIInspectorViewModel URuntimeInspectorController::GetCurrentViewModel() const
         }
     }
 
-    TArray<UInspectorFunctionItem*> FunctionItems;
-    InspectorSubsystem->GetFunctionItemsForSelected(EffectiveSearch, FunctionItems);
-    for (UInspectorFunctionItem* Item : FunctionItems)
+    if (HydrationMode == ERIViewModelHydrationMode::Full)
     {
-        if (!Item || !Item->IsValidItem())
+        TArray<UInspectorFunctionItem*> FunctionItems;
+        InspectorSubsystem->GetFunctionItemsForSelected(EffectiveSearch, FunctionItems);
+        for (UInspectorFunctionItem* Item : FunctionItems)
         {
-            continue;
-        }
+            if (!Item || !Item->IsValidItem())
+            {
+                continue;
+            }
 
-        FRIFunctionViewModel FunctionViewModel;
-        FunctionViewModel.FunctionName = Item->GetFunctionFName();
-        FunctionViewModel.DisplayName = RI_TextFromString(Item->GetDisplayName().IsEmpty() ? Item->GetFunctionName() : Item->GetDisplayName());
-        FunctionViewModel.Description = RI_TextFromString(Item->GetSignatureText().IsEmpty() ? Item->GetTooltipText() : Item->GetSignatureText());
+            FRIFunctionViewModel FunctionViewModel;
+            FunctionViewModel.FunctionName = Item->GetFunctionFName();
+            FunctionViewModel.DisplayName = RI_TextFromString(Item->GetDisplayName().IsEmpty() ? Item->GetFunctionName() : Item->GetDisplayName());
+            FunctionViewModel.Description = RI_TextFromString(Item->GetSignatureText().IsEmpty() ? Item->GetTooltipText() : Item->GetSignatureText());
 
-        bool bAllParamsSupported = true;
-        for (const FRIFunctionParameterSpec& Spec : Item->GetParameterSpecs())
-        {
-            FunctionViewModel.ParameterSummaries.Add(FString::Printf(TEXT("%s: %s"), *Spec.DisplayName, *Spec.TypeLabel));
-            bAllParamsSupported = bAllParamsSupported && Spec.bIsSupported;
-        }
+            bool bAllParamsSupported = true;
+            for (const FRIFunctionParameterSpec& Spec : Item->GetParameterSpecs())
+            {
+                FunctionViewModel.ParameterSummaries.Add(FString::Printf(TEXT("%s: %s"), *Spec.DisplayName, *Spec.TypeLabel));
+                bAllParamsSupported = bAllParamsSupported && Spec.bIsSupported;
+            }
 
-        FunctionViewModel.bCallable = bAllParamsSupported;
-        FunctionViewModel.bDeprecated = Item->GetFunctionName().Contains(TEXT("Deprecated"), ESearchCase::IgnoreCase);
-        FunctionViewModel.RiskLevel = FunctionViewModel.bDeprecated ? ERIFunctionRiskLevel::Medium : ERIFunctionRiskLevel::Low;
-        ViewModel.Functions.Add(FunctionViewModel);
+            FunctionViewModel.bCallable = bAllParamsSupported;
+            FunctionViewModel.bDeprecated = Item->GetFunctionName().Contains(TEXT("Deprecated"), ESearchCase::IgnoreCase);
+            FunctionViewModel.RiskLevel = FunctionViewModel.bDeprecated ? ERIFunctionRiskLevel::Medium : ERIFunctionRiskLevel::Low;
+            ViewModel.Functions.Add(FunctionViewModel);
 
-        if (ViewModel.Functions.Num() >= 64)
-        {
-            break;
+            if (ViewModel.Functions.Num() >= 64)
+            {
+                break;
+            }
         }
     }
 
-    TArray<UObject*> PinnedItems;
-    InspectorSubsystem->GetPinnedItemsForSelected(EffectiveSearch, PinnedItems);
-    for (UObject* PinnedItem : PinnedItems)
+    if (HydrationMode != ERIViewModelHydrationMode::ShellOnly)
     {
-        FRIFavoriteViewModel FavoriteViewModel;
-        FavoriteViewModel.SourceItem = PinnedItem;
-        if (UInspectorPropertyItem* PropertyItem = Cast<UInspectorPropertyItem>(PinnedItem))
+        TArray<UObject*> PinnedItems;
+        InspectorSubsystem->GetPinnedItemsForSelected(EffectiveSearch, PinnedItems);
+        for (UObject* PinnedItem : PinnedItems)
         {
-            FavoriteViewModel.DisplayName = RI_TextFromString(PropertyItem->GetPropertyName());
-            FavoriteViewModel.OwnerLabel = RI_TextFromString(PropertyItem->OwnerPrefix);
-            FavoriteViewModel.ValueText = RI_TextFromString(PropertyItem->GetValueText());
-        }
-        else if (UInspectorMaterialParamItem* MaterialItem = Cast<UInspectorMaterialParamItem>(PinnedItem))
-        {
-            FavoriteViewModel.DisplayName = RI_TextFromString(MaterialItem->GetPropertyName());
-            FavoriteViewModel.OwnerLabel = FText::FromString(TEXT("Material"));
-            FavoriteViewModel.ValueText = RI_TextFromString(MaterialItem->GetValueText());
-        }
-        else if (PinnedItem)
-        {
-            FavoriteViewModel.DisplayName = RI_TextFromString(PinnedItem->GetName());
-            FavoriteViewModel.OwnerLabel = RI_TextFromString(GetNameSafe(PinnedItem->GetClass()));
-        }
+            FRIFavoriteViewModel FavoriteViewModel;
+            FavoriteViewModel.SourceItem = PinnedItem;
+            if (UInspectorPropertyItem* PropertyItem = Cast<UInspectorPropertyItem>(PinnedItem))
+            {
+                FavoriteViewModel.DisplayName = RI_TextFromString(PropertyItem->GetPropertyName());
+                FavoriteViewModel.OwnerLabel = RI_TextFromString(PropertyItem->OwnerPrefix);
+                FavoriteViewModel.ValueText = RI_TextFromString(PropertyItem->GetValueText());
+            }
+            else if (UInspectorMaterialParamItem* MaterialItem = Cast<UInspectorMaterialParamItem>(PinnedItem))
+            {
+                FavoriteViewModel.DisplayName = RI_TextFromString(MaterialItem->GetPropertyName());
+                FavoriteViewModel.OwnerLabel = FText::FromString(TEXT("Material"));
+                FavoriteViewModel.ValueText = RI_TextFromString(MaterialItem->GetValueText());
+            }
+            else if (PinnedItem)
+            {
+                FavoriteViewModel.DisplayName = RI_TextFromString(PinnedItem->GetName());
+                FavoriteViewModel.OwnerLabel = RI_TextFromString(GetNameSafe(PinnedItem->GetClass()));
+            }
 
-        if (!FavoriteViewModel.DisplayName.IsEmpty())
-        {
-            ViewModel.Favorites.Add(FavoriteViewModel);
-        }
+            if (!FavoriteViewModel.DisplayName.IsEmpty())
+            {
+                ViewModel.Favorites.Add(FavoriteViewModel);
+            }
 
-        if (ViewModel.Favorites.Num() >= 16)
-        {
-            break;
+            if (ViewModel.Favorites.Num() >= 16)
+            {
+                break;
+            }
         }
     }
 

@@ -29,8 +29,10 @@
 #include "Components/VerticalBoxSlot.h"
 #include "Components/WidgetSwitcher.h"
 #include "Components/WidgetSwitcherSlot.h"
+#include "Engine/World.h"
 #include "HAL/PlatformTime.h"
 #include "InspectorWorldSubsystem.h"
+#include "TimerManager.h"
 
 namespace
 {
@@ -528,6 +530,7 @@ void UInspectorDockRootWidget::BuildChangesTab(UScrollBox* OutScrollBox)
 
 void UInspectorDockRootWidget::BuildHostedPageTabs()
 {
+    const double StartSeconds = FPlatformTime::Seconds();
     if (!TabSwitcher || !Controller || !WidgetTree)
     {
         return;
@@ -584,6 +587,7 @@ void UInspectorDockRootWidget::BuildHostedPageTabs()
     }
 
     InspectorSubsystem->RegisterDockHostedPages(FilePageWidget.Get(), SettingsPageWidget.Get(), ToolsPageWidget.Get());
+    LastHostedCreateMs = (FPlatformTime::Seconds() - StartSeconds) * 1000.0;
 }
 
 void UInspectorDockRootWidget::BuildHostedActorSections(UInspectorWorldSubsystem* InspectorSubsystem)
@@ -606,6 +610,7 @@ void UInspectorDockRootWidget::BuildHostedActorSections(UInspectorWorldSubsystem
 
         if (ActorAttributesWidget)
         {
+            ActorAttributesWidget->SetAutoRefreshOnConstruct(false);
             ActorAttributesWidget->SetInspectorSubsystem(InspectorSubsystem);
             ActorAttributesWidget->TakeWidget();
             RI_AddVertical(ActorAttributesHostBox, ActorAttributesWidget, FMargin(0.f), ESlateSizeRule::Fill);
@@ -625,6 +630,7 @@ void UInspectorDockRootWidget::BuildHostedActorSections(UInspectorWorldSubsystem
 
         if (ActorFunctionsWidget)
         {
+            ActorFunctionsWidget->SetAutoRefreshOnConstruct(false);
             ActorFunctionsWidget->SetInspectorSubsystem(InspectorSubsystem);
             ActorFunctionsWidget->TakeWidget();
             RI_AddVertical(ActorFunctionsHostBox, ActorFunctionsWidget, FMargin(0.f), ESlateSizeRule::Fill);
@@ -702,13 +708,20 @@ void UInspectorDockRootWidget::RefreshFromController()
 
 void UInspectorDockRootWidget::RefreshFromController(EInspectorRefreshReason Reason)
 {
+    RefreshFromController(Reason, ERIViewModelHydrationMode::DockHydrated);
+}
+
+void UInspectorDockRootWidget::RefreshFromController(EInspectorRefreshReason Reason, ERIViewModelHydrationMode HydrationMode)
+{
     BuildWidgetTreeIfNeeded();
     if (!Controller)
     {
         return;
     }
 
-    CurrentViewModel = Controller->GetCurrentViewModel();
+    const double ViewModelStartSeconds = FPlatformTime::Seconds();
+    CurrentViewModel = Controller->GetCurrentViewModel(HydrationMode);
+    LastViewModelRefreshMs = (FPlatformTime::Seconds() - ViewModelStartSeconds) * 1000.0;
     RefreshLayoutForViewport();
     BuildHostedPageTabs();
     RefreshActorContext(CurrentViewModel);
@@ -740,6 +753,72 @@ void UInspectorDockRootWidget::RefreshFromController(EInspectorRefreshReason Rea
     {
         ToolsPageWidget->RefreshFromSubsystem();
     }
+
+    if (HydrationMode == ERIViewModelHydrationMode::ShellOnly)
+    {
+        ScheduleOpenHydrationRefresh();
+    }
+
+    UE_LOG(
+        LogRuntimeInspector,
+        Log,
+        TEXT("[RI][Perf] RefreshDockRootViewModel %.2f ms | Mode=%d HostedCreate=%.2f OpenHydrationPending=%d"),
+        LastViewModelRefreshMs,
+        static_cast<int32>(HydrationMode),
+        LastHostedCreateMs,
+        bOpenHydrationPending ? 1 : 0);
+}
+
+void UInspectorDockRootWidget::ScheduleOpenHydrationRefresh()
+{
+    ++OpenHydrationSerial;
+    bOpenHydrationPending = true;
+
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        ProcessOpenHydrationRefresh(OpenHydrationSerial);
+        return;
+    }
+
+    FTimerDelegate Delegate;
+    Delegate.BindUObject(this, &UInspectorDockRootWidget::ProcessOpenHydrationRefresh, OpenHydrationSerial);
+    World->GetTimerManager().SetTimerForNextTick(Delegate);
+}
+
+void UInspectorDockRootWidget::CancelOpenHydrationRefresh()
+{
+    ++OpenHydrationSerial;
+    bOpenHydrationPending = false;
+}
+
+void UInspectorDockRootWidget::ProcessOpenHydrationRefresh(int32 Serial)
+{
+    if (Serial != OpenHydrationSerial || !bOpenHydrationPending || !Controller)
+    {
+        return;
+    }
+
+    bOpenHydrationPending = false;
+    const double StartSeconds = FPlatformTime::Seconds();
+    CurrentViewModel = Controller->GetCurrentViewModel(ERIViewModelHydrationMode::DockHydrated);
+    LastOpenHydrationViewModelMs = (FPlatformTime::Seconds() - StartSeconds) * 1000.0;
+    LastViewModelRefreshMs = LastOpenHydrationViewModelMs;
+
+    RefreshLayoutForViewport();
+    RefreshActorContext(CurrentViewModel);
+    RefreshChangesTab(CurrentViewModel);
+    RefreshTabPresentation(CurrentViewModel);
+    RefreshActionBar(CurrentViewModel);
+
+    UE_LOG(
+        LogRuntimeInspector,
+        Log,
+        TEXT("[RI][Perf] OpenHydrationViewModel %.2f ms | Favorites=%d Functions=%d Pending=%d"),
+        LastOpenHydrationViewModelMs,
+        CurrentViewModel.Favorites.Num(),
+        CurrentViewModel.Functions.Num(),
+        bOpenHydrationPending ? 1 : 0);
 }
 
 void UInspectorDockRootWidget::RefreshLayoutForViewport()
@@ -1323,7 +1402,7 @@ FString UInspectorDockRootWidget::GetDockLayoutDebugSummary() const
     const int32 AttributeRows = ActorAttributesWidget ? ActorAttributesWidget->GetEntryWidgetCountForAutomation() : INDEX_NONE;
     const int32 HostedFunctionRows = ActorFunctionsWidget ? ActorFunctionsWidget->GetEntryWidgetCountForAutomation() : INDEX_NONE;
     return FString::Printf(
-        TEXT("DockRoot=1 LeftPanel=%s RightPanel=1 SideWidth=%.0f CenterWidth=%.0f LogicalWidth=%.0f ExpandedAt1080=%d ExpandedAt1390=%d CompactAt1000=%d CompactTextHidden=%d CenterPassThrough=1 CenterSelectionPill=0 FavoritesFrame=%d FavoritesScroll=%d FunctionsFrame=%d ActionBar=%d PatchRows=%d FunctionRows=%d AttributeRows=%d AttributesTransform=%d AttributesPending=%d FunctionsPending=%d LastComponentFocusIntentMs=%.2f ActiveTab=%d"),
+        TEXT("DockRoot=1 LeftPanel=%s RightPanel=1 SideWidth=%.0f CenterWidth=%.0f LogicalWidth=%.0f ExpandedAt1080=%d ExpandedAt1390=%d CompactAt1000=%d CompactTextHidden=%d CenterPassThrough=1 CenterSelectionPill=0 FavoritesFrame=%d FavoritesScroll=%d FunctionsFrame=%d ActionBar=%d PatchRows=%d FunctionRows=%d AttributeRows=%d AttributesTransform=%d AttributesPending=%d FunctionsPending=%d OpenHydrationPending=%d ViewModelMs=%.2f HostedCreateMs=%.2f LastComponentFocusIntentMs=%.2f ActiveTab=%d"),
         bLeftPanelCompact ? TEXT("Compact") : TEXT("Expanded"),
         RI_DockSidePanelWidth,
         CenterWidth,
@@ -1342,6 +1421,9 @@ FString UInspectorDockRootWidget::GetDockLayoutDebugSummary() const
         ActorAttributesWidget && ActorAttributesWidget->HasActorTransformBlockForAutomation() ? 1 : 0,
         ActorAttributesWidget && ActorAttributesWidget->IsDeferredRefreshPendingForAutomation() ? 1 : 0,
         ActorFunctionsWidget && ActorFunctionsWidget->IsDeferredRefreshPendingForAutomation() ? 1 : 0,
+        bOpenHydrationPending ? 1 : 0,
+        LastViewModelRefreshMs,
+        LastHostedCreateMs,
         LastComponentFocusIntentMs,
         static_cast<int32>(CurrentViewModel.ActiveTab));
 }
