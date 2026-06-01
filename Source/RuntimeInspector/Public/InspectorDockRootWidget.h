@@ -22,6 +22,7 @@ class USizeBox;
 class UTextBlock;
 class URuntimeInspectorController;
 class UVerticalBox;
+class UWidget;
 class UWidgetSwitcher;
 enum class EInspectorRefreshReason : uint8;
 
@@ -200,6 +201,10 @@ private:
     UPROPERTY(Transient)
     TObjectPtr<UVerticalBox> ActorFunctionsHostBox;
     UPROPERTY(Transient)
+    TObjectPtr<UVerticalBox> SettingsHostBox;
+    UPROPERTY(Transient)
+    TObjectPtr<UVerticalBox> ToolsHostBox;
+    UPROPERTY(Transient)
     TObjectPtr<USizeBox> ActorAttributesFrameSizeBox;
     UPROPERTY(Transient)
     TObjectPtr<USizeBox> ActorFunctionsFrameSizeBox;
@@ -219,6 +224,10 @@ private:
     TObjectPtr<UHorizontalBox> TabButtonBox;
     UPROPERTY(Transient)
     TObjectPtr<UVerticalBox> ActionBarBox;
+    UPROPERTY(Transient)
+    TObjectPtr<UWidget> ComponentTitleWidget;
+    UPROPERTY(Transient)
+    TObjectPtr<UWidget> FavoritesTitleWidget;
 
     UPROPERTY(Transient)
     TObjectPtr<UTextBlock> ActorNameText;

@@ -38,7 +38,7 @@ namespace
     static constexpr float RI_DockLeftCompactWidth = 58.0f;
     static constexpr float RI_DockOuterPadding = 0.0f;
     static constexpr float RI_DockPanelGap = 16.0f;
-    static constexpr float RI_DockNarrowCollapseThreshold = 1500.0f;
+    static constexpr float RI_DockMinimumExpandedCenterWidth = 520.0f;
     static constexpr float RI_DockFavoritesFrameHeight = 190.0f;
     static constexpr float RI_DockFunctionsFrameHeight = 220.0f;
 
@@ -118,6 +118,12 @@ namespace
     {
         const float LeftWidth = bLeftCompact ? RI_DockLeftCompactWidth : RI_DockSidePanelWidth;
         return ViewportWidth - LeftWidth - RI_DockSidePanelWidth - (RI_DockPanelGap * 2.0f);
+    }
+
+    static bool RI_ShouldUseCompactLeftPanel(float LogicalViewportWidth)
+    {
+        return LogicalViewportWidth > 1.0f
+            && RI_GetDockCenterWidth(LogicalViewportWidth, false) < RI_DockMinimumExpandedCenterWidth;
     }
 
     static USizeBox* RI_MakeIconBox(UWidgetTree* WidgetTree, const FName& Name, const TCHAR* IconAssetName, float IconSize, const FLinearColor& Tint);
@@ -231,15 +237,12 @@ void UInspectorDockRootWidget::NativeConstruct()
 {
     Super::NativeConstruct();
     BuildWidgetTreeIfNeeded();
-    RefreshFromController();
 }
 
 void UInspectorDockRootWidget::SetController(URuntimeInspectorController* InController)
 {
     Controller = InController;
     BuildWidgetTreeIfNeeded();
-    BuildHostedPageTabs();
-    RefreshFromController();
 }
 
 void UInspectorDockRootWidget::BuildWidgetTreeIfNeeded()
@@ -362,7 +365,8 @@ void UInspectorDockRootWidget::BuildLeftPanel(UVerticalBox* OutPanel)
     SearchSurface->SetContent(SearchRow);
     RI_AddVertical(OutPanel, SearchSurface, FMargin(0.f, 0.f, 0.f, RICompactUI::GetSectionGap()));
 
-    RI_AddVertical(OutPanel, RI_MakeIconSectionTitle(WidgetTree, TEXT("shape:components"), TEXT("Components"), RICompactUI::ERISectionVisualStyle::Standard, TEXT("RI_ComponentTreeTitle")));
+    ComponentTitleWidget = RI_MakeIconSectionTitle(WidgetTree, TEXT("shape:components"), TEXT("Components"), RICompactUI::ERISectionVisualStyle::Standard, TEXT("RI_ComponentTreeTitle"));
+    RI_AddVertical(OutPanel, ComponentTitleWidget);
     UBorder* ComponentCard = RI_MakeSectionCard(WidgetTree, TEXT("RI_ComponentTreeCard"));
     UScrollBox* ComponentScrollBox = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("RI_ComponentTreeScroll"));
     ComponentListBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ComponentTree"));
@@ -376,7 +380,8 @@ void UInspectorDockRootWidget::BuildLeftPanel(UVerticalBox* OutPanel)
     UVerticalBox* FavoritesFrameBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_FavoritesFrame"));
     FavoritesFrameSizeBox->SetContent(FavoritesFrameBox);
 
-    RI_AddVertical(FavoritesFrameBox, RI_MakeIconSectionTitle(WidgetTree, TEXT("star_white_outline_64"), TEXT("Favorites"), RICompactUI::ERISectionVisualStyle::Standard, TEXT("RI_FavoritesTitle")));
+    FavoritesTitleWidget = RI_MakeIconSectionTitle(WidgetTree, TEXT("star_white_outline_64"), TEXT("Favorites"), RICompactUI::ERISectionVisualStyle::Standard, TEXT("RI_FavoritesTitle"));
+    RI_AddVertical(FavoritesFrameBox, FavoritesTitleWidget);
     UBorder* FavoritesCard = RI_MakeSectionCard(WidgetTree, TEXT("RI_FavoritesCard"));
     FavoritesCard->SetClipping(EWidgetClipping::ClipToBounds);
     FavoritesScrollBox = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("RI_FavoritesScroll"));
@@ -433,10 +438,14 @@ void UInspectorDockRootWidget::BuildRightInspector(UVerticalBox* OutPanel)
     TabSwitcher = WidgetTree->ConstructWidget<UWidgetSwitcher>(UWidgetSwitcher::StaticClass(), TEXT("RI_TabContent"));
     ActorTabPageBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ActorTabPage"));
     ChangesTabScrollBox = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("RI_ChangesTabScroll"));
+    SettingsHostBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_SettingsTabHost"));
+    ToolsHostBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ToolsTabHost"));
     BuildActorTab(ActorTabPageBox);
     BuildChangesTab(ChangesTabScrollBox);
     TabSwitcher->AddChild(ActorTabPageBox);
     TabSwitcher->AddChild(ChangesTabScrollBox);
+    TabSwitcher->AddChild(SettingsHostBox);
+    TabSwitcher->AddChild(ToolsHostBox);
     RI_AddVertical(OutPanel, TabSwitcher, FMargin(0.f, 0.f, 0.f, RICompactUI::GetSectionGap()), ESlateSizeRule::Fill);
 
     ActionBarBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ActionBar"));
@@ -530,9 +539,12 @@ void UInspectorDockRootWidget::BuildHostedPageTabs()
         return;
     }
 
-    BuildHostedActorSections(InspectorSubsystem);
+    if (CurrentViewModel.ActiveTab == ERIInspectorTab::Actor)
+    {
+        BuildHostedActorSections(InspectorSubsystem);
+    }
 
-    if (!FilePageWidget)
+    if (CurrentViewModel.ActiveTab == ERIInspectorTab::Changes && !FilePageWidget)
     {
         FilePageWidget = CreateWidget<UInspectorFilePageWidget>(GetWorld(), UInspectorFilePageWidget::StaticClass());
         if (FilePageWidget)
@@ -545,25 +557,33 @@ void UInspectorDockRootWidget::BuildHostedPageTabs()
         }
     }
 
-    if (!SettingsPageWidget)
+    if (CurrentViewModel.ActiveTab == ERIInspectorTab::Settings && !SettingsPageWidget)
     {
         SettingsPageWidget = CreateWidget<UInspectorSettingsPageWidget>(GetWorld(), UInspectorSettingsPageWidget::StaticClass());
         if (SettingsPageWidget)
         {
             SettingsPageWidget->SetInspectorSubsystem(InspectorSubsystem);
-            TabSwitcher->AddChild(SettingsPageWidget);
+            if (SettingsHostBox)
+            {
+                RI_AddVertical(SettingsHostBox, SettingsPageWidget, FMargin(0.f), ESlateSizeRule::Fill);
+            }
         }
     }
 
-    if (!ToolsPageWidget)
+    if (CurrentViewModel.ActiveTab == ERIInspectorTab::Tools && !ToolsPageWidget)
     {
         ToolsPageWidget = CreateWidget<UInspectorTestPageWidget>(GetWorld(), UInspectorTestPageWidget::StaticClass());
         if (ToolsPageWidget)
         {
             ToolsPageWidget->SetInspectorSubsystem(InspectorSubsystem);
-            TabSwitcher->AddChild(ToolsPageWidget);
+            if (ToolsHostBox)
+            {
+                RI_AddVertical(ToolsHostBox, ToolsPageWidget, FMargin(0.f), ESlateSizeRule::Fill);
+            }
         }
     }
+
+    InspectorSubsystem->RegisterDockHostedPages(FilePageWidget.Get(), SettingsPageWidget.Get(), ToolsPageWidget.Get());
 }
 
 void UInspectorDockRootWidget::BuildHostedActorSections(UInspectorWorldSubsystem* InspectorSubsystem)
@@ -683,7 +703,6 @@ void UInspectorDockRootWidget::RefreshFromController()
 void UInspectorDockRootWidget::RefreshFromController(EInspectorRefreshReason Reason)
 {
     BuildWidgetTreeIfNeeded();
-    BuildHostedPageTabs();
     if (!Controller)
     {
         return;
@@ -691,6 +710,7 @@ void UInspectorDockRootWidget::RefreshFromController(EInspectorRefreshReason Rea
 
     CurrentViewModel = Controller->GetCurrentViewModel();
     RefreshLayoutForViewport();
+    BuildHostedPageTabs();
     RefreshActorContext(CurrentViewModel);
     RefreshViewportOverlay(CurrentViewModel);
     if (CurrentViewModel.ActiveTab == ERIInspectorTab::Actor)
@@ -724,8 +744,8 @@ void UInspectorDockRootWidget::RefreshFromController(EInspectorRefreshReason Rea
 
 void UInspectorDockRootWidget::RefreshLayoutForViewport()
 {
-    const FVector2D ViewportSize = UWidgetLayoutLibrary::GetViewportSize(this);
-    bLeftPanelCompact = ViewportSize.X > 1.0f && ViewportSize.X < RI_DockNarrowCollapseThreshold;
+    const FVector2D ViewportSize = RI_GetDockLogicalViewportSize(this);
+    bLeftPanelCompact = RI_ShouldUseCompactLeftPanel(ViewportSize.X);
     if (LeftPanelSizeBox)
     {
         LeftPanelSizeBox->SetWidthOverride(bLeftPanelCompact ? RI_DockLeftCompactWidth : RI_DockSidePanelWidth);
@@ -740,11 +760,13 @@ void UInspectorDockRootWidget::RefreshActorContext(const FRIInspectorViewModel& 
 {
     if (ActorNameText)
     {
+        ActorNameText->SetVisibility(bLeftPanelCompact ? ESlateVisibility::Collapsed : ESlateVisibility::HitTestInvisible);
         ActorNameText->SetText(ViewModel.SelectedActor.ActorDisplayName);
         RICompactUI::ApplyTextStyle(ActorNameText, RICompactUI::GetSectionTitleFontSize() + 2, true, RICompactUI::GetStrongTextColor());
     }
     if (ActorClassText)
     {
+        ActorClassText->SetVisibility(bLeftPanelCompact ? ESlateVisibility::Collapsed : ESlateVisibility::HitTestInvisible);
         ActorClassText->SetText(ViewModel.SelectedActor.ActorClassName);
         RICompactUI::ApplyTextStyle(ActorClassText, RICompactUI::GetLabelFontSize(), false, RICompactUI::GetSecondaryTextColor());
     }
@@ -758,11 +780,13 @@ void UInspectorDockRootWidget::RefreshActorContext(const FRIInspectorViewModel& 
     if (StagedBannerText)
     {
         const int32 PatchCount = ViewModel.StagedPatches.Num();
+        StagedBannerText->SetVisibility(bLeftPanelCompact ? ESlateVisibility::Collapsed : ESlateVisibility::HitTestInvisible);
         StagedBannerText->SetText(FText::FromString(PatchCount > 0 ? FString::Printf(TEXT("%d staged changes"), PatchCount) : TEXT("No staged patch")));
         RICompactUI::ApplyTextStyle(StagedBannerText, RICompactUI::GetLabelFontSize(), true, PatchCount > 0 ? RICompactUI::GetWarningTextColor() : RICompactUI::GetMutedTextColor());
     }
     if (SearchTextBox && Controller)
     {
+        SearchTextBox->SetVisibility(bLeftPanelCompact ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
         const FText DesiredSearchText = FText::FromString(Controller->GetSearchText());
         if (!SearchTextBox->GetText().EqualTo(DesiredSearchText))
         {
@@ -770,6 +794,14 @@ void UInspectorDockRootWidget::RefreshActorContext(const FRIInspectorViewModel& 
             SearchTextBox->SetText(DesiredSearchText);
             bSuppressSearchTextChanged = false;
         }
+    }
+    if (ComponentTitleWidget)
+    {
+        ComponentTitleWidget->SetVisibility(bLeftPanelCompact ? ESlateVisibility::Collapsed : ESlateVisibility::HitTestInvisible);
+    }
+    if (FavoritesTitleWidget)
+    {
+        FavoritesTitleWidget->SetVisibility(bLeftPanelCompact ? ESlateVisibility::Collapsed : ESlateVisibility::HitTestInvisible);
     }
 
     ActionProxies.Reset();
@@ -781,7 +813,10 @@ void UInspectorDockRootWidget::RefreshActorContext(const FRIInspectorViewModel& 
         ComponentListBox->ClearChildren();
         if (bLeftPanelCompact)
         {
-            RI_AddVertical(ComponentListBox, RICompactUI::MakeText(WidgetTree, TEXT("..."), RICompactUI::GetLabelFontSize(), true, RICompactUI::GetMutedTextColor()));
+            if (USizeBox* CompactIcon = RI_MakeIconBox(WidgetTree, NAME_None, TEXT("shape:components"), 13.0f, RICompactUI::GetMutedTextColor()))
+            {
+                RI_AddVertical(ComponentListBox, CompactIcon, FMargin(0.f, 2.f, 0.f, 2.f));
+            }
         }
         else if (ViewModel.Components.Num() == 0)
         {
@@ -835,7 +870,10 @@ void UInspectorDockRootWidget::RefreshActorContext(const FRIInspectorViewModel& 
         FavoritesListBox->ClearChildren();
         if (bLeftPanelCompact)
         {
-            RI_AddVertical(FavoritesListBox, RICompactUI::MakeText(WidgetTree, TEXT("*"), RICompactUI::GetLabelFontSize(), true, RICompactUI::GetWarningTextColor()));
+            if (USizeBox* CompactIcon = RI_MakeIconBox(WidgetTree, NAME_None, TEXT("star_white_solid_64"), 13.0f, RICompactUI::GetWarningTextColor()))
+            {
+                RI_AddVertical(FavoritesListBox, CompactIcon, FMargin(0.f, 2.f, 0.f, 2.f));
+            }
         }
         else if (ViewModel.Favorites.Num() == 0)
         {
@@ -1272,13 +1310,28 @@ FString UInspectorDockRootWidget::GetDockLayoutDebugSummary() const
 {
     const FVector2D ViewportSize = RI_GetDockLogicalViewportSize(const_cast<UInspectorDockRootWidget*>(this));
     const float CenterWidth = RI_GetDockCenterWidth(ViewportSize.X, bLeftPanelCompact);
+    const bool bExpandedAtPreviewWidth = !RI_ShouldUseCompactLeftPanel(1080.0f);
+    const bool bExpandedAtReferenceWidth = !RI_ShouldUseCompactLeftPanel(1390.0f);
+    const bool bCompactAtNarrowWidth = RI_ShouldUseCompactLeftPanel(1000.0f);
+    const bool bCompactTextHidden = !bLeftPanelCompact
+        || ((ActorNameText == nullptr || ActorNameText->GetVisibility() == ESlateVisibility::Collapsed)
+            && (ActorClassText == nullptr || ActorClassText->GetVisibility() == ESlateVisibility::Collapsed)
+            && (StagedBannerText == nullptr || StagedBannerText->GetVisibility() == ESlateVisibility::Collapsed)
+            && (SearchTextBox == nullptr || SearchTextBox->GetVisibility() == ESlateVisibility::Collapsed)
+            && (ComponentTitleWidget == nullptr || ComponentTitleWidget->GetVisibility() == ESlateVisibility::Collapsed)
+            && (FavoritesTitleWidget == nullptr || FavoritesTitleWidget->GetVisibility() == ESlateVisibility::Collapsed));
     const int32 AttributeRows = ActorAttributesWidget ? ActorAttributesWidget->GetEntryWidgetCountForAutomation() : INDEX_NONE;
     const int32 HostedFunctionRows = ActorFunctionsWidget ? ActorFunctionsWidget->GetEntryWidgetCountForAutomation() : INDEX_NONE;
     return FString::Printf(
-        TEXT("DockRoot=1 LeftPanel=%s RightPanel=1 SideWidth=%.0f CenterWidth=%.0f CenterPassThrough=1 CenterSelectionPill=0 FavoritesFrame=%d FavoritesScroll=%d FunctionsFrame=%d ActionBar=%d PatchRows=%d FunctionRows=%d AttributeRows=%d AttributesTransform=%d AttributesPending=%d FunctionsPending=%d LastComponentFocusIntentMs=%.2f ActiveTab=%d"),
+        TEXT("DockRoot=1 LeftPanel=%s RightPanel=1 SideWidth=%.0f CenterWidth=%.0f LogicalWidth=%.0f ExpandedAt1080=%d ExpandedAt1390=%d CompactAt1000=%d CompactTextHidden=%d CenterPassThrough=1 CenterSelectionPill=0 FavoritesFrame=%d FavoritesScroll=%d FunctionsFrame=%d ActionBar=%d PatchRows=%d FunctionRows=%d AttributeRows=%d AttributesTransform=%d AttributesPending=%d FunctionsPending=%d LastComponentFocusIntentMs=%.2f ActiveTab=%d"),
         bLeftPanelCompact ? TEXT("Compact") : TEXT("Expanded"),
         RI_DockSidePanelWidth,
         CenterWidth,
+        ViewportSize.X,
+        bExpandedAtPreviewWidth ? 1 : 0,
+        bExpandedAtReferenceWidth ? 1 : 0,
+        bCompactAtNarrowWidth ? 1 : 0,
+        bCompactTextHidden ? 1 : 0,
         FavoritesFrameSizeBox ? 1 : 0,
         FavoritesScrollBox ? 1 : 0,
         ActorFunctionsFrameSizeBox ? 1 : 0,

@@ -4471,13 +4471,47 @@ void UInspectorWorldSubsystem::OpenToPage(ERIVisiblePage InitialPage)
         PushToast(ERIToastType::Warning, GetRIUnlockHint(), 3.0f);
         return;
     }
-    if (bOpen) return;
+    if (bOpen)
+    {
+        EnsureDockRootWidget();
+        if (URuntimeInspectorController* Controller = GetOrCreateRuntimeInspectorController())
+        {
+            switch (InitialPage)
+            {
+            case ERIVisiblePage::Changes:
+                Controller->SetActiveTab(ERIInspectorTab::Changes);
+                break;
+            case ERIVisiblePage::Settings:
+                Controller->SetActiveTab(ERIInspectorTab::Settings);
+                break;
+            case ERIVisiblePage::Tools:
+                Controller->SetActiveTab(ERIInspectorTab::Tools);
+                break;
+            case ERIVisiblePage::Actor:
+            default:
+                Controller->SetActiveTab(ERIInspectorTab::Actor);
+                break;
+            }
+        }
+        if (UInspectorDockRootWidget* RootWidget = DockRootWidget.Get())
+        {
+            if (!RootWidget->IsInViewport())
+            {
+                RootWidget->AddToViewport(9999);
+            }
+            RootWidget->SetVisibility(ESlateVisibility::Visible);
+            RootWidget->RefreshFromController(EInspectorRefreshReason::UIStateChanged);
+        }
+        return;
+    }
     bOpen = true;
     bInspectorOpen = true;
 
     RegisterInputProcessor();
 
+    const double EnsureStartSeconds = FPlatformTime::Seconds();
     EnsureDockRootWidget();
+    const double EnsureMs = (FPlatformTime::Seconds() - EnsureStartSeconds) * 1000.0;
     if (URuntimeInspectorController* Controller = GetOrCreateRuntimeInspectorController())
     {
         switch (InitialPage)
@@ -4497,10 +4531,22 @@ void UInspectorWorldSubsystem::OpenToPage(ERIVisiblePage InitialPage)
             break;
         }
     }
+    int32 OpenRefreshCount = 0;
+    double AddToViewportMs = 0.0;
+    double FirstRefreshMs = 0.0;
     if (UInspectorDockRootWidget* RootWidget = DockRootWidget.Get())
     {
-        RootWidget->AddToViewport(9999);
-        RootWidget->RefreshFromController();
+        const double AddStartSeconds = FPlatformTime::Seconds();
+        if (!RootWidget->IsInViewport())
+        {
+            RootWidget->AddToViewport(9999);
+        }
+        RootWidget->SetVisibility(ESlateVisibility::Visible);
+        AddToViewportMs = (FPlatformTime::Seconds() - AddStartSeconds) * 1000.0;
+        const double RefreshStartSeconds = FPlatformTime::Seconds();
+        RootWidget->RefreshFromController(EInspectorRefreshReason::StructureChanged);
+        FirstRefreshMs = (FPlatformTime::Seconds() - RefreshStartSeconds) * 1000.0;
+        ++OpenRefreshCount;
     }
     bHasCompletedInitialActorPanelRefresh = false;
     CancelDeferredOpenActorRefresh();
@@ -4517,13 +4563,22 @@ void UInspectorWorldSubsystem::OpenToPage(ERIVisiblePage InitialPage)
     UE_LOG(
         LogRuntimeInspector,
         Log,
-        TEXT("[RI][Perf] Open %.2f ms | InitialPage=%d"),
+        TEXT("[RI][Perf] OpenStages Ensure=%.2f ms AddToViewport=%.2f ms FirstRefresh=%.2f ms OpenRefreshCount=%d"),
+        EnsureMs,
+        AddToViewportMs,
+        FirstRefreshMs,
+        OpenRefreshCount);
+    UE_LOG(
+        LogRuntimeInspector,
+        Log,
+        TEXT("[RI][Perf] Open %.2f ms | InitialPage=%d OpenRefreshCount=%d"),
         (FPlatformTime::Seconds() - StartSeconds) * 1000.0,
-        static_cast<int32>(InitialPage));
+        static_cast<int32>(InitialPage),
+        OpenRefreshCount);
     RecordValidationCaptureMetric(
         TEXT("Open"),
         (FPlatformTime::Seconds() - StartSeconds) * 1000.0,
-        FString::Printf(TEXT("InitialPage=%d"), static_cast<int32>(InitialPage)));
+        FString::Printf(TEXT("InitialPage=%d OpenRefreshCount=%d"), static_cast<int32>(InitialPage), OpenRefreshCount));
 #endif
 }
 
@@ -4541,6 +4596,8 @@ void UInspectorWorldSubsystem::Close()
     {
         ExistingDockRoot->RemoveFromParent();
     }
+    DockRootWidgetStrong = nullptr;
+    DockRootWidget.Reset();
     UUserWidget* ExistingPanelWidget = PanelWidget.Get();
     if (ExistingPanelWidget)
     {
@@ -6078,7 +6135,7 @@ bool UInspectorWorldSubsystem::IsDockRootActive() const
 {
 #if RUNTIME_INSPECTOR_ENABLED
     const UInspectorDockRootWidget* RootWidget = DockRootWidget.Get();
-    return RootWidget && RootWidget->IsInViewport();
+    return bOpen && RootWidget && RootWidget->IsInViewport() && RootWidget->GetVisibility() != ESlateVisibility::Collapsed;
 #else
     return false;
 #endif
@@ -13695,6 +13752,10 @@ bool UInspectorWorldSubsystem::ExecuteLegacyToolNativeBridgeAction(FName BridgeI
         bOutPassed = Summary.Contains(TEXT("DockRoot=1"))
             && Summary.Contains(TEXT("RightPanel=1"))
             && Summary.Contains(TEXT("SideWidth=256"))
+            && Summary.Contains(TEXT("ExpandedAt1080=1"))
+            && Summary.Contains(TEXT("ExpandedAt1390=1"))
+            && Summary.Contains(TEXT("CompactAt1000=1"))
+            && Summary.Contains(TEXT("CompactTextHidden=1"))
             && Summary.Contains(TEXT("CenterPassThrough=1"))
             && Summary.Contains(TEXT("CenterSelectionPill=0"))
             && Summary.Contains(TEXT("FavoritesFrame=1"))
