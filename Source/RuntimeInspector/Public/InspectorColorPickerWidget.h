@@ -8,6 +8,7 @@
 class UBorder;
 class UButton;
 class UCanvasPanel;
+class UCanvasPanelSlot;
 class UEditableTextBox;
 class UHorizontalBox;
 class UImage;
@@ -61,6 +62,8 @@ public:
     bool HasHitTestSafeDragLayersForAutomation() const;
     bool HasFixedRadiusBrushesForAutomation() const;
     bool HasCompactLayoutForAutomation() const;
+    bool HasBottomSheetPlacementForAutomation() const;
+    bool DragModalByForAutomation(const FVector2D& Delta);
 
 protected:
     virtual TSharedRef<SWidget> RebuildWidget() override;
@@ -75,7 +78,8 @@ private:
         None,
         SaturationValue,
         Hue,
-        Opacity
+        Opacity,
+        Move
     };
 
     enum class ERIColorPickerInputMode : uint8
@@ -102,7 +106,10 @@ private:
     void BroadcastPreviewIfNeeded();
     bool BeginPointerDragAtScreenPosition(const FVector2D& ScreenPosition);
     bool ApplyDragAtScreenPosition(const FVector2D& ScreenPosition, ERIColorPickerDragRegion Region, bool bBroadcastPreview);
+    bool ApplyModalDragAtScreenPosition(const FVector2D& ScreenPosition);
     bool IsWidgetUnderScreenPosition(const UWidget* Widget, const FVector2D& ScreenPosition) const;
+    UCanvasPanelSlot* GetModalCanvasSlot() const;
+    FVector2D ClampModalPosition(const FVector2D& DesiredPosition) const;
     void ApplyRgbTextValues(bool bBroadcastPreview);
     void ApplyHsvTextValues(bool bBroadcastPreview);
     void ApplyHexTextValue(const FText& InText, bool bBroadcastPreview);
@@ -170,6 +177,9 @@ private:
 
     UPROPERTY(Transient)
     TObjectPtr<UBorder> ModalBorder = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UHorizontalBox> HeaderRow = nullptr;
 
     UPROPERTY(Transient)
     TObjectPtr<UCanvasPanel> SaturationValueCanvas = nullptr;
@@ -279,4 +289,6 @@ private:
     bool bHasBroadcastPreview = false;
     ERIColorPickerDragRegion ActiveDragRegion = ERIColorPickerDragRegion::None;
     ERIColorPickerInputMode InputMode = ERIColorPickerInputMode::RGB;
+    FVector2D ModalDragStartScreenPosition = FVector2D::ZeroVector;
+    FVector2D ModalDragStartSlotPosition = FVector2D::ZeroVector;
 };

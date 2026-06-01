@@ -16598,6 +16598,8 @@ bool UInspectorWorldSubsystem::RunColorPickerUIContractSelfTest(FString& OutRepo
     const bool bContract = PickerWidget->HasNativeColorPickerContractForAutomation();
     const bool bFixedRadius = PickerWidget->HasFixedRadiusBrushesForAutomation();
     const bool bCompactLayout = PickerWidget->HasCompactLayoutForAutomation();
+    const bool bBottomPlacement = PickerWidget->HasBottomSheetPlacementForAutomation();
+    const bool bHeaderDrag = PickerWidget->DragModalByForAutomation(FVector2D(48.0f, -24.0f));
     const bool bModal = ActiveConfirmDialogModalBlockerWidget.IsValid();
 
     bool bRgbTypingPreserved = false;
@@ -16681,6 +16683,8 @@ bool UInspectorWorldSubsystem::RunColorPickerUIContractSelfTest(FString& OutRepo
         && bContract
         && bFixedRadius
         && bCompactLayout
+        && bBottomPlacement
+        && bHeaderDrag
         && bModal
         && bRgbTypingPreserved
         && bRgbTypingDeferred
@@ -16693,13 +16697,15 @@ bool UInspectorWorldSubsystem::RunColorPickerUIContractSelfTest(FString& OutRepo
         && bHexParsed
         && bModalCleared;
     OutReport = FString::Printf(
-        TEXT("ColorPickerUIContract=%s | Bound=%d Page=%d Contract=%d FixedRadius=%d Compact=%d Modal=%d RgbTypingPreserved=%d RgbTypingDeferred=%d RgbInput=%d RgbParsed=%d DragPreview=%d HexTypingPreserved=%d HexTypingDeferred=%d HexInput=%d HexParsed=%d ModalCleared=%d"),
+        TEXT("ColorPickerUIContract=%s | Bound=%d Page=%d Contract=%d FixedRadius=%d Compact=%d Bottom=%d HeaderDrag=%d Modal=%d RgbTypingPreserved=%d RgbTypingDeferred=%d RgbInput=%d RgbParsed=%d DragPreview=%d HexTypingPreserved=%d HexTypingDeferred=%d HexInput=%d HexParsed=%d ModalCleared=%d"),
         bPassed ? TEXT("PASS") : TEXT("FAIL"),
         bBound ? 1 : 0,
         bPageActive ? 1 : 0,
         bContract ? 1 : 0,
         bFixedRadius ? 1 : 0,
         bCompactLayout ? 1 : 0,
+        bBottomPlacement ? 1 : 0,
+        bHeaderDrag ? 1 : 0,
         bModal ? 1 : 0,
         bRgbTypingPreserved ? 1 : 0,
         bRgbTypingDeferred ? 1 : 0,
