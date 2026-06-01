@@ -379,6 +379,8 @@
       { "ActionType": "RunSelfTest", "RefId": "actor_context_panel" },
       { "ActionType": "RunSelfTest", "RefId": "actor_attributes_section" },
       { "ActionType": "RunSelfTest", "RefId": "component_row_focus_route" },
+      { "ActionType": "RunSelfTest", "RefId": "dock_material_tree_route" },
+      { "ActionType": "RunSelfTest", "RefId": "dock_material_edit_route" },
       { "ActionType": "RunSelfTest", "RefId": "favorite_row_navigation_route" },
       { "ActionType": "RunSelfTest", "RefId": "function_row_parameter_run_route" },
       { "ActionType": "RunSelfTest", "RefId": "favorite_star_toggle_route" },

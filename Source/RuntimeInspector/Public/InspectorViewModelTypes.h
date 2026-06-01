@@ -66,6 +66,14 @@ enum class ERIPatchRiskLevel : uint8
     Dangerous
 };
 
+UENUM(BlueprintType)
+enum class ERIComponentNodeKind : uint8
+{
+    Component,
+    MaterialsRoot,
+    MaterialSlot
+};
+
 USTRUCT(BlueprintType)
 struct RUNTIMEINSPECTOR_API FRIActorSummaryViewModel
 {
@@ -105,7 +113,25 @@ struct RUNTIMEINSPECTOR_API FRIComponentNodeViewModel
     FString ComponentName;
 
     UPROPERTY(BlueprintReadWrite, Category = "RuntimeInspector|ViewModel")
+    FString StableKey;
+
+    UPROPERTY(BlueprintReadWrite, Category = "RuntimeInspector|ViewModel")
     int32 ParentIndex = INDEX_NONE;
+
+    UPROPERTY(BlueprintReadWrite, Category = "RuntimeInspector|ViewModel")
+    int32 Depth = 0;
+
+    UPROPERTY(BlueprintReadWrite, Category = "RuntimeInspector|ViewModel")
+    ERIComponentNodeKind Kind = ERIComponentNodeKind::Component;
+
+    UPROPERTY(BlueprintReadWrite, Category = "RuntimeInspector|ViewModel")
+    bool bExpanded = false;
+
+    UPROPERTY(BlueprintReadWrite, Category = "RuntimeInspector|ViewModel")
+    bool bCanExpand = false;
+
+    UPROPERTY(BlueprintReadWrite, Category = "RuntimeInspector|ViewModel")
+    int32 MaterialSlotIndex = INDEX_NONE;
 
     UPROPERTY(BlueprintReadWrite, Category = "RuntimeInspector|ViewModel")
     bool bSelected = false;

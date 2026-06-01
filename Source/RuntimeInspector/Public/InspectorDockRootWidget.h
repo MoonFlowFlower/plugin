@@ -121,7 +121,7 @@ public:
 
     void HandleFunctionRunProxyClicked(FName FunctionName);
     void HandlePatchRevertProxyClicked(FGuid PatchId);
-    void HandleComponentProxyClicked(const FString& ComponentName);
+    void HandleComponentProxyClicked(const FString& RouteToken);
     void HandleFavoriteProxyClicked(UObject* SourceItem);
     void HandleFavoriteToggleProxyClicked(UObject* SourceItem);
 

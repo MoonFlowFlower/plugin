@@ -230,6 +230,26 @@
     "LegacyNativeBridgeId": "component_row_focus_route"
   },
   {
+    "Id": "dock_material_tree_route",
+    "DisplayName": "Dock Material Tree Route",
+    "Category": "UI",
+    "Description": "Validates dock component tree expansion routes Component > Materials > Element N into MaterialOnly attributes.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": true,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "dock_material_tree_route"
+  },
+  {
+    "Id": "dock_material_edit_route",
+    "DisplayName": "Dock Material Edit Route",
+    "Category": "UI",
+    "Description": "Validates material scalar/vector rows remain editable after entering MaterialOnly from the dock tree.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": true,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "dock_material_edit_route"
+  },
+  {
     "Id": "favorite_row_navigation_route",
     "DisplayName": "Favorite Row Navigation Route",
     "Category": "UI",

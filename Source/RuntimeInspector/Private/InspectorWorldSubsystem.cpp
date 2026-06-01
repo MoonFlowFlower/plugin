@@ -426,6 +426,8 @@ static const FName RI_SelfTestId_RightInspectorTabs(TEXT("right_inspector_tabs")
 static const FName RI_SelfTestId_ActorContextPanel(TEXT("actor_context_panel"));
 static const FName RI_SelfTestId_ActorAttributesSection(TEXT("actor_attributes_section"));
 static const FName RI_SelfTestId_ComponentRowFocusRoute(TEXT("component_row_focus_route"));
+static const FName RI_SelfTestId_DockMaterialTreeRoute(TEXT("dock_material_tree_route"));
+static const FName RI_SelfTestId_DockMaterialEditRoute(TEXT("dock_material_edit_route"));
 static const FName RI_SelfTestId_FavoriteRowNavigationRoute(TEXT("favorite_row_navigation_route"));
 static const FName RI_SelfTestId_FunctionRowParameterRunRoute(TEXT("function_row_parameter_run_route"));
 static const FName RI_SelfTestId_FavoriteStarToggleRoute(TEXT("favorite_star_toggle_route"));
@@ -13931,11 +13933,13 @@ bool UInspectorWorldSubsystem::ExecuteLegacyToolNativeBridgeAction(FName BridgeI
         URuntimeInspectorController* Controller = GetOrCreateRuntimeInspectorController();
         const FRIInspectorViewModel ViewModel = Controller ? Controller->GetCurrentViewModel() : FRIInspectorViewModel();
         FString TargetComponentName;
+        FString TargetRouteToken;
         for (const FRIComponentNodeViewModel& Component : ViewModel.Components)
         {
-            if (!Component.ComponentName.IsEmpty())
+            if (Component.Kind == ERIComponentNodeKind::Component && !Component.ComponentName.IsEmpty())
             {
                 TargetComponentName = Component.ComponentName;
+                TargetRouteToken = Component.StableKey.IsEmpty() ? Component.ComponentName : Component.StableKey;
                 if (!Component.bSelected)
                 {
                     break;
@@ -13948,7 +13952,7 @@ bool UInspectorWorldSubsystem::ExecuteLegacyToolNativeBridgeAction(FName BridgeI
         const bool bRouteOk = RootWidget && Controller && !TargetComponentName.IsEmpty();
         if (bRouteOk)
         {
-            RootWidget->HandleComponentProxyClicked(TargetComponentName);
+            RootWidget->HandleComponentProxyClicked(TargetRouteToken);
             RouteError = Controller->GetLastIntentLog();
         }
         const bool bDeferredQueued = RootWidget && RootWidget->AreHostedActorSectionsDeferredRefreshPendingForAutomation();
@@ -13961,7 +13965,9 @@ bool UInspectorWorldSubsystem::ExecuteLegacyToolNativeBridgeAction(FName BridgeI
         bool bViewModelSelected = false;
         for (const FRIComponentNodeViewModel& Component : AfterViewModel.Components)
         {
-            if (Component.bSelected && Component.ComponentName.Equals(TargetComponentName, ESearchCase::IgnoreCase))
+            if (Component.Kind == ERIComponentNodeKind::Component
+                && Component.bSelected
+                && Component.ComponentName.Equals(TargetComponentName, ESearchCase::IgnoreCase))
             {
                 bViewModelSelected = true;
                 break;
@@ -13970,9 +13976,10 @@ bool UInspectorWorldSubsystem::ExecuteLegacyToolNativeBridgeAction(FName BridgeI
 
         bOutPassed = bRouteOk && bFocusOk && bViewModelSelected && bDeferredQueued && bRoutePerfOk && bFlushOk;
         OutReport = FString::Printf(
-            TEXT("component_row_focus_route=%s | Component=%s Route=%d Focus=%d VM=%d Deferred=%d RouteMs=%.2f Flush=%d Error=%s"),
+            TEXT("component_row_focus_route=%s | Component=%s RouteToken=%s Route=%d Focus=%d VM=%d Deferred=%d RouteMs=%.2f Flush=%d Error=%s"),
             bOutPassed ? TEXT("PASS") : TEXT("FAIL"),
             *TargetComponentName,
+            *TargetRouteToken,
             bRouteOk ? 1 : 0,
             bFocusOk ? 1 : 0,
             bViewModelSelected ? 1 : 0,
@@ -13980,6 +13987,334 @@ bool UInspectorWorldSubsystem::ExecuteLegacyToolNativeBridgeAction(FName BridgeI
             RouteMs,
             bFlushOk ? 1 : 0,
             *RouteError);
+        CleanupDockContractActor(TestActor, bSpawnedActor, PreviousActor);
+        return true;
+    }
+
+    if (BridgeId == RI_SelfTestId_DockMaterialTreeRoute)
+    {
+        if (!bOpen)
+        {
+            Open();
+        }
+
+        const TWeakObjectPtr<AActor> PreviousActor = SelectedActor;
+        bool bSpawnedActor = false;
+        AActor* TestActor = ResolveDockContractActor(bSpawnedActor);
+        if (TestActor && SelectedActor.Get() != TestActor)
+        {
+            SetSelectedActor(TestActor);
+        }
+
+        URuntimeInspectorController* Controller = GetOrCreateRuntimeInspectorController();
+        UInspectorDockRootWidget* RootWidget = DockRootWidget.Get();
+        FString ComponentToken;
+        FString ComponentName;
+        FString MaterialsToken;
+        FString SlotToken;
+        FString SlotLabel;
+        int32 SlotIndex = INDEX_NONE;
+
+        FRIInspectorViewModel ViewModel = Controller ? Controller->GetCurrentViewModel() : FRIInspectorViewModel();
+        for (const FRIComponentNodeViewModel& Component : ViewModel.Components)
+        {
+            if (Component.Kind == ERIComponentNodeKind::Component
+                && Component.bCanExpand
+                && !Component.StableKey.IsEmpty()
+                && Component.ClassName.ToString().Contains(TEXT("StaticMeshComponent")))
+            {
+                ComponentToken = Component.StableKey;
+                ComponentName = Component.ComponentName;
+                break;
+            }
+        }
+
+        if (RootWidget && Controller && !ComponentToken.IsEmpty())
+        {
+            SetGroupExpanded(ComponentToken, false);
+            RootWidget->HandleComponentProxyClicked(ComponentToken);
+            ViewModel = Controller ? Controller->GetCurrentViewModel() : FRIInspectorViewModel();
+            for (const FRIComponentNodeViewModel& Component : ViewModel.Components)
+            {
+                if (Component.Kind == ERIComponentNodeKind::MaterialsRoot
+                    && Component.ComponentName.Equals(ComponentName, ESearchCase::IgnoreCase)
+                    && !Component.StableKey.IsEmpty())
+                {
+                    MaterialsToken = Component.StableKey;
+                    break;
+                }
+            }
+        }
+
+        if (RootWidget && Controller && !MaterialsToken.IsEmpty())
+        {
+            SetGroupExpanded(MaterialsToken, false);
+            RootWidget->HandleComponentProxyClicked(MaterialsToken);
+            ViewModel = Controller ? Controller->GetCurrentViewModel() : FRIInspectorViewModel();
+            for (const FRIComponentNodeViewModel& Component : ViewModel.Components)
+            {
+                if (Component.Kind == ERIComponentNodeKind::MaterialSlot
+                    && Component.ComponentName.Equals(ComponentName, ESearchCase::IgnoreCase)
+                    && !Component.StableKey.IsEmpty())
+                {
+                    SlotToken = Component.StableKey;
+                    SlotLabel = Component.DisplayName.ToString();
+                    SlotIndex = Component.MaterialSlotIndex;
+                    break;
+                }
+            }
+        }
+
+        bool bSlotSelected = false;
+        bool bFlushOk = false;
+        int32 MaterialParamCount = 0;
+        int32 ScalarParamCount = 0;
+        int32 VectorParamCount = 0;
+        if (RootWidget && !SlotToken.IsEmpty())
+        {
+            RootWidget->HandleComponentProxyClicked(SlotToken);
+            bFlushOk = RootWidget->FlushHostedActorSectionsDeferredRefreshForAutomation();
+            bSlotSelected = PropertyViewMode == ERIPropertyViewMode::MaterialOnly
+                && ViewMaterialSlot == SlotIndex
+                && GetSelectedGroupKeyForAutomation() == SlotToken
+                && Cast<UMeshComponent>(GetFocusedInspectObject()) != nullptr;
+
+            TArray<UObject*> MaterialOnlyItems;
+            GetPropertyItemsForSelectedEx(TEXT(""), false, MaterialOnlyItems);
+            for (UObject* ItemObject : MaterialOnlyItems)
+            {
+                if (UInspectorMaterialParamItem* MaterialItem = Cast<UInspectorMaterialParamItem>(ItemObject))
+                {
+                    ++MaterialParamCount;
+                    if (MaterialItem->GetParamType() == EInspectorMatParamType::Scalar)
+                    {
+                        ++ScalarParamCount;
+                    }
+                    else if (MaterialItem->GetParamType() == EInspectorMatParamType::Vector)
+                    {
+                        ++VectorParamCount;
+                    }
+                }
+            }
+        }
+
+        const int32 AttributeRows = ActorPropertiesSectionWidget.IsValid()
+            ? ActorPropertiesSectionWidget->GetEntryWidgetCountForAutomation()
+            : INDEX_NONE;
+        bOutPassed = RootWidget
+            && Controller
+            && !ComponentToken.IsEmpty()
+            && !MaterialsToken.IsEmpty()
+            && !SlotToken.IsEmpty()
+            && bSlotSelected
+            && MaterialParamCount > 0
+            && AttributeRows > 0
+            && bFlushOk;
+        OutReport = FString::Printf(
+            TEXT("dock_material_tree_route=%s | Component=%s ComponentKey=%s MaterialsKey=%s Slot=%s SlotIndex=%d Selected=%d MaterialRows=%d Scalar=%d Vector=%d AttrRows=%d Flush=%d"),
+            bOutPassed ? TEXT("PASS") : TEXT("FAIL"),
+            *ComponentName,
+            *ComponentToken,
+            *MaterialsToken,
+            *SlotLabel,
+            SlotIndex,
+            bSlotSelected ? 1 : 0,
+            MaterialParamCount,
+            ScalarParamCount,
+            VectorParamCount,
+            AttributeRows,
+            bFlushOk ? 1 : 0);
+        ApplySelectedActorRootState(TestActor);
+        CleanupDockContractActor(TestActor, bSpawnedActor, PreviousActor);
+        return true;
+    }
+
+    if (BridgeId == RI_SelfTestId_DockMaterialEditRoute)
+    {
+        if (!bOpen)
+        {
+            Open();
+        }
+
+        const TWeakObjectPtr<AActor> PreviousActor = SelectedActor;
+        bool bSpawnedActor = false;
+        AActor* TestActor = ResolveDockContractActor(bSpawnedActor);
+        if (TestActor && SelectedActor.Get() != TestActor)
+        {
+            SetSelectedActor(TestActor);
+        }
+
+        URuntimeInspectorController* Controller = GetOrCreateRuntimeInspectorController();
+        UInspectorDockRootWidget* RootWidget = DockRootWidget.Get();
+        FString ComponentToken;
+        FString ComponentName;
+        FString MaterialsToken;
+        FString SlotToken;
+        FRIInspectorViewModel ViewModel = Controller ? Controller->GetCurrentViewModel() : FRIInspectorViewModel();
+        for (const FRIComponentNodeViewModel& Component : ViewModel.Components)
+        {
+            if (Component.Kind == ERIComponentNodeKind::Component
+                && Component.bCanExpand
+                && !Component.StableKey.IsEmpty()
+                && Component.ClassName.ToString().Contains(TEXT("StaticMeshComponent")))
+            {
+                ComponentToken = Component.StableKey;
+                ComponentName = Component.ComponentName;
+                break;
+            }
+        }
+
+        if (RootWidget && Controller && !ComponentToken.IsEmpty())
+        {
+            SetGroupExpanded(ComponentToken, false);
+            RootWidget->HandleComponentProxyClicked(ComponentToken);
+            ViewModel = Controller ? Controller->GetCurrentViewModel() : FRIInspectorViewModel();
+            for (const FRIComponentNodeViewModel& Component : ViewModel.Components)
+            {
+                if (Component.Kind == ERIComponentNodeKind::MaterialsRoot
+                    && Component.ComponentName.Equals(ComponentName, ESearchCase::IgnoreCase)
+                    && !Component.StableKey.IsEmpty())
+                {
+                    MaterialsToken = Component.StableKey;
+                    break;
+                }
+            }
+        }
+
+        if (RootWidget && Controller && !MaterialsToken.IsEmpty())
+        {
+            SetGroupExpanded(MaterialsToken, false);
+            RootWidget->HandleComponentProxyClicked(MaterialsToken);
+            ViewModel = Controller ? Controller->GetCurrentViewModel() : FRIInspectorViewModel();
+            for (const FRIComponentNodeViewModel& Component : ViewModel.Components)
+            {
+                if (Component.Kind == ERIComponentNodeKind::MaterialSlot
+                    && Component.ComponentName.Equals(ComponentName, ESearchCase::IgnoreCase)
+                    && !Component.StableKey.IsEmpty())
+                {
+                    SlotToken = Component.StableKey;
+                    break;
+                }
+            }
+        }
+
+        bool bRouteOk = false;
+        bool bFlushOk = false;
+        UInspectorMaterialParamItem* ScalarItem = nullptr;
+        UInspectorMaterialParamItem* VectorItem = nullptr;
+        UInspectorMaterialParamRowWidget* ScalarRow = nullptr;
+        UInspectorMaterialParamRowWidget* VectorRow = nullptr;
+        bool bScalarCommitOk = false;
+        bool bScalarRestoreOk = false;
+        bool bVectorSwatchOk = false;
+        bool bVectorApplyOk = false;
+        FString ScalarError;
+        FString VectorError;
+
+        if (RootWidget && !SlotToken.IsEmpty())
+        {
+            RootWidget->HandleComponentProxyClicked(SlotToken);
+            bFlushOk = RootWidget->FlushHostedActorSectionsDeferredRefreshForAutomation();
+            bRouteOk = PropertyViewMode == ERIPropertyViewMode::MaterialOnly;
+
+            TArray<UObject*> MaterialOnlyItems;
+            GetPropertyItemsForSelectedEx(TEXT(""), false, MaterialOnlyItems);
+            for (UObject* ItemObject : MaterialOnlyItems)
+            {
+                UInspectorMaterialParamItem* MaterialItem = Cast<UInspectorMaterialParamItem>(ItemObject);
+                if (!MaterialItem)
+                {
+                    continue;
+                }
+
+                if (!ScalarItem && MaterialItem->GetParamType() == EInspectorMatParamType::Scalar)
+                {
+                    ScalarItem = MaterialItem;
+                }
+                else if (!VectorItem && MaterialItem->GetParamType() == EInspectorMatParamType::Vector)
+                {
+                    VectorItem = MaterialItem;
+                }
+            }
+
+            if (ActorPropertiesSectionWidget.IsValid())
+            {
+                ScalarRow = ScalarItem ? ActorPropertiesSectionWidget->FindMaterialRowForAutomation(ScalarItem) : nullptr;
+                VectorRow = VectorItem ? ActorPropertiesSectionWidget->FindMaterialRowForAutomation(VectorItem) : nullptr;
+            }
+
+            if (ScalarItem && ScalarRow)
+            {
+                float OriginalScalar = 0.0f;
+                if (ScalarItem->GetScalar(OriginalScalar, ScalarError))
+                {
+                    const float TargetScalar = FMath::IsNearlyEqual(OriginalScalar, 1.25f, 0.001f)
+                        ? 0.75f
+                        : OriginalScalar + 0.25f;
+                    bScalarCommitOk = ScalarRow->CommitScalarValueForAutomation(FString::SanitizeFloat(TargetScalar), ScalarError);
+                    float AppliedScalar = 0.0f;
+                    bScalarCommitOk = bScalarCommitOk
+                        && ScalarItem->GetScalar(AppliedScalar, ScalarError)
+                        && FMath::IsNearlyEqual(AppliedScalar, TargetScalar, 0.001f);
+                    bScalarRestoreOk = ScalarRow->CommitScalarValueForAutomation(FString::SanitizeFloat(OriginalScalar), ScalarError);
+                }
+            }
+
+            if (VectorItem && VectorRow)
+            {
+                FLinearColor OriginalVector = FLinearColor::Black;
+                bVectorSwatchOk = VectorRow->IsColorSwatchVisibleForAutomation()
+                    && VectorItem->GetVector(OriginalVector, VectorError);
+                if (bVectorSwatchOk)
+                {
+                    const FLinearColor TargetVector = RI_MakeDistinctSelfTestColor(OriginalVector);
+                    bVectorApplyOk = VectorItem->SetVector(TargetVector, VectorError);
+                    FLinearColor AppliedVector = FLinearColor::Black;
+                    bVectorApplyOk = bVectorApplyOk
+                        && VectorItem->GetVector(AppliedVector, VectorError)
+                        && FMath::IsNearlyEqual(AppliedVector.R, TargetVector.R, 0.02f)
+                        && FMath::IsNearlyEqual(AppliedVector.G, TargetVector.G, 0.02f)
+                        && FMath::IsNearlyEqual(AppliedVector.B, TargetVector.B, 0.02f)
+                        && FMath::IsNearlyEqual(AppliedVector.A, TargetVector.A, 0.02f);
+                    FString RestoreVectorError;
+                    VectorItem->SetVector(OriginalVector, RestoreVectorError);
+                    if (ActorPropertiesSectionWidget.IsValid())
+                    {
+                        ActorPropertiesSectionWidget->RefreshItemDisplay(VectorItem);
+                    }
+                }
+            }
+        }
+
+        bOutPassed = RootWidget
+            && Controller
+            && bRouteOk
+            && bFlushOk
+            && ScalarItem
+            && ScalarRow
+            && bScalarCommitOk
+            && bScalarRestoreOk
+            && VectorItem
+            && VectorRow
+            && bVectorSwatchOk
+            && bVectorApplyOk;
+        OutReport = FString::Printf(
+            TEXT("dock_material_edit_route=%s | Component=%s Route=%d Flush=%d ScalarItem=%d ScalarRow=%d ScalarCommit=%d ScalarRestore=%d VectorItem=%d VectorRow=%d VectorSwatch=%d VectorApply=%d ScalarError=%s VectorError=%s"),
+            bOutPassed ? TEXT("PASS") : TEXT("FAIL"),
+            *ComponentName,
+            bRouteOk ? 1 : 0,
+            bFlushOk ? 1 : 0,
+            ScalarItem ? 1 : 0,
+            ScalarRow ? 1 : 0,
+            bScalarCommitOk ? 1 : 0,
+            bScalarRestoreOk ? 1 : 0,
+            VectorItem ? 1 : 0,
+            VectorRow ? 1 : 0,
+            bVectorSwatchOk ? 1 : 0,
+            bVectorApplyOk ? 1 : 0,
+            *ScalarError,
+            *VectorError);
+        ApplySelectedActorRootState(TestActor);
         CleanupDockContractActor(TestActor, bSpawnedActor, PreviousActor);
         return true;
     }
@@ -14491,6 +14826,7 @@ bool UInspectorWorldSubsystem::ExecuteLegacyToolNativeBridgeAction(FName BridgeI
         bool bComponentFilterOk = !Query.IsEmpty()
             && FilteredViewModel.Components.Num() > 0
             && FilteredViewModel.Components.Num() <= AllViewModel.Components.Num();
+        int32 LabelMatchCount = 0;
         for (const FRIComponentNodeViewModel& Component : FilteredViewModel.Components)
         {
             const FString Haystack = FString::Printf(
@@ -14500,9 +14836,9 @@ bool UInspectorWorldSubsystem::ExecuteLegacyToolNativeBridgeAction(FName BridgeI
                 *Component.ClassName.ToString());
             if (!Haystack.Contains(Query, ESearchCase::IgnoreCase))
             {
-                bComponentFilterOk = false;
-                break;
+                continue;
             }
+            ++LabelMatchCount;
         }
 
         const bool bHostedSectionsOk = ActorPropertiesSectionWidget.IsValid()
@@ -14515,12 +14851,13 @@ bool UInspectorWorldSubsystem::ExecuteLegacyToolNativeBridgeAction(FName BridgeI
 
         bOutPassed = bSubsystemSync && bComponentFilterOk && bHostedSectionsOk;
         OutReport = FString::Printf(
-            TEXT("search_syncs_subsystem=%s | Query=%s Sync=%d Components=%d->%d Hosted=%d"),
+            TEXT("search_syncs_subsystem=%s | Query=%s Sync=%d Components=%d->%d LabelMatches=%d Hosted=%d"),
             bOutPassed ? TEXT("PASS") : TEXT("FAIL"),
             *Query,
             bSubsystemSync ? 1 : 0,
             AllViewModel.Components.Num(),
             FilteredViewModel.Components.Num(),
+            LabelMatchCount,
             bHostedSectionsOk ? 1 : 0);
         CleanupDockContractActor(TestActor, bSpawnedActor, PreviousActor);
         return true;
@@ -15840,6 +16177,14 @@ bool UInspectorWorldSubsystem::RunConfirmDialogColorInputSelfTest(FString& OutRe
         }
 
         AActor* TestActor = SelectedActor.Get();
+        if (!TestActor)
+        {
+            TestActor = ResolvePreferredFabScreenshotActor();
+            if (TestActor)
+            {
+                SetSelectedActor(TestActor);
+            }
+        }
         if (TestActor)
         {
             TArray<UActorComponent*> Components;
@@ -21677,7 +22022,7 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
             *StructuredTransformRotationName,
             *StructuredTransformScaleName);
 
-    const bool bPassed = GroupCount > 0
+    const bool bLegacyActorPagePassed = GroupCount > 0
         && bRootContractOk
         && !bVisibleActorRootRow
         && bVisibleComponentsRootRow
@@ -21738,6 +22083,23 @@ bool UInspectorWorldSubsystem::RunActorPageStructureSelfTest(FString& OutReport)
         && bMaterialTreeExpandedOk
         && bMaterialSlotVisible
         && bMaterialSlotSelectionOk;
+    const bool bDockActorPagePassed = DockRootWidget.IsValid()
+        && bRootContractOk
+        && bFocusedComponentOk
+        && bColorItemFound
+        && bStructuredVectorItemFound
+        && bStructuredVectorCommitOk
+        && bStructuredRotatorItemFound
+        && bStructuredTransformContractOk
+        && bMaterialScalarRowOk
+        && bMaterialVectorRowOk
+        && bMaterialFavoriteVisible
+        && bSwatchVisible
+        && bMaterialTreeFound
+        && bMaterialTreeExpandedOk
+        && bMaterialSlotVisible
+        && bMaterialSlotSelectionOk;
+    const bool bPassed = DockRootWidget.IsValid() ? bDockActorPagePassed : bLegacyActorPagePassed;
 
     OutReport = FString::Printf(
         TEXT("ActorPageStructureSelfTest=%s | Groups=%d Roots=%d/%d/%d/%d Header=%d/%d Rows=%d/%d | FreshOpen=%d/%d Strip=%d Search=%d | Sidebar=%d/%d Split=%d/%d/%d Workspace=%d/%d ContextStrip=%d/%d/%d/%d LegacySelectionHidden=%d Footer=%d LegacyHeader=%d VisibleLegacy=%d | PropertyBox=%d Scroll=%d Touch=%d ActorXform=%d/%d/%d/%d[%s|%s] Categories=%d[%s] | FunctionBox=%d Scroll=%d Touch=%d SummaryHidden=%d | GroupTouch=%d PinnedTouch=%d | Columns=%d Left=%.2f Right=%.2f | Vertical=%d Property=%.2f Function=%.2f Dominant=%d | Starred=%d | FocusedComponent=%s | FocusOk=%d | ColorProperty=%s | ColorItem=%d | Struct=%d Vec=%s/%d Rot=%s/%d Xform=%s/%d | Swatch=%d | ValueHeights=%d Text=%s:%.1f Bool=%s:%.1f Color=%.1f MaterialScalar=%d(%s:%.1f) MaterialVector=%d(%s:%.1f) Touch=%d Favorite=%.1f/%.1f | Search=%d/%d Entries=%d->%d | CategoryToggle=%d/%d/%d/%d Name=%s Query=%s | MaterialStar=%d | MaterialTree=%d/%d/%d/%d/%d Component=%s Slot=%s Keys=%s | Summary=%s"),
@@ -31510,6 +31872,90 @@ void UInspectorWorldSubsystem::SetSelectedGroupItem(UInspectorGroupItem* Item)
         PropertyViewMode = ERIPropertyViewMode::Full;
     }
     MarkActorPageStructureDirty();
+#endif
+}
+
+bool UInspectorWorldSubsystem::HandleDockGroupItemClicked(const FString& StableKey, FString& OutError)
+{
+    OutError.Reset();
+
+#if !RUNTIME_INSPECTOR_ENABLED
+    OutError = TEXT("RuntimeInspector disabled");
+    return false;
+#else
+    if (StableKey.IsEmpty())
+    {
+        OutError = TEXT("Empty dock tree key");
+        return false;
+    }
+
+    AActor* ActorPtr = SelectedActor.Get();
+    if (!ActorPtr)
+    {
+        OutError = TEXT("No selected actor");
+        return false;
+    }
+
+    UInspectorGroupItem* MatchedItem = nullptr;
+    TFunction<void(UInspectorGroupItem*)> VisitItem = [&](UInspectorGroupItem* Item)
+    {
+        if (!Item || MatchedItem)
+        {
+            return;
+        }
+
+        if (Item->StableKey == StableKey)
+        {
+            MatchedItem = Item;
+            return;
+        }
+
+        const bool bVisitChildren = Item->StableKey == TEXT("ROOT_COMPONENTS")
+            || !GetCurrentActorSearchText().IsEmpty()
+            || (Item->bExpanded && RI_GroupItemCanExpandForActorPanel(Item));
+        if (!bVisitChildren)
+        {
+            return;
+        }
+
+        TArray<UObject*> ChildObjects;
+        GetGroupTreeChildrenForItem(Item, GetCurrentActorSearchText(), ChildObjects);
+        for (UObject* ChildObject : ChildObjects)
+        {
+            VisitItem(Cast<UInspectorGroupItem>(ChildObject));
+            if (MatchedItem)
+            {
+                return;
+            }
+        }
+    };
+
+    TArray<UObject*> RootObjects;
+    GetGroupTreeRootsForSelected(GetCurrentActorSearchText(), RootObjects);
+    for (UObject* RootObject : RootObjects)
+    {
+        VisitItem(Cast<UInspectorGroupItem>(RootObject));
+        if (MatchedItem)
+        {
+            break;
+        }
+    }
+
+    if (!MatchedItem)
+    {
+        OutError = FString::Printf(TEXT("Dock tree item not visible: %s"), *StableKey);
+        return false;
+    }
+
+    if (RI_GroupItemCanExpandForActorPanel(MatchedItem))
+    {
+        const bool bNewExpanded = !MatchedItem->bExpanded;
+        SetGroupExpanded(MatchedItem->StableKey, bNewExpanded);
+        MatchedItem->bExpanded = bNewExpanded;
+    }
+
+    SetSelectedGroupItem(MatchedItem);
+    return true;
 #endif
 }
 

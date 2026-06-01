@@ -1,12 +1,15 @@
 #include "RuntimeInspectorController.h"
 
 #include "InspectorFunctionItem.h"
+#include "InspectorGroupItem.h"
 #include "InspectorMaterialParamItem.h"
 #include "InspectorPropertyItem.h"
 #include "InspectorPropertyUtils.h"
 #include "InspectorWorldSubsystem.h"
 
+#include "Components/ActorComponent.h"
 #include "Components/SceneComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "GameFramework/Actor.h"
 #include "Misc/DateTime.h"
 
@@ -84,6 +87,121 @@ namespace
         }
         return static_cast<int32>(PatchId.D) - 1;
     }
+
+    static bool RI_DockGroupCanExpand(const UInspectorGroupItem* Item)
+    {
+        if (!Item || Item->IsMaterialSlot())
+        {
+            return false;
+        }
+
+        if (Item->StableKey == TEXT("ROOT_COMPONENTS") || Item->IsMaterialsRoot())
+        {
+            return true;
+        }
+
+        return Cast<UStaticMeshComponent>(Item->TargetObject) != nullptr;
+    }
+
+    static bool RI_IsDockRenderableGroup(const UInspectorGroupItem* Item)
+    {
+        return Item
+            && Item->StableKey != TEXT("ROOT_COMPONENTS")
+            && Item->StableKey != TEXT("ROOT_ACTOR")
+            && Item->StableKey != TEXT("PINNED_ROOT");
+    }
+
+    static ERIComponentNodeKind RI_DockComponentNodeKind(const UInspectorGroupItem* Item)
+    {
+        if (Item && Item->IsMaterialSlot())
+        {
+            return ERIComponentNodeKind::MaterialSlot;
+        }
+        if (Item && Item->IsMaterialsRoot())
+        {
+            return ERIComponentNodeKind::MaterialsRoot;
+        }
+        return ERIComponentNodeKind::Component;
+    }
+
+    static void RI_AppendDockComponentGroup(
+        UInspectorWorldSubsystem* InspectorSubsystem,
+        UInspectorGroupItem* GroupItem,
+        const FString& SearchText,
+        const FString& SelectedStableKey,
+        FRIInspectorViewModel& ViewModel,
+        int32 ParentIndex)
+    {
+        if (!InspectorSubsystem || !GroupItem)
+        {
+            return;
+        }
+
+        int32 ThisIndex = ParentIndex;
+        if (RI_IsDockRenderableGroup(GroupItem))
+        {
+            FRIComponentNodeViewModel Node;
+            Node.StableKey = GroupItem->StableKey;
+            Node.Depth = FMath::Max(0, GroupItem->Depth - 1);
+            Node.ParentIndex = ParentIndex;
+            Node.Kind = RI_DockComponentNodeKind(GroupItem);
+            Node.bExpanded = GroupItem->bExpanded;
+            Node.bCanExpand = RI_DockGroupCanExpand(GroupItem);
+            Node.MaterialSlotIndex = GroupItem->MaterialSlotIndex;
+            Node.bSelected = !SelectedStableKey.IsEmpty() && GroupItem->StableKey == SelectedStableKey;
+
+            if (UActorComponent* Component = Cast<UActorComponent>(GroupItem->TargetObject))
+            {
+                Node.ComponentName = Component->GetName();
+                Node.Path = RI_TextFromString(Component->GetPathName());
+                if (Node.Kind == ERIComponentNodeKind::Component)
+                {
+                    Node.DisplayName = RI_TextFromString(Component->GetName());
+                    Node.ClassName = RI_TextFromString(GetNameSafe(Component->GetClass()));
+                }
+                else if (Node.Kind == ERIComponentNodeKind::MaterialsRoot)
+                {
+                    Node.DisplayName = RI_TextFromString(GroupItem->DisplayName.IsEmpty() ? TEXT("Materials") : GroupItem->DisplayName);
+                    Node.ClassName = FText::GetEmpty();
+                }
+                else
+                {
+                    Node.DisplayName = RI_TextFromString(GroupItem->DisplayName);
+                    Node.ClassName = FText::FromString(TEXT("Material"));
+                }
+            }
+            else
+            {
+                Node.DisplayName = RI_TextFromString(GroupItem->DisplayName);
+                Node.ClassName = RI_TextFromString(GetNameSafe(GroupItem->TargetObject));
+                Node.Path = RI_TextFromString(GetPathNameSafe(GroupItem->TargetObject));
+            }
+
+            ThisIndex = ViewModel.Components.Num();
+            ViewModel.Components.Add(Node);
+        }
+
+        const bool bShouldVisitChildren = GroupItem->StableKey == TEXT("ROOT_COMPONENTS")
+            || !SearchText.IsEmpty()
+            || (GroupItem->bExpanded && RI_DockGroupCanExpand(GroupItem));
+        if (!bShouldVisitChildren)
+        {
+            return;
+        }
+
+        TArray<UObject*> ChildObjects;
+        InspectorSubsystem->GetGroupTreeChildrenForItem(GroupItem, SearchText, ChildObjects);
+        for (UObject* ChildObject : ChildObjects)
+        {
+            RI_AppendDockComponentGroup(
+                InspectorSubsystem,
+                Cast<UInspectorGroupItem>(ChildObject),
+                SearchText,
+                SelectedStableKey,
+                ViewModel,
+                ThisIndex);
+        }
+    }
 }
 
 void URuntimeInspectorController::Initialize(UInspectorWorldSubsystem* InSubsystem)
@@ -154,49 +272,24 @@ FRIInspectorViewModel URuntimeInspectorController::GetCurrentViewModel(ERIViewMo
             ViewModel.Transform.bReadOnly = true;
         }
 
-        TArray<UActorComponent*> Components;
-        Actor->GetComponents(Components);
-
-        TMap<const UActorComponent*, int32> ComponentToIndex;
-        ViewModel.Components.Reserve(Components.Num());
-        for (UActorComponent* Component : Components)
+        TArray<UObject*> RootObjects;
+        InspectorSubsystem->GetGroupTreeRootsForSelected(EffectiveSearch, RootObjects);
+        const FString SelectedStableKey = InspectorSubsystem->GetSelectedGroupKeyForAutomation();
+        for (UObject* RootObject : RootObjects)
         {
-            if (!Component)
+            UInspectorGroupItem* RootItem = Cast<UInspectorGroupItem>(RootObject);
+            if (!RootItem || RootItem->StableKey == TEXT("PINNED_ROOT"))
             {
                 continue;
             }
 
-            FRIComponentNodeViewModel Node;
-            Node.DisplayName = RI_TextFromString(Component->GetName());
-            Node.ClassName = RI_TextFromString(GetNameSafe(Component->GetClass()));
-            Node.Path = RI_TextFromString(Component->GetPathName());
-            Node.ComponentName = Component->GetName();
-            Node.bSelected = Component == InspectorSubsystem->GetFocusedInspectObject();
-
-            const FString ComponentHaystack = FString::Printf(
-                TEXT("%s %s %s"),
-                *Component->GetName(),
-                *GetNameSafe(Component->GetClass()),
-                *Component->GetPathName());
-            if (!EffectiveSearch.IsEmpty() && !ComponentHaystack.Contains(EffectiveSearch, ESearchCase::IgnoreCase))
-            {
-                continue;
-            }
-
-            if (const USceneComponent* SceneComponent = Cast<USceneComponent>(Component))
-            {
-                const USceneComponent* AttachParent = SceneComponent->GetAttachParent();
-                if (AttachParent)
-                {
-                    if (const int32* ParentIndex = ComponentToIndex.Find(AttachParent))
-                    {
-                        Node.ParentIndex = *ParentIndex;
-                    }
-                }
-            }
-
-            ComponentToIndex.Add(Component, ViewModel.Components.Num());
-            ViewModel.Components.Add(Node);
+            RI_AppendDockComponentGroup(
+                InspectorSubsystem,
+                RootItem,
+                EffectiveSearch,
+                SelectedStableKey,
+                ViewModel,
+                INDEX_NONE);
         }
     }
 
@@ -521,6 +614,40 @@ bool URuntimeInspectorController::RequestFocusComponentWithRefreshPolicy(const F
     SetLastIntentLog(FString::Printf(
         TEXT("FocusComponent %s -> %s"),
         *ComponentName,
+        bOk ? TEXT("ok") : *OutError));
+    return bOk;
+}
+
+bool URuntimeInspectorController::RequestSelectComponentTreeNode(const FString& StableKey, FString& OutError)
+{
+    OutError.Reset();
+    UInspectorWorldSubsystem* InspectorSubsystem = Subsystem.Get();
+    if (!InspectorSubsystem)
+    {
+        OutError = TEXT("RuntimeInspector subsystem unavailable");
+        return false;
+    }
+
+    bool bOk = InspectorSubsystem->HandleDockGroupItemClicked(StableKey, OutError);
+    if (!bOk && !StableKey.Contains(TEXT(":MATERIALS")))
+    {
+        FString FocusError;
+        const bool bFallbackOk = InspectorSubsystem->FocusSelectedActorComponentByNameWithRefreshPolicy(StableKey, FocusError, false);
+        if (bFallbackOk)
+        {
+            bOk = true;
+            OutError.Reset();
+        }
+        else if (OutError.IsEmpty())
+        {
+            OutError = FocusError;
+        }
+    }
+
+    ActiveTab = ERIInspectorTab::Actor;
+    SetLastIntentLog(FString::Printf(
+        TEXT("SelectComponentTreeNode %s -> %s"),
+        *StableKey,
         bOk ? TEXT("ok") : *OutError));
     return bOk;
 }

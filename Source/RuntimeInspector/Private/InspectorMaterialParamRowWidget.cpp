@@ -275,8 +275,8 @@ void UInspectorMaterialParamRowWidget::BuildWidgetTree()
     FavoriteButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("RI_MaterialParamFavoriteButton"));
     RICompactUI::ConfigureButton(FavoriteButton, RICompactUI::ERIButtonVisualStyle::Secondary, false);
     FavoriteSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_MaterialParamFavoriteSize"));
-    const float FavoriteButtonSize = FMath::Max(18.f, RICompactUI::GetInputHeight() - 4.f);
-    const float FavoriteIconSize = FavoriteButtonSize * 0.58f;
+    const float FavoriteButtonSize = 22.0f;
+    const float FavoriteIconSize = 12.0f;
     FavoriteSizeBox->SetWidthOverride(FavoriteButtonSize);
     FavoriteSizeBox->SetHeightOverride(FavoriteButtonSize);
     FavoriteIcon = RICompactUI::MakeFavoriteIcon(
@@ -301,7 +301,7 @@ void UInspectorMaterialParamRowWidget::BuildWidgetTree()
         FavoriteSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
     }
 
-    NameText = RICompactUI::MakeText(WidgetTree, TEXT("Material Parameter"), RICompactUI::GetLabelFontSize(), true, RI_MaterialTextColor(), false);
+    NameText = RICompactUI::MakeEllipsisText(WidgetTree, TEXT("Material Parameter"), RICompactUI::GetLabelFontSize(), true, RI_MaterialTextColor());
     NameText->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
     if (UHorizontalBoxSlot* NameSlot = RootBox->AddChildToHorizontalBox(NameText))
     {
@@ -312,10 +312,10 @@ void UInspectorMaterialParamRowWidget::BuildWidgetTree()
         NameSlot->SetPadding(FMargin(0.f, 0.f, 6.f, 0.f));
     }
 
-    ReadOnlyValueText = RICompactUI::MakeText(WidgetTree, TEXT(""), RICompactUI::GetValueFontSize(), false, RI_MaterialMutedColor(), true);
+    ReadOnlyValueText = RICompactUI::MakeEllipsisText(WidgetTree, TEXT(""), RICompactUI::GetValueFontSize(), false, RI_MaterialMutedColor());
     ReadOnlyValueText->SetJustification(ETextJustify::Right);
     ReadOnlyValueText->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
-    ReadOnlyValueSizeBox = RICompactUI::WrapValueControl(WidgetTree, ReadOnlyValueText, 132.f);
+    ReadOnlyValueSizeBox = RICompactUI::WrapValueControl(WidgetTree, ReadOnlyValueText, 96.f);
     if (UHorizontalBoxSlot* ValueSlot = RootBox->AddChildToHorizontalBox(ReadOnlyValueSizeBox))
     {
         ValueSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
@@ -327,7 +327,7 @@ void UInspectorMaterialParamRowWidget::BuildWidgetTree()
     RICompactUI::ConfigureEditableTextBox(ScalarValueTextBox, RI_MaterialTextColor());
     ScalarValueTextBox->SetJustification(ETextJustify::Right);
     ScalarValueTextBox->OnTextCommitted.AddDynamic(this, &UInspectorMaterialParamRowWidget::HandleScalarCommitted);
-    ScalarValueTextBoxSizeBox = RICompactUI::WrapValueControl(WidgetTree, ScalarValueTextBox, 132.f);
+    ScalarValueTextBoxSizeBox = RICompactUI::WrapValueControl(WidgetTree, ScalarValueTextBox, 96.f);
     if (UHorizontalBoxSlot* ValueSlot = RootBox->AddChildToHorizontalBox(ScalarValueTextBoxSizeBox))
     {
         ValueSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
@@ -339,8 +339,8 @@ void UInspectorMaterialParamRowWidget::BuildWidgetTree()
     RICompactUI::ConfigureSwatchButton(ColorButton);
     ColorButton->OnClicked.AddDynamic(this, &UInspectorMaterialParamRowWidget::HandleColorClicked);
     ColorSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_MaterialParamColorSize"));
-    ColorSizeBox->SetWidthOverride(30.f);
-    ColorSizeBox->SetHeightOverride(RICompactUI::GetInputHeight());
+    ColorSizeBox->SetWidthOverride(34.f);
+    ColorSizeBox->SetHeightOverride(22.f);
     ColorSwatch = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("RI_MaterialParamColorSwatch"));
     ColorSwatch->SetPadding(FMargin(0.f));
     ColorSwatch->SetBrushColor(FLinearColor::Black);
@@ -399,14 +399,16 @@ void UInspectorMaterialParamRowWidget::RefreshRow()
         RICompactUI::SetFavoriteIconState(
             FavoriteIcon,
             bFavorited,
-            FavoriteSizeBox ? FavoriteSizeBox->GetWidthOverride() * 0.58f : 0.f,
+            12.0f,
             RI_MaterialFavoriteActiveColor(),
             RI_MaterialMutedColor());
     }
 
     if (NameText)
     {
-        NameText->SetText(FText::FromString(Item->GetPropertyName()));
+        const FText PropertyNameText = FText::FromString(Item->GetPropertyName());
+        NameText->SetText(PropertyNameText);
+        NameText->SetToolTipText(PropertyNameText);
     }
     if (ReadOnlyValueText)
     {
@@ -448,10 +450,12 @@ void UInspectorMaterialParamRowWidget::RefreshRow()
         {
             ScalarValueTextBox->SetVisibility(ESlateVisibility::Visible);
             ScalarValueTextBox->SetText(FText::FromString(DisplayValue));
+            ScalarValueTextBox->SetToolTipText(FText::FromString(DisplayValue));
         }
         else
         {
             ReadOnlyValueText->SetText(FText::FromString(DisplayValue));
+            ReadOnlyValueText->SetToolTipText(FText::FromString(DisplayValue));
             ReadOnlyValueText->SetVisibility(ESlateVisibility::Visible);
         }
     }

@@ -1698,6 +1698,9 @@ private:
         void SetSelectedGroupItem(class UInspectorGroupItem* Item);
 
         UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Selection")
+        bool HandleDockGroupItemClicked(const FString& StableKey, FString& OutError);
+
+        UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Selection")
         void ClearSelectedGroupItem();
 
 

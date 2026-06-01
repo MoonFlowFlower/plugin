@@ -38,6 +38,9 @@ public:
     bool RequestFocusComponentWithRefreshPolicy(const FString& ComponentName, FString& OutError, bool bRefreshPanel);
 
     UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Controller")
+    bool RequestSelectComponentTreeNode(const FString& StableKey, FString& OutError);
+
+    UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Controller")
     bool RequestNavigateToPinnedItem(UObject* Item, FString& OutError);
 
     UFUNCTION(BlueprintCallable, Category = "RuntimeInspector|Controller")

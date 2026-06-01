@@ -905,7 +905,6 @@ void UInspectorDockRootWidget::RefreshActorContext(const FRIInspectorViewModel& 
         {
             for (const FRIComponentNodeViewModel& Component : ViewModel.Components)
             {
-                const FString Prefix = Component.ParentIndex == INDEX_NONE ? TEXT("") : TEXT("  ");
                 UButton* RowButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), NAME_None);
                 UBorder* RowSurface = RICompactUI::MakeSurfaceCard(
                     WidgetTree,
@@ -914,29 +913,49 @@ void UInspectorDockRootWidget::RefreshActorContext(const FRIInspectorViewModel& 
                     RICompactUI::GetSurfaceCardPadding(true));
                 UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), NAME_None);
                 const FLinearColor RowColor = Component.bSelected ? RICompactUI::GetSuccessTextColor() : RICompactUI::GetSecondaryTextColor();
-                if (USizeBox* RowIcon = RI_MakeIconBox(WidgetTree, NAME_None, TEXT("glyph:>"), 9.0f, RowColor))
+                const int32 Depth = FMath::Max(0, Component.Depth);
+                if (Depth > 0)
+                {
+                    USizeBox* Indent = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), NAME_None);
+                    Indent->SetWidthOverride(static_cast<float>(Depth) * 12.0f);
+                    Indent->SetHeightOverride(1.0f);
+                    RI_AddHorizontal(Row, Indent);
+                }
+
+                const TCHAR* ExpanderGlyph = Component.bCanExpand
+                    ? (Component.bExpanded ? TEXT("glyph:v") : TEXT("glyph:>"))
+                    : TEXT("glyph:.");
+                const FLinearColor ExpanderColor = Component.bCanExpand ? RowColor : RICompactUI::GetMutedTextColor();
+                if (USizeBox* RowIcon = RI_MakeIconBox(WidgetTree, NAME_None, ExpanderGlyph, 9.0f, ExpanderColor))
                 {
                     RI_AddHorizontal(Row, RowIcon, FMargin(0.f, 2.f, RICompactUI::GetInlineGap() + 1.f, 0.f));
                 }
-                const FString ComponentLabel = FString::Printf(TEXT("%s%s  |  %s"), *Prefix, *Component.DisplayName.ToString(), *Component.ClassName.ToString());
+                FString ComponentLabel = Component.DisplayName.ToString();
+                if (Component.Kind == ERIComponentNodeKind::Component && !Component.ClassName.IsEmpty())
+                {
+                    ComponentLabel = FString::Printf(TEXT("%s  |  %s"), *ComponentLabel, *Component.ClassName.ToString());
+                }
                 UTextBlock* RowText = RICompactUI::MakeEllipsisText(
                     WidgetTree,
                     ComponentLabel,
                     RICompactUI::GetLabelFontSize(),
                     Component.bSelected,
                     RowColor);
+                RowText->SetToolTipText(FText::FromString(ComponentLabel));
                 RI_AddHorizontal(Row, RowText, FMargin(0.f), ESlateSizeRule::Fill);
                 RowSurface->SetContent(Row);
                 RowButton->AddChild(RowSurface);
                 RICompactUI::ConfigureSwatchButton(RowButton);
 
-                const FString RouteComponentName = Component.ComponentName.IsEmpty() ? Component.DisplayName.ToString() : Component.ComponentName;
-                ComponentRowSurfaces.Add(RouteComponentName, RowSurface);
-                ComponentRowTexts.Add(RouteComponentName, RowText);
+                const FString RouteToken = Component.StableKey.IsEmpty()
+                    ? (Component.ComponentName.IsEmpty() ? Component.DisplayName.ToString() : Component.ComponentName)
+                    : Component.StableKey;
+                ComponentRowSurfaces.Add(RouteToken, RowSurface);
+                ComponentRowTexts.Add(RouteToken, RowText);
 
                 UInspectorDockComponentActionProxy* Proxy = NewObject<UInspectorDockComponentActionProxy>(this);
                 Proxy->Owner = this;
-                Proxy->ComponentName = RouteComponentName;
+                Proxy->ComponentName = RouteToken;
                 ActionProxies.Add(Proxy);
                 RowButton->OnClicked.AddDynamic(Proxy, &UInspectorDockComponentActionProxy::HandleClicked);
                 RI_AddVertical(ComponentListBox, RowButton, FMargin(0.f, 0.f, 0.f, 3.f));
@@ -1336,23 +1355,34 @@ void UInspectorDockRootWidget::HandlePatchRevertProxyClicked(FGuid PatchId)
     RefreshFromController(EInspectorRefreshReason::ValuesChanged);
 }
 
-void UInspectorDockRootWidget::HandleComponentProxyClicked(const FString& ComponentName)
+void UInspectorDockRootWidget::HandleComponentProxyClicked(const FString& RouteToken)
 {
     const double StartSeconds = FPlatformTime::Seconds();
     bool bFocusSucceeded = false;
     FString Error;
     if (Controller)
     {
-        bFocusSucceeded = Controller->RequestFocusComponentWithRefreshPolicy(ComponentName, Error, false);
+        bFocusSucceeded = Controller->RequestSelectComponentTreeNode(RouteToken, Error);
+        CurrentViewModel = Controller->GetCurrentViewModel(ERIViewModelHydrationMode::DockHydrated);
     }
-    RefreshAfterComponentFocus(ComponentName, bFocusSucceeded);
+    RefreshActorContext(CurrentViewModel);
+    if (bFocusSucceeded)
+    {
+        RefreshHostedActorSectionsDeferred(CurrentViewModel);
+    }
+    RefreshTabPresentation(CurrentViewModel);
+    RefreshActionBar(CurrentViewModel);
+    if (ActionStatusText && Controller)
+    {
+        ActionStatusText->SetText(FText::FromString(Controller->GetLastIntentLog()));
+    }
     LastComponentFocusIntentMs = (FPlatformTime::Seconds() - StartSeconds) * 1000.0;
     UE_LOG(
         LogRuntimeInspector,
         Log,
-        TEXT("[RI][Perf] DockComponentFocusIntent %.2f ms | Component=%s Result=%s Deferred=%d"),
+        TEXT("[RI][Perf] DockComponentFocusIntent %.2f ms | Route=%s Result=%s Deferred=%d"),
         LastComponentFocusIntentMs,
-        *ComponentName,
+        *RouteToken,
         bFocusSucceeded ? TEXT("ok") : *Error,
         AreHostedActorSectionsDeferredRefreshPendingForAutomation() ? 1 : 0);
 }
