@@ -63,6 +63,7 @@ public:
     bool HasFixedRadiusBrushesForAutomation() const;
     bool HasCompactLayoutForAutomation() const;
     bool HasBottomSheetPlacementForAutomation() const;
+    bool HasFooterClearanceForAutomation() const;
     bool DragModalByForAutomation(const FVector2D& Delta);
 
 protected:

@@ -16592,6 +16592,19 @@ bool UInspectorWorldSubsystem::RunColorPickerUIContractSelfTest(FString& OutRepo
     };
     PickerWidget->InitializePicker(FLinearColor::Red, TestRecentColors);
     PickerWidget->AddToViewport(10001);
+    if (FSlateApplication::IsInitialized())
+    {
+        FSlateApplication::Get().Tick(ESlateTickType::All);
+        PickerWidget->ForceLayoutPrepass();
+        if (TSharedPtr<SWidget> CachedWidget = PickerWidget->GetCachedWidget())
+        {
+            CachedWidget->SlatePrepass(FSlateApplication::Get().GetApplicationScale());
+        }
+    }
+    else
+    {
+        PickerWidget->ForceLayoutPrepass();
+    }
 
     const bool bBound = TryBindActiveConfirmDialog(PickerWidget);
     const bool bPageActive = TryActivateConfirmDialogColorPage(PickerWidget) && IsConfirmDialogColorPageActive(PickerWidget);
@@ -16599,6 +16612,7 @@ bool UInspectorWorldSubsystem::RunColorPickerUIContractSelfTest(FString& OutRepo
     const bool bFixedRadius = PickerWidget->HasFixedRadiusBrushesForAutomation();
     const bool bCompactLayout = PickerWidget->HasCompactLayoutForAutomation();
     const bool bBottomPlacement = PickerWidget->HasBottomSheetPlacementForAutomation();
+    const bool bFooterClearance = PickerWidget->HasFooterClearanceForAutomation();
     const bool bHeaderDrag = PickerWidget->DragModalByForAutomation(FVector2D(48.0f, -24.0f));
     const bool bModal = ActiveConfirmDialogModalBlockerWidget.IsValid();
 
@@ -16684,6 +16698,7 @@ bool UInspectorWorldSubsystem::RunColorPickerUIContractSelfTest(FString& OutRepo
         && bFixedRadius
         && bCompactLayout
         && bBottomPlacement
+        && bFooterClearance
         && bHeaderDrag
         && bModal
         && bRgbTypingPreserved
@@ -16697,7 +16712,7 @@ bool UInspectorWorldSubsystem::RunColorPickerUIContractSelfTest(FString& OutRepo
         && bHexParsed
         && bModalCleared;
     OutReport = FString::Printf(
-        TEXT("ColorPickerUIContract=%s | Bound=%d Page=%d Contract=%d FixedRadius=%d Compact=%d Bottom=%d HeaderDrag=%d Modal=%d RgbTypingPreserved=%d RgbTypingDeferred=%d RgbInput=%d RgbParsed=%d DragPreview=%d HexTypingPreserved=%d HexTypingDeferred=%d HexInput=%d HexParsed=%d ModalCleared=%d"),
+        TEXT("ColorPickerUIContract=%s | Bound=%d Page=%d Contract=%d FixedRadius=%d Compact=%d Bottom=%d FooterClearance=%d HeaderDrag=%d Modal=%d RgbTypingPreserved=%d RgbTypingDeferred=%d RgbInput=%d RgbParsed=%d DragPreview=%d HexTypingPreserved=%d HexTypingDeferred=%d HexInput=%d HexParsed=%d ModalCleared=%d"),
         bPassed ? TEXT("PASS") : TEXT("FAIL"),
         bBound ? 1 : 0,
         bPageActive ? 1 : 0,
@@ -16705,6 +16720,7 @@ bool UInspectorWorldSubsystem::RunColorPickerUIContractSelfTest(FString& OutRepo
         bFixedRadius ? 1 : 0,
         bCompactLayout ? 1 : 0,
         bBottomPlacement ? 1 : 0,
+        bFooterClearance ? 1 : 0,
         bHeaderDrag ? 1 : 0,
         bModal ? 1 : 0,
         bRgbTypingPreserved ? 1 : 0,

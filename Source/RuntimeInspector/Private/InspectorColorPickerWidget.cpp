@@ -24,6 +24,7 @@
 #include "Input/Events.h"
 #include "Input/Reply.h"
 #include "InputCoreTypes.h"
+#include "Layout/SlateRect.h"
 #include "Math/Color.h"
 #include "Misc/DefaultValueHelper.h"
 #include "Rendering/Texture2DResource.h"
@@ -37,7 +38,7 @@ namespace
     static constexpr float RI_ColorPickerSVWidgetSize = 130.0f;
     static constexpr float RI_ColorPickerHueWidgetWidth = 14.0f;
     static constexpr float RI_ColorPickerModalWidth = 350.0f;
-    static constexpr float RI_ColorPickerModalHeight = 270.0f;
+    static constexpr float RI_ColorPickerModalHeight = 310.0f;
     static constexpr float RI_ColorPickerModalRadius = 8.0f;
     static constexpr float RI_ColorPickerBottomOffset = 28.0f;
     static constexpr float RI_ColorPickerViewportClampPadding = 8.0f;
@@ -158,6 +159,30 @@ namespace
             Slot->SetHorizontalAlignment(HAlign_Fill);
             Slot->SetVerticalAlignment(VAlign_Fill);
         }
+    }
+
+    static bool RI_TryGetWidgetScreenRect(const UWidget* Widget, FSlateRect& OutRect)
+    {
+        if (!Widget)
+        {
+            return false;
+        }
+
+        const FGeometry Geometry = Widget->GetCachedGeometry();
+        const FVector2D LocalSize = Geometry.GetLocalSize();
+        if (LocalSize.X <= KINDA_SMALL_NUMBER || LocalSize.Y <= KINDA_SMALL_NUMBER)
+        {
+            return false;
+        }
+
+        const FVector2D TopLeft = Geometry.LocalToAbsolute(FVector2D::ZeroVector);
+        const FVector2D BottomRight = Geometry.LocalToAbsolute(LocalSize);
+        OutRect = FSlateRect(
+            FMath::Min(TopLeft.X, BottomRight.X),
+            FMath::Min(TopLeft.Y, BottomRight.Y),
+            FMath::Max(TopLeft.X, BottomRight.X),
+            FMath::Max(TopLeft.Y, BottomRight.Y));
+        return true;
     }
 }
 
@@ -298,7 +323,7 @@ bool UInspectorColorPickerWidget::HasFixedRadiusBrushesForAutomation() const
 bool UInspectorColorPickerWidget::HasCompactLayoutForAutomation() const
 {
     return RI_ColorPickerModalWidth <= 370.0f
-        && RI_ColorPickerModalHeight <= 280.0f
+        && RI_ColorPickerModalHeight <= 320.0f
         && RI_ColorPickerSVWidgetSize <= 132.0f
         && RI_ColorPickerHueWidgetWidth <= 14.0f
         && RI_ColorPickerOpacityTextureWidth <= 156
@@ -326,6 +351,22 @@ bool UInspectorColorPickerWidget::HasBottomSheetPlacementForAutomation() const
         && Size.Equals(FVector2D(RI_ColorPickerModalWidth, RI_ColorPickerModalHeight), 0.5f)
         && FMath::Abs(Position.X) <= 0.5f
         && FMath::IsNearlyEqual(Position.Y, -RI_ColorPickerBottomOffset, 0.5f);
+}
+
+bool UInspectorColorPickerWidget::HasFooterClearanceForAutomation() const
+{
+    FSlateRect HexRect;
+    FSlateRect CancelRect;
+    FSlateRect ApplyRect;
+    if (!RI_TryGetWidgetScreenRect(InputHex.Get(), HexRect)
+        || !RI_TryGetWidgetScreenRect(CancelButton.Get(), CancelRect)
+        || !RI_TryGetWidgetScreenRect(ApplyButton.Get(), ApplyRect))
+    {
+        return false;
+    }
+
+    const float FooterTop = FMath::Min(CancelRect.Top, ApplyRect.Top);
+    return HexRect.Bottom + 4.0f <= FooterTop;
 }
 
 bool UInspectorColorPickerWidget::DragModalByForAutomation(const FVector2D& Delta)
