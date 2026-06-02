@@ -32,11 +32,11 @@ namespace
 {
     static constexpr int32 RI_ColorPickerSVTextureSize = 192;
     static constexpr int32 RI_ColorPickerHueTextureWidth = 16;
-    static constexpr int32 RI_ColorPickerOpacityTextureWidth = 160;
+    static constexpr int32 RI_ColorPickerOpacityTextureWidth = 154;
     static constexpr int32 RI_ColorPickerStripHeight = 12;
     static constexpr float RI_ColorPickerSVWidgetSize = 130.0f;
     static constexpr float RI_ColorPickerHueWidgetWidth = 14.0f;
-    static constexpr float RI_ColorPickerModalWidth = 460.0f;
+    static constexpr float RI_ColorPickerModalWidth = 350.0f;
     static constexpr float RI_ColorPickerModalHeight = 270.0f;
     static constexpr float RI_ColorPickerModalRadius = 8.0f;
     static constexpr float RI_ColorPickerBottomOffset = 28.0f;
@@ -297,11 +297,13 @@ bool UInspectorColorPickerWidget::HasFixedRadiusBrushesForAutomation() const
 
 bool UInspectorColorPickerWidget::HasCompactLayoutForAutomation() const
 {
-    return RI_ColorPickerModalWidth <= 470.0f
+    return RI_ColorPickerModalWidth <= 370.0f
         && RI_ColorPickerModalHeight <= 280.0f
         && RI_ColorPickerSVWidgetSize <= 132.0f
         && RI_ColorPickerHueWidgetWidth <= 14.0f
-        && RI_ColorPickerOpacityTextureWidth <= 162;
+        && RI_ColorPickerOpacityTextureWidth <= 156
+        && RecentSwatchBox
+        && RecentSwatchBox->GetChildrenCount() <= 6;
 }
 
 bool UInspectorColorPickerWidget::HasBottomSheetPlacementForAutomation() const
@@ -465,12 +467,12 @@ void UInspectorColorPickerWidget::BuildWidgetTree()
     RI_AddHorizontal(PreviewRow, PreviousPreviewStack);
     RI_AddVertical(RightBox, PreviewRow, FMargin(0.0f, 0.0f, 0.0f, 4.0f));
 
-    UHorizontalBox* ModeRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_ColorPickerModeRow"));
+    UVerticalBox* ModeStack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ColorPickerModeStack"));
     RgbModeButton = MakeModeButton(TEXT("RI_ColorPickerRgbMode"), TEXT("RGB"), ERIColorPickerInputMode::RGB);
     HsvModeButton = MakeModeButton(TEXT("RI_ColorPickerHsvMode"), TEXT("HSV"), ERIColorPickerInputMode::HSV);
-    RI_AddHorizontal(ModeRow, RgbModeButton, FMargin(0.0f, 0.0f, 4.0f, 0.0f), ESlateSizeRule::Fill);
-    RI_AddHorizontal(ModeRow, HsvModeButton, FMargin(4.0f, 0.0f, 0.0f, 0.0f), ESlateSizeRule::Fill);
-    RI_AddVertical(RightBox, ModeRow, FMargin(0.0f, 0.0f, 0.0f, 4.0f));
+    RI_AddVertical(ModeStack, RgbModeButton, FMargin(0.0f, 0.0f, 0.0f, 3.0f));
+    RI_AddVertical(ModeStack, HsvModeButton);
+    RI_AddVertical(RightBox, ModeStack, FMargin(0.0f, 0.0f, 0.0f, 4.0f));
 
     InputR = MakeInputBox(TEXT("InputTXT_R"), TEXT("255"));
     InputG = MakeInputBox(TEXT("InputTXT_G"), TEXT("0"));
@@ -504,7 +506,7 @@ void UInspectorColorPickerWidget::BuildWidgetTree()
     RI_AddVertical(RightBox, HexInputSize);
 
     USizeBox* LeftSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-    LeftSize->SetWidthOverride(172.0f);
+    LeftSize->SetWidthOverride(168.0f);
     LeftSize->SetContent(LeftBox);
     RI_AddHorizontal(BodyRow, LeftSize, FMargin(0.0f, 0.0f, 12.0f, 0.0f));
     RI_AddHorizontal(BodyRow, RightBox, FMargin(0.0f), ESlateSizeRule::Fill);
@@ -775,8 +777,9 @@ void UInspectorColorPickerWidget::RefreshRecentSwatches()
     }
 
     RecentSwatchBox->ClearChildren();
-    const int32 MaxSwatches = 8;
-    for (int32 Index = 0; Index < MaxSwatches; ++Index)
+    const int32 MaxSwatches = 6;
+    const int32 VisibleSwatches = FMath::Clamp(FMath::Max(RecentColors.Num(), 4), 1, MaxSwatches);
+    for (int32 Index = 0; Index < VisibleSwatches; ++Index)
     {
         const FLinearColor SwatchColor = RecentColors.IsValidIndex(Index)
             ? RecentColors[Index]
