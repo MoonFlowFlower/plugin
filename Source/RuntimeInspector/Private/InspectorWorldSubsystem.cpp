@@ -16613,6 +16613,8 @@ bool UInspectorWorldSubsystem::RunColorPickerUIContractSelfTest(FString& OutRepo
     const bool bCompactLayout = PickerWidget->HasCompactLayoutForAutomation();
     const bool bBottomPlacement = PickerWidget->HasBottomSheetPlacementForAutomation();
     const bool bFooterClearance = PickerWidget->HasFooterClearanceForAutomation();
+    const bool bActionsBelowRecent = PickerWidget->HasActionsBelowRecentForAutomation();
+    const bool bHexButtonOverlap = PickerWidget->HasHexButtonOverlapForAutomation();
     const bool bHeaderDrag = PickerWidget->DragModalByForAutomation(FVector2D(48.0f, -24.0f));
     const bool bModal = ActiveConfirmDialogModalBlockerWidget.IsValid();
 
@@ -16699,6 +16701,8 @@ bool UInspectorWorldSubsystem::RunColorPickerUIContractSelfTest(FString& OutRepo
         && bCompactLayout
         && bBottomPlacement
         && bFooterClearance
+        && bActionsBelowRecent
+        && !bHexButtonOverlap
         && bHeaderDrag
         && bModal
         && bRgbTypingPreserved
@@ -16712,7 +16716,7 @@ bool UInspectorWorldSubsystem::RunColorPickerUIContractSelfTest(FString& OutRepo
         && bHexParsed
         && bModalCleared;
     OutReport = FString::Printf(
-        TEXT("ColorPickerUIContract=%s | Bound=%d Page=%d Contract=%d FixedRadius=%d Compact=%d Bottom=%d FooterClearance=%d HeaderDrag=%d Modal=%d RgbTypingPreserved=%d RgbTypingDeferred=%d RgbInput=%d RgbParsed=%d DragPreview=%d HexTypingPreserved=%d HexTypingDeferred=%d HexInput=%d HexParsed=%d ModalCleared=%d"),
+        TEXT("ColorPickerUIContract=%s | Bound=%d Page=%d Contract=%d FixedRadius=%d Compact=%d Bottom=%d FooterClearance=%d ActionsBelowRecent=%d HexButtonOverlap=%d HeaderDrag=%d Modal=%d RgbTypingPreserved=%d RgbTypingDeferred=%d RgbInput=%d RgbParsed=%d DragPreview=%d HexTypingPreserved=%d HexTypingDeferred=%d HexInput=%d HexParsed=%d ModalCleared=%d"),
         bPassed ? TEXT("PASS") : TEXT("FAIL"),
         bBound ? 1 : 0,
         bPageActive ? 1 : 0,
@@ -16721,6 +16725,8 @@ bool UInspectorWorldSubsystem::RunColorPickerUIContractSelfTest(FString& OutRepo
         bCompactLayout ? 1 : 0,
         bBottomPlacement ? 1 : 0,
         bFooterClearance ? 1 : 0,
+        bActionsBelowRecent ? 1 : 0,
+        bHexButtonOverlap ? 1 : 0,
         bHeaderDrag ? 1 : 0,
         bModal ? 1 : 0,
         bRgbTypingPreserved ? 1 : 0,

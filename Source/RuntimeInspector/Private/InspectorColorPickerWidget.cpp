@@ -38,7 +38,7 @@ namespace
     static constexpr float RI_ColorPickerSVWidgetSize = 130.0f;
     static constexpr float RI_ColorPickerHueWidgetWidth = 14.0f;
     static constexpr float RI_ColorPickerModalWidth = 350.0f;
-    static constexpr float RI_ColorPickerModalHeight = 310.0f;
+    static constexpr float RI_ColorPickerModalHeight = 278.0f;
     static constexpr float RI_ColorPickerModalRadius = 8.0f;
     static constexpr float RI_ColorPickerBottomOffset = 28.0f;
     static constexpr float RI_ColorPickerViewportClampPadding = 8.0f;
@@ -184,6 +184,22 @@ namespace
             FMath::Max(TopLeft.Y, BottomRight.Y));
         return true;
     }
+
+    static bool RI_RectIntersects(const FSlateRect& A, const FSlateRect& B)
+    {
+        return A.Left < B.Right
+            && A.Right > B.Left
+            && A.Top < B.Bottom
+            && A.Bottom > B.Top;
+    }
+
+    static bool RI_RectContainsWithPadding(const FSlateRect& Outer, const FSlateRect& Inner, float Padding)
+    {
+        return Inner.Left >= Outer.Left + Padding
+            && Inner.Right <= Outer.Right - Padding
+            && Inner.Top >= Outer.Top + Padding
+            && Inner.Bottom <= Outer.Bottom - Padding;
+    }
 }
 
 UInspectorColorPickerWidget::UInspectorColorPickerWidget(const FObjectInitializer& ObjectInitializer)
@@ -232,7 +248,7 @@ bool UInspectorColorPickerWidget::IsNativeColorPickerReadyForAutomation() const
     return RootCanvas && ModalBorder && SaturationValueImage && HueImage && OpacityImage
         && HeaderRow
         && CurrentPreviewBorder && PreviousPreviewBorder && InputR && InputG && InputB && InputA
-        && InputH && InputS && InputV && InputHsvA && InputHex && RecentSwatchBox && ApplyButton && CancelButton;
+        && InputH && InputS && InputV && InputHsvA && InputHex && RecentSwatchBox && ActionButtonRow && ApplyButton && CancelButton;
 }
 
 bool UInspectorColorPickerWidget::HasNativeColorPickerContractForAutomation() const
@@ -323,7 +339,7 @@ bool UInspectorColorPickerWidget::HasFixedRadiusBrushesForAutomation() const
 bool UInspectorColorPickerWidget::HasCompactLayoutForAutomation() const
 {
     return RI_ColorPickerModalWidth <= 370.0f
-        && RI_ColorPickerModalHeight <= 320.0f
+        && RI_ColorPickerModalHeight <= 290.0f
         && RI_ColorPickerSVWidgetSize <= 132.0f
         && RI_ColorPickerHueWidgetWidth <= 14.0f
         && RI_ColorPickerOpacityTextureWidth <= 156
@@ -355,6 +371,34 @@ bool UInspectorColorPickerWidget::HasBottomSheetPlacementForAutomation() const
 
 bool UInspectorColorPickerWidget::HasFooterClearanceForAutomation() const
 {
+    return !HasHexButtonOverlapForAutomation();
+}
+
+bool UInspectorColorPickerWidget::HasActionsBelowRecentForAutomation() const
+{
+    FSlateRect RecentRect;
+    FSlateRect ActionRect;
+    FSlateRect CancelRect;
+    FSlateRect ApplyRect;
+    FSlateRect ModalRect;
+    if (!RI_TryGetWidgetScreenRect(RecentSwatchBox.Get(), RecentRect)
+        || !RI_TryGetWidgetScreenRect(ActionButtonRow.Get(), ActionRect)
+        || !RI_TryGetWidgetScreenRect(CancelButton.Get(), CancelRect)
+        || !RI_TryGetWidgetScreenRect(ApplyButton.Get(), ApplyRect)
+        || !RI_TryGetWidgetScreenRect(ModalBorder.Get(), ModalRect))
+    {
+        return false;
+    }
+
+    const float ButtonTop = FMath::Min(CancelRect.Top, ApplyRect.Top);
+    return RecentRect.Bottom + 3.0f <= ButtonTop
+        && RI_RectContainsWithPadding(ModalRect, ActionRect, 4.0f)
+        && RI_RectContainsWithPadding(ModalRect, CancelRect, 4.0f)
+        && RI_RectContainsWithPadding(ModalRect, ApplyRect, 4.0f);
+}
+
+bool UInspectorColorPickerWidget::HasHexButtonOverlapForAutomation() const
+{
     FSlateRect HexRect;
     FSlateRect CancelRect;
     FSlateRect ApplyRect;
@@ -362,11 +406,11 @@ bool UInspectorColorPickerWidget::HasFooterClearanceForAutomation() const
         || !RI_TryGetWidgetScreenRect(CancelButton.Get(), CancelRect)
         || !RI_TryGetWidgetScreenRect(ApplyButton.Get(), ApplyRect))
     {
-        return false;
+        return true;
     }
 
-    const float FooterTop = FMath::Min(CancelRect.Top, ApplyRect.Top);
-    return HexRect.Bottom + 4.0f <= FooterTop;
+    return RI_RectIntersects(HexRect, CancelRect)
+        || RI_RectIntersects(HexRect, ApplyRect);
 }
 
 bool UInspectorColorPickerWidget::DragModalByForAutomation(const FVector2D& Delta)
@@ -492,6 +536,13 @@ void UInspectorColorPickerWidget::BuildWidgetTree()
     RecentSwatchBox = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_ColorPickerRecentSwatches"));
     RI_AddVertical(LeftBox, RecentSwatchBox);
 
+    ActionButtonRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_ColorPickerActions"));
+    CancelButton = MakePickerButton(TEXT("RI_ColorPickerCancel"), TEXT("Cancel"), false);
+    ApplyButton = MakePickerButton(TEXT("RI_ColorPickerApply"), TEXT("Apply"), true);
+    RI_AddHorizontal(ActionButtonRow, CancelButton, FMargin(0.0f, 0.0f, 6.0f, 0.0f));
+    RI_AddHorizontal(ActionButtonRow, ApplyButton);
+    RI_AddVertical(LeftBox, ActionButtonRow, FMargin(0.0f, 8.0f, 0.0f, 0.0f));
+
     UVerticalBox* RightBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ColorPickerRight"));
     UHorizontalBox* PreviewRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_ColorPickerPreviewRow"));
     UVerticalBox* CurrentPreviewStack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
@@ -552,15 +603,6 @@ void UInspectorColorPickerWidget::BuildWidgetTree()
     RI_AddHorizontal(BodyRow, LeftSize, FMargin(0.0f, 0.0f, 12.0f, 0.0f));
     RI_AddHorizontal(BodyRow, RightBox, FMargin(0.0f), ESlateSizeRule::Fill);
     RI_AddVertical(ModalBox, BodyRow, FMargin(0.0f), ESlateSizeRule::Fill);
-
-    UHorizontalBox* FooterRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_ColorPickerFooter"));
-    USizeBox* FooterSpacer = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-    RI_AddHorizontal(FooterRow, FooterSpacer, FMargin(0.0f), ESlateSizeRule::Fill);
-    CancelButton = MakePickerButton(TEXT("RI_ColorPickerCancel"), TEXT("Cancel"), false);
-    ApplyButton = MakePickerButton(TEXT("RI_ColorPickerApply"), TEXT("Apply"), true);
-    RI_AddHorizontal(FooterRow, CancelButton, FMargin(0.0f, 0.0f, 8.0f, 0.0f));
-    RI_AddHorizontal(FooterRow, ApplyButton);
-    RI_AddVertical(ModalBox, FooterRow, FMargin(0.0f, 7.0f, 0.0f, 0.0f));
 
     if (UCanvasPanelSlot* ModalSlot = RootCanvas->AddChildToCanvas(ModalBorder))
     {
@@ -1346,7 +1388,7 @@ UButton* UInspectorColorPickerWidget::MakePickerButton(const FName& Name, const 
         Name,
         Label,
         bPrimary ? RICompactUI::ERIButtonVisualStyle::Primary : RICompactUI::ERIButtonVisualStyle::Secondary,
-        bCloseButton ? 28.0f : (bPrimary ? 96.0f : 84.0f),
+        bCloseButton ? 28.0f : (bPrimary ? 84.0f : 76.0f),
         bCloseButton ? 22.0f : 24.0f,
         RICompactUI::GetLabelFontSize());
 }

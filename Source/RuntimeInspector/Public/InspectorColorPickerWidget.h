@@ -64,6 +64,8 @@ public:
     bool HasCompactLayoutForAutomation() const;
     bool HasBottomSheetPlacementForAutomation() const;
     bool HasFooterClearanceForAutomation() const;
+    bool HasActionsBelowRecentForAutomation() const;
+    bool HasHexButtonOverlapForAutomation() const;
     bool DragModalByForAutomation(const FVector2D& Delta);
 
 protected:
@@ -256,6 +258,9 @@ private:
 
     UPROPERTY(Transient)
     TObjectPtr<UHorizontalBox> RecentSwatchBox = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UHorizontalBox> ActionButtonRow = nullptr;
 
     UPROPERTY(Transient)
     TObjectPtr<UButton> ApplyButton = nullptr;
