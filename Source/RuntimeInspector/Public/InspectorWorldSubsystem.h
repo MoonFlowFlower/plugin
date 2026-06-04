@@ -1895,6 +1895,7 @@ private:
         FTimerHandle DeferredOpenActorRefreshTimerHandle;
         FTimerHandle ThemePreviewRefreshTimerHandle;
         bool bFabScreenshotApplicationScaleCaptured = false;
+        bool bSkipFabScreenshotApplicationScaleRestoreForNextOpen = false;
         float SavedFabScreenshotApplicationScale = 1.0f;
         bool bFabScreenshotPanelTransformCaptured = false;
         FVector2D SavedFabScreenshotPanelTranslation = FVector2D::ZeroVector;

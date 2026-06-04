@@ -365,34 +365,55 @@ namespace RICompactUI
         return GetThemePresetTokens().Metrics;
     }
 
+    inline float& ReadableScaleOverride()
+    {
+        static float Scale = 1.0f;
+        return Scale;
+    }
+
+    inline void SetReadableScaleOverride(float InScale)
+    {
+        ReadableScaleOverride() = FMath::Clamp(InScale, 1.0f, 1.25f);
+    }
+
+    inline float GetReadableScaleOverride()
+    {
+        return ReadableScaleOverride();
+    }
+
+    inline int32 ScaleReadableFontSize(int32 BaseSize)
+    {
+        return FMath::Max(BaseSize, FMath::RoundToInt(static_cast<float>(BaseSize) * GetReadableScaleOverride()));
+    }
+
     inline int32 GetSectionTitleFontSize()
     {
-        return GetThemeMetrics().SectionTitleFontSize;
+        return ScaleReadableFontSize(GetThemeMetrics().SectionTitleFontSize);
     }
 
     inline int32 GetLabelFontSize()
     {
-        return GetThemeMetrics().LabelFontSize;
+        return ScaleReadableFontSize(GetThemeMetrics().LabelFontSize);
     }
 
     inline int32 GetValueFontSize()
     {
-        return GetThemeMetrics().ValueFontSize;
+        return ScaleReadableFontSize(GetThemeMetrics().ValueFontSize);
     }
 
     inline int32 GetMutedFontSize()
     {
-        return GetThemeMetrics().MutedFontSize;
+        return ScaleReadableFontSize(GetThemeMetrics().MutedFontSize);
     }
 
     inline float GetButtonHeight()
     {
-        return GetThemeMetrics().ButtonHeight;
+        return GetThemeMetrics().ButtonHeight * GetReadableScaleOverride();
     }
 
     inline float GetInputHeight()
     {
-        return GetThemeMetrics().InputHeight;
+        return GetThemeMetrics().InputHeight * GetReadableScaleOverride();
     }
 
     inline float GetCompactListHeight()

@@ -4474,6 +4474,16 @@ void UInspectorWorldSubsystem::OpenToPage(ERIVisiblePage InitialPage)
         PushToast(ERIToastType::Warning, GetRIUnlockHint(), 3.0f);
         return;
     }
+
+    if (bSkipFabScreenshotApplicationScaleRestoreForNextOpen)
+    {
+        bSkipFabScreenshotApplicationScaleRestoreForNextOpen = false;
+    }
+    else
+    {
+        RestoreFabScreenshotApplicationScale();
+    }
+
     if (bOpen)
     {
         EnsureDockRootWidget();
@@ -13762,10 +13772,55 @@ bool UInspectorWorldSubsystem::ExecuteLegacyToolNativeBridgeAction(FName BridgeI
         }
         RefreshDockRootWidget();
         const FString Summary = GetDockLayoutDebugSummaryForAutomation();
+        auto ExtractSummaryFloat = [&Summary](const TCHAR* Key, float& OutValue) -> bool
+        {
+            const FString KeyText(Key);
+            const int32 StartIndex = Summary.Find(KeyText);
+            if (StartIndex == INDEX_NONE)
+            {
+                return false;
+            }
+
+            FString ValueText = Summary.Mid(StartIndex + KeyText.Len());
+            int32 SpaceIndex = INDEX_NONE;
+            if (ValueText.FindChar(TEXT(' '), SpaceIndex))
+            {
+                ValueText.LeftInline(SpaceIndex);
+            }
+            ValueText.TrimStartAndEndInline();
+            if (ValueText.IsEmpty())
+            {
+                return false;
+            }
+
+            OutValue = FCString::Atof(*ValueText);
+            return true;
+        };
+
+        float SideWidthPhysical = 0.0f;
+        float SideWidthLogical = 0.0f;
+        float CompactLeftPhysical = 0.0f;
+        float ViewportScale = 0.0f;
+        float ReadableScale = 0.0f;
+        const bool bScaleMetricsPresent =
+            ExtractSummaryFloat(TEXT("SideWidthPhysical="), SideWidthPhysical)
+            && ExtractSummaryFloat(TEXT("SideWidthLogical="), SideWidthLogical)
+            && ExtractSummaryFloat(TEXT("CompactLeftPhysical="), CompactLeftPhysical)
+            && ExtractSummaryFloat(TEXT("ViewportScale="), ViewportScale)
+            && ExtractSummaryFloat(TEXT("ReadableScale="), ReadableScale);
+        const bool bReadableDockScaleOk = bScaleMetricsPresent
+            && SideWidthPhysical >= 319.0f
+            && SideWidthPhysical <= 361.0f
+            && SideWidthLogical > 0.0f
+            && CompactLeftPhysical >= 63.0f
+            && CompactLeftPhysical <= 65.0f
+            && ViewportScale > 0.0f
+            && ReadableScale >= 1.0f
+            && ReadableScale <= 1.25f;
         bOutPassed = Summary.Contains(TEXT("DockRoot=1"))
             && Summary.Contains(TEXT("RightPanel=1"))
-            && Summary.Contains(TEXT("SideWidth=256"))
-            && Summary.Contains(TEXT("ExpandedAt1080=1"))
+            && bReadableDockScaleOk
+            && Summary.Contains(TEXT("CompactAt1080=1"))
             && Summary.Contains(TEXT("ExpandedAt1390=1"))
             && Summary.Contains(TEXT("CompactAt1000=1"))
             && Summary.Contains(TEXT("CompactTextHidden=1"))
@@ -18126,6 +18181,7 @@ bool UInspectorWorldSubsystem::ApplyFabScreenshotFoundationState(FString& OutSum
 
     SetRemoteSessionUIContext(FString(), FString(), FString(), FString());
     Close();
+    bSkipFabScreenshotApplicationScaleRestoreForNextOpen = true;
     Open();
 
     FString PanelTransformError;

@@ -290,6 +290,14 @@ private:
     double LastViewModelRefreshMs = 0.0;
     double LastHostedCreateMs = 0.0;
     double LastOpenHydrationViewModelMs = 0.0;
+    float LastDockViewportScale = 1.0f;
+    float LastDockReadableScale = 1.0f;
+    float LastDockSidePanelLogicalWidth = 0.0f;
+    float LastDockSidePanelPhysicalWidth = 0.0f;
+    float LastDockCompactLeftLogicalWidth = 0.0f;
+    float LastDockCompactLeftPhysicalWidth = 0.0f;
+    float LastDockPanelGapLogical = 0.0f;
+    float LastDockPanelGapPhysical = 0.0f;
 
     bool bWidgetTreeBuilt = false;
     bool bLeftPanelCompact = false;
