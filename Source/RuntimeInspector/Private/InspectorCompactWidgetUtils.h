@@ -24,6 +24,7 @@
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
 #include "Engine/Texture2D.h"
+#include "TextureResource.h"
 
 namespace RICompactUI
 {
