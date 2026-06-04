@@ -1,0 +1,68 @@
+{
+  "targetWidth": 1920,
+  "targetHeight": 1080,
+  "maxBytes": 3145728,
+  "images": [
+    {
+      "source": "D:\\Project\\Game\\UE\\PluginMaker\\Saved\\RuntimeInspector\\FabMediaCapture\\cover.png",
+      "filename": "cover.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 1109162,
+      "format": "PNG",
+      "jpegQuality": null,
+      "originalWidth": 1707,
+      "originalHeight": 1032,
+      "pass": true
+    },
+    {
+      "source": "D:\\Project\\Game\\UE\\PluginMaker\\Saved\\RuntimeInspector\\FabMediaCapture\\screenshot_01_actor_panel.png",
+      "filename": "screenshot_01_actor_panel.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 1170086,
+      "format": "PNG",
+      "jpegQuality": null,
+      "originalWidth": 1707,
+      "originalHeight": 1032,
+      "pass": true
+    },
+    {
+      "source": "D:\\Project\\Game\\UE\\PluginMaker\\Saved\\RuntimeInspector\\FabMediaCapture\\screenshot_02_changes_workflow.png",
+      "filename": "screenshot_02_changes_workflow.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 1196653,
+      "format": "PNG",
+      "jpegQuality": null,
+      "originalWidth": 1707,
+      "originalHeight": 1032,
+      "pass": true
+    },
+    {
+      "source": "D:\\Project\\Game\\UE\\PluginMaker\\Saved\\RuntimeInspector\\FabMediaCapture\\screenshot_03_settings.png",
+      "filename": "screenshot_03_settings.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 1136079,
+      "format": "PNG",
+      "jpegQuality": null,
+      "originalWidth": 1707,
+      "originalHeight": 1032,
+      "pass": true
+    },
+    {
+      "source": "D:\\Project\\Game\\UE\\PluginMaker\\Saved\\RuntimeInspector\\FabMediaCapture\\screenshot_04_tools.png",
+      "filename": "screenshot_04_tools.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 1155827,
+      "format": "PNG",
+      "jpegQuality": null,
+      "originalWidth": 1707,
+      "originalHeight": 1032,
+      "pass": true
+    }
+  ],
+  "allPassed": true
+}

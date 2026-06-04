@@ -4,48 +4,62 @@ This file is the release-candidate signoff guide for the current Fab submission 
 
 It is not the development authority. For implementation rules, use `docs/AGENT_DEVELOPMENT.md`.
 
-## Status Note
-
-- The RC baseline recorded below is stale and must not be treated as the final Fab submission candidate.
-- Transform source persistence is now validated on the local dirty baseline:
-  - `Saved/RuntimeInspector/Validation/TransformSourcePersistence/BC8B047E-400B-566E-1347-2DA5AA231920/prepare_report.json`
-  - `Saved/RuntimeInspector/Validation/TransformSourcePersistence/BC8B047E-400B-566E-1347-2DA5AA231920/verify_restore_report.json`
-  - acceptance target: `BP_TestVarsActor -> Cube (StaticMeshComponent)`
-- The previous actor-root scale false negative was not a source-promote failure:
-  - `BP_TestVarsActor` drives `SetActorScale3D(TestScale)` from `Event Tick`
-  - actor-root world scale on that test Blueprint is not the release-authoritative persistence target
-- Automated package regeneration and blank-project load validation were refreshed on `2026-04-16`:
-  - package root: `Saved/FabRelease/Package/RuntimeInspector_UE55/RuntimeInspector`
-  - blank host: `Saved/FabRelease/BlankProjectValidation/RuntimeInspectorBlank_UE55/RuntimeInspectorBlank/RuntimeInspectorBlank.uproject`
-  - load log: `Saved/fab_blank_project_validation.log`
-- Deterministic screenshot staging was also refreshed on `2026-04-16` on the current dirty local baseline:
-  - screenshot root: `Saved/RuntimeInspector/FabMediaCapture/`
-  - capture log: `Saved/RuntimeInspector/FabMediaCapture/capture_fab_media.log`
-  - capture manifest: `Saved/RuntimeInspector/FabMediaCapture/capture_manifest.txt`
-  - required current-UI shots spot-checked:
-    - `cover.png`
-    - `screenshot_01_actor_panel.png`
-    - `screenshot_02_changes_workflow.png`
-    - `screenshot_03_settings.png`
-    - `screenshot_04_tools.png`
-- Before final Fab signoff, freeze a new clean RC commit and then regenerate package, screenshot, demo, and manual-smoke evidence from that exact commit.
-
 ## RC Baseline
 
 - Branch: `codex/runtimeinspector-fab-rc`
-- Commit: `1970ee707288bff2288785c7ca73981da89b6507`
+- Product RC commit: `0a26995c1f057972bb175afa483326cb1c2df886`
+- Product RC summary: `Fix RuntimeInspector Fab plugin package build`
 - Package root:
   - `Saved/FabRelease/Package/RuntimeInspector_UE55/RuntimeInspector`
-- Blank-install manual smoke host:
+- Package log:
+  - `Saved/build_runtimeinspector_fab_release.log`
+- Blank validation host:
   - `Saved/FabRelease/BlankProjectValidation/RuntimeInspectorBlank_UE55/RuntimeInspectorBlank/RuntimeInspectorBlank.uproject`
-- Screenshot set:
-  - `Saved/RuntimeInspector/FabMediaCapture/`
-- Current Actor-page runtime structure validation also still passes on the same dirty local baseline:
-  - `Saved/RuntimeInspector/Validation/actor_page_structure.png`
+- Automated blank-load log:
+  - `Saved/fab_blank_project_validation.log`
 
-All manual smoke notes, screenshots, and demo media must match this RC baseline. If code changes after this commit, regenerate package, validation evidence, and media before signoff.
+## Automated Evidence
 
-## Manual Smoke
+- Build:
+  - `PluginMakerEditor Win64 Development` passed after the package-build include fix.
+- Runtime/UI regression:
+  - `favorite_icon_visual_contract`
+  - `dock_material_tree_route`
+  - `dock_material_edit_route`
+  - `row_text_overflow_contract`
+  - `function_run_button_visual_contract`
+  - `color_picker_preview_perf`
+  - `runtime_ui_contract_v1`
+- Package:
+  - `Scripts/PackageFabRelease.ps1`
+- Blank host automated load:
+  - `Scripts/ValidateFabBlankProject.ps1 -KeepValidationProject`
+- Media:
+  - `Scripts/OpenFabScreenshotState.ps1`
+  - `Scripts/CaptureFabMedia.ps1`
+  - `python Scripts/NormalizeFabMedia.py --input Saved/RuntimeInspector/FabMediaCapture --output FabMedia --width 1920 --height 1080 --max-bytes 3145728`
+
+## Media Signoff
+
+- Final image manifest:
+  - `FabMedia/fab_media_manifest.json`
+- Final image status:
+  - all five images passed `1920x1080`, PNG, `<3145728` bytes
+- Final images:
+  - `FabMedia/cover.png`
+  - `FabMedia/screenshot_01_actor_panel.png`
+  - `FabMedia/screenshot_02_changes_workflow.png`
+  - `FabMedia/screenshot_03_settings.png`
+  - `FabMedia/screenshot_04_tools.png`
+- Actor screenshot note:
+  - generated through real input-equivalent actor pick
+  - selected actor: `BP_ThirdPersonCharacter_C_0`
+- Demo:
+  - `FabMedia/demo.mp4`
+  - ffprobe: H.264, `1920x1080`, `30 fps`, `35.000000s`, `734861` bytes
+  - note: deterministic screenshot-sequence video, not a live operation recording
+
+## Blank-Host Manual Smoke
 
 Use the preserved blank-install host project. Do not use the main `PluginMaker` project for this signoff.
 
@@ -53,24 +67,20 @@ Important boundary:
 
 - the preserved blank host contains the packaged `RuntimeInspector` plugin only
 - it does not include `UE_MCP_Bridge` or `control_runtime_inspector` automation hooks
-- this signoff step therefore remains human/manual, not bridge-driven
-
-### Launch
-
-1. Open:
-   - `Saved/FabRelease/BlankProjectValidation/RuntimeInspectorBlank_UE55/RuntimeInspectorBlank/RuntimeInspectorBlank.uproject`
-2. Wait for the editor to finish loading.
-3. Confirm the plugin is mounted and no startup error dialog appears.
+- this step remains human/manual
 
 ### Minimum Path
 
-1. Open Runtime Inspector.
-2. Select a test actor in the level.
-3. Verify `Actor` page opens and shows selection + component/property content.
-4. Switch to `Changes` and confirm the page opens without embedded settings content.
-5. Switch to `Settings` and confirm it is the only highlighted settings-style tab.
-6. Switch to `Tools` and confirm it is the only highlighted tools-style tab.
-7. Return to `Actor` and confirm basic interaction still works.
+1. Open:
+   - `Saved/FabRelease/BlankProjectValidation/RuntimeInspectorBlank_UE55/RuntimeInspectorBlank/RuntimeInspectorBlank.uproject`
+2. Wait for shader compilation to finish.
+3. Open Runtime Inspector.
+4. Select a test actor in the level.
+5. Verify `Actor` page opens and shows selection plus component/property content.
+6. Switch to `Changes` and confirm the page opens without embedded settings content.
+7. Switch to `Settings` and confirm it is the only highlighted settings-style tab.
+8. Switch to `Tools` and confirm it is the only highlighted tools-style tab.
+9. Return to `Actor` and confirm basic interaction still works.
 
 ### Pass Criteria
 
@@ -81,42 +91,21 @@ Important boundary:
 - No double-highlighted tabs.
 - No blocking modal/input leak after normal use.
 
-### Record
+### Current Record
 
-- Date:
-- Operator:
-- Result: `PASS` / `FAIL`
+- Date: 2026-06-04
+- Operator: Codex attempted launch only
+- Result: `PENDING`
 - Notes:
+  - Automated blank-load validation passed.
+  - Manual interaction smoke was not completed because the blank host remained on the UE splash/shader compilation screen during the wait window.
+  - Evidence:
+    - `Saved/FabRelease/blank_manual_smoke_editor.png`
+    - `Saved/FabRelease/blank_manual_smoke_editor_after_wait.png`
 
-## Demo Capture
+## Remaining Non-Repo Steps
 
-Use the RC baseline above. If the UI or workflow changes, re-record.
-
-### Target Length
-
-- 30 to 60 seconds
-
-### Shot Order
-
-1. Start PIE and open Runtime Inspector.
-2. Select an actor and edit one supported property.
-3. Show the staged change on `Changes`.
-4. Show compare/audit or promote preview.
-5. Show `Settings` briefly to establish the distinct settings page.
-6. Show `Tools` briefly with workflow/self-test capability.
-7. Show packaged-runtime pullback on `Changes` if the shot remains readable.
-
-### Demo Rules
-
-- Keep one clear idea per shot.
-- Do not show internal dev-only logs unless they support a product-facing capability.
-- Keep tab highlights correct and page routing obvious.
-- Prefer the current deterministic screenshot state/theme when possible.
-
-### Record
-
-- Video or GIF file:
-- Captured from commit:
-- Checked by:
-- Result: `PASS` / `FAIL`
-- Notes:
+- Complete blank-host manual smoke after shader compilation finishes.
+- Create/submit Fab listing in the backend.
+- Fill `MarketplaceURL` after the Fab listing exists.
+- Wait for Epic review result.

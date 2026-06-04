@@ -4,40 +4,14 @@ This file is a Fab submission checklist, not the RuntimeInspector agent developm
 
 For implementation rules and development workflow authority, use `docs/AGENT_DEVELOPMENT.md`.
 
-Use this checklist when preparing the UE 5.5 Fab submission package.
-
 ## Current RC Status
 
-- Release-candidate baseline must stay fixed while preparing package, screenshots, manual smoke evidence, and demo media.
 - Current RC branch: `codex/runtimeinspector-fab-rc`
-- Current RC commit: `1970ee707288bff2288785c7ca73981da89b6507`
-- The RC commit above is now stale and no longer release-authoritative for the current worktree.
-- Transform source persistence is no longer a Fab blocker on the local baseline:
-  - `Saved/RuntimeInspector/Validation/TransformSourcePersistence/BC8B047E-400B-566E-1347-2DA5AA231920/prepare_report.json`
-  - `Saved/RuntimeInspector/Validation/TransformSourcePersistence/BC8B047E-400B-566E-1347-2DA5AA231920/verify_restore_report.json`
-- Latest automated release evidence refreshed on `2026-04-16`.
-- Preserved blank-install smoke host:
-  - `Saved/FabRelease/BlankProjectValidation/RuntimeInspectorBlank_UE55/RuntimeInspectorBlank/RuntimeInspectorBlank.uproject`
-- Current deterministic screenshot set:
-  - `Saved/RuntimeInspector/FabMediaCapture/`
-- Automated screenshot staging was refreshed on `2026-04-16` on the current dirty local baseline:
-  - `Saved/RuntimeInspector/FabMediaCapture/capture_fab_media.log`
-  - `Saved/RuntimeInspector/FabMediaCapture/capture_manifest.txt`
-- Required current-UI shots were visually spot-checked from that staging set:
-  - `cover.png`
-  - `screenshot_01_actor_panel.png`
-  - `screenshot_02_changes_workflow.png`
-  - `screenshot_03_settings.png`
-  - `screenshot_04_tools.png`
-- Manual smoke and demo capture procedure:
-  - `docs/FAB_RC_SIGNOFF.md`
-- Remaining pre-submit items are intentionally narrow:
-  - Freeze a new clean RC commit from the current branch/worktree state.
-  - Regenerate package, screenshots, and signoff evidence from that same commit.
-  - Re-run the packaged-install manual smoke path on the preserved blank host project.
-  - Record the short demo video or GIF.
-  - Fill `MarketplaceURL` after the Fab listing exists.
-- Package output, media output, and manual-smoke evidence must all come from the same RC branch/commit.
+- Product RC commit: `0a26995c1f057972bb175afa483326cb1c2df886`
+- Product RC summary: `Fix RuntimeInspector Fab plugin package build`
+- Repo-local package, automated blank-load validation, final screenshots, media manifest, and demo video are prepared.
+- Do not claim Fab-ready until blank-host manual interaction smoke is signed.
+- Remaining external follow-up: replace `MarketplaceURL` after the Fab listing exists.
 
 ## Package
 
@@ -45,10 +19,11 @@ Use this checklist when preparing the UE 5.5 Fab submission package.
 - [x] `README.md` explains installation, activation, scope, and support.
 - [x] `Config/FilterPlugin.ini` is present for release packaging.
 - [x] `Scripts/PackageFabRelease.ps1` builds and stages a clean release package.
-- [x] Clean package output is generated under `Saved/FabRelease/Package/RuntimeInspector_UE55/RuntimeInspector`.
+- [x] Clean package output exists:
+  - `Saved/FabRelease/Package/RuntimeInspector_UE55/RuntimeInspector`
 - [x] Final package excludes `.git`, `Docs`, `Saved`, internal logs, and other repo-only residue.
-- [x] Final package retains the precompiled `Binaries` required for direct install into a blank UE 5.5 blueprint project.
-- [x] Final package retains the validated `Intermediate` precompile data emitted by `BuildPlugin -NoHostPlatform`.
+- [x] Final package retains precompiled `Binaries` for direct install into a blank UE 5.5 Blueprint project.
+- [x] Final package retains validated `Intermediate` precompile data emitted by `BuildPlugin -NoHostPlatform`.
 
 ## Listing Copy
 
@@ -58,46 +33,46 @@ Use this checklist when preparing the UE 5.5 Fab submission package.
 
 ## Media
 
-- [x] Capture cover image.
-- [x] Capture 3-6 product screenshots based on `FAB_LISTING.md`.
-- [ ] Record a short demo video or GIF.
-- [x] Confirm screenshots match the actual shipped UE 5.5 feature set.
-- [x] Media staging folder and expected filenames are prepared under `FabMedia/`.
-- [x] Automated capture path is available at `Scripts\CaptureFabMedia.cmd` and writes deterministic shots to `Saved\RuntimeInspector\FabMediaCapture\`.
+- [x] Capture cover image:
+  - `FabMedia/cover.png`
+- [x] Capture product screenshots:
+  - `FabMedia/screenshot_01_actor_panel.png`
+  - `FabMedia/screenshot_02_changes_workflow.png`
+  - `FabMedia/screenshot_03_settings.png`
+  - `FabMedia/screenshot_04_tools.png`
+- [x] Normalize all final 2D images to `1920x1080`, PNG/JPEG, under `3145728` bytes:
+  - `FabMedia/fab_media_manifest.json`
+- [x] Record demo video:
+  - `FabMedia/demo.mp4`
+  - ffprobe: H.264, `1920x1080`, `30 fps`, `35.000000s`, `734861` bytes
+- [x] Confirm screenshots match the current shipped UE 5.5 UI surface.
+- [x] Automated capture path is available:
+  - `Scripts/CaptureFabMedia.ps1`
+- [x] Media normalization tool is available:
+  - `Scripts/NormalizeFabMedia.py`
 
 ## Validation
 
 - [x] Real PIE `SceneComponent transform -> Stage -> Apply To Source -> next PIE persists` validation passes on the local baseline.
-  - Use `Scripts\ValidateTransformSourcePersistence.ps1`.
-  - Latest passing artifact:
-    - `Saved\RuntimeInspector\Validation\TransformSourcePersistence\BC8B047E-400B-566E-1347-2DA5AA231920\prepare_report.json`
-    - `Saved\RuntimeInspector\Validation\TransformSourcePersistence\BC8B047E-400B-566E-1347-2DA5AA231920\verify_restore_report.json`
-- [x] UE 5.5 `BuildPlugin` validation passes through the release script.
-- [x] Fresh local package regeneration and blank-project automated load validation were re-run on `2026-04-16`.
-  - package root:
-    - `Saved\FabRelease\Package\RuntimeInspector_UE55\RuntimeInspector`
-  - preserved validation host:
-    - `Saved\FabRelease\BlankProjectValidation\RuntimeInspectorBlank_UE55\RuntimeInspectorBlank\RuntimeInspectorBlank.uproject`
-  - automated load log:
-    - `Saved\fab_blank_project_validation.log`
-- [x] Install the packaged plugin into a clean blank UE 5.5 project and confirm it loads.
-  - Use `Scripts\ValidateFabBlankProject.cmd` for the automated load check.
-  - `ValidateFabBlankProject` may still perform a controlled shutdown after `QUIT`, but it no longer emits a misleading warning for that successful path.
-- [x] Use the main `PluginMaker` project, not the blank validation host, for loopback packaged-runtime self-tests and bridge-driven workflow acceptance.
-  - Use `Scripts\BuildPackagedRuntimeValidation.cmd`, `Scripts\RunPackagedRuntimeValidation.cmd`, and `Scripts\StopPackagedRuntimeValidation.cmd`.
-- [ ] Re-run a minimal smoke path in the packaged install:
-  - Open Runtime Inspector.
-  - Inspect an actor.
-  - Open Changes, Settings, and Tools pages.
-  - Use `Scripts\ValidateFabBlankProject.cmd -KeepValidationProject` and `Scripts\OpenFabValidationProject.cmd` to preserve and open the generated host project for manual smoke only.
+  - `Saved/RuntimeInspector/Validation/TransformSourcePersistence/BC8B047E-400B-566E-1347-2DA5AA231920/prepare_report.json`
+  - `Saved/RuntimeInspector/Validation/TransformSourcePersistence/BC8B047E-400B-566E-1347-2DA5AA231920/verify_restore_report.json`
+- [x] UE 5.5 `BuildPlugin` validation passed through the release script.
+- [x] Fresh local package regeneration passed.
+- [x] Blank-project automated load validation passed:
+  - `Saved/fab_blank_project_validation.log`
+- [x] Preserved blank validation host exists:
+  - `Saved/FabRelease/BlankProjectValidation/RuntimeInspectorBlank_UE55/RuntimeInspectorBlank/RuntimeInspectorBlank.uproject`
+- [ ] Blank-host manual interaction smoke is signed.
+  - 2026-06-04 attempt opened the host but stayed on UE shader compilation during the wait window.
+  - Evidence:
+    - `Saved/FabRelease/blank_manual_smoke_editor.png`
+    - `Saved/FabRelease/blank_manual_smoke_editor_after_wait.png`
 - [x] Capture Fab screenshots from the main `PluginMaker` editor state, not the blank validation host.
-  - Use `Scripts\OpenFabScreenshotState.cmd` to open the clean screenshot presentation state.
-  - Use `Scripts\CaptureFabMedia.cmd` to generate the deterministic screenshot staging output.
-  - Latest refreshed staging evidence:
-    - `Saved\RuntimeInspector\FabMediaCapture\capture_fab_media.log`
-    - `Saved\RuntimeInspector\FabMediaCapture\capture_manifest.txt`
+  - `Saved/RuntimeInspector/FabMediaCapture/capture_fab_media.log`
+  - `Saved/RuntimeInspector/FabMediaCapture/capture_manifest.txt`
 
-## Optional Cleanup Before Submission
+## Submission Boundary
 
-- [x] Normalize source file encodings to remove `warning C4828` noise.
-- [ ] Replace any remaining temporary support/documentation URLs if needed.
+- [ ] Fab backend account/tax/payout/listing metadata completed outside the repo.
+- [ ] Fab listing review completed by Epic.
+- [ ] `MarketplaceURL` updated after the listing exists.

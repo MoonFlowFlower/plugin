@@ -3,6 +3,7 @@ param(
     [string]$EngineRoot = "D:\Software\Unreal\UE_5.5",
     [string]$OutputRoot = "",
     [switch]$UseProjectFabMediaOutput,
+    [switch]$IncludeOptionalShots,
     [int]$EditorLaunchTimeoutSeconds = 180,
     [int]$StepDelaySeconds = 1
 )
@@ -275,6 +276,134 @@ function Get-WindowTitleFromSummary {
     return $null
 }
 
+function Ensure-NativeWindowCaptureType {
+    try {
+        [RuntimeInspector.NativeWindowCapture] | Out-Null
+        return
+    } catch {
+    }
+
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+
+namespace RuntimeInspector
+{
+public class NativeWindowCapture
+{
+    public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RECT
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    [DllImport("user32.dll")]
+    public static extern bool EnumWindows(EnumWindowsProc enumProc, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
+
+    [DllImport("user32.dll")]
+    public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
+
+    [DllImport("user32.dll")]
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    public static IntPtr FindWindowContaining(string needle, out string title)
+    {
+        title = String.Empty;
+        IntPtr found = IntPtr.Zero;
+        string foundTitle = String.Empty;
+        EnumWindows(delegate(IntPtr hWnd, IntPtr lParam)
+        {
+            if (!IsWindowVisible(hWnd))
+            {
+                return true;
+            }
+
+            StringBuilder builder = new StringBuilder(512);
+            GetWindowText(hWnd, builder, builder.Capacity);
+            string currentTitle = builder.ToString();
+            if (String.IsNullOrWhiteSpace(currentTitle))
+            {
+                return true;
+            }
+
+            if (currentTitle.IndexOf(needle, StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                found = hWnd;
+                foundTitle = currentTitle;
+                return false;
+            }
+
+            return true;
+        }, IntPtr.Zero);
+
+        title = foundTitle;
+        return found;
+    }
+}
+}
+'@
+}
+
+function Save-NativeWindowScreenshot {
+    param(
+        [string]$WindowTitleContains,
+        [string]$TargetPath
+    )
+
+    Ensure-NativeWindowCaptureType
+    Add-Type -AssemblyName System.Drawing
+
+    $FoundTitle = ""
+    $WindowHandle = [RuntimeInspector.NativeWindowCapture]::FindWindowContaining($WindowTitleContains, [ref]$FoundTitle)
+    if ($WindowHandle -eq [IntPtr]::Zero) {
+        throw "Could not find visible window containing title: $WindowTitleContains"
+    }
+
+    $Rect = New-Object RuntimeInspector.NativeWindowCapture+RECT
+    if (-not [RuntimeInspector.NativeWindowCapture]::GetWindowRect($WindowHandle, [ref]$Rect)) {
+        throw "Could not read window bounds for: $FoundTitle"
+    }
+
+    $Width = $Rect.Right - $Rect.Left
+    $Height = $Rect.Bottom - $Rect.Top
+    if ($Width -le 0 -or $Height -le 0) {
+        throw "Invalid window bounds for $FoundTitle : ${Width}x${Height}"
+    }
+
+    [void][RuntimeInspector.NativeWindowCapture]::SetForegroundWindow($WindowHandle)
+    Start-Sleep -Milliseconds 250
+
+    New-Item -ItemType Directory -Path (Split-Path -Parent $TargetPath) -Force | Out-Null
+    $Bitmap = New-Object System.Drawing.Bitmap $Width, $Height
+    $Graphics = [System.Drawing.Graphics]::FromImage($Bitmap)
+    try {
+        $Graphics.CopyFromScreen($Rect.Left, $Rect.Top, 0, 0, $Bitmap.Size)
+        $Bitmap.Save($TargetPath, [System.Drawing.Imaging.ImageFormat]::Png)
+    } finally {
+        $Graphics.Dispose()
+        $Bitmap.Dispose()
+    }
+
+    return [pscustomobject]@{
+        title = $FoundTitle
+        width = $Width
+        height = $Height
+        path = $TargetPath
+    }
+}
+
 function Get-InspectorAutomationSummary {
     param(
         [object]$BridgeState,
@@ -319,6 +448,27 @@ function Invoke-FabCaptureSelfTest {
     Start-Sleep -Seconds $StepDelaySeconds
 }
 
+function Invoke-ActorPagePickForCapture {
+    $PositionResult = Invoke-BridgeRequest -BridgeState $BridgeState -Method "control_runtime_inspector" -Params @{ action = "position_mouse_on_player_character" } -TimeoutSeconds 30
+    if (-not [bool](Get-BridgeFieldValue -BridgeResult $PositionResult -FieldName "success")) {
+        $ErrorText = [string](Get-BridgeFieldValue -BridgeResult $PositionResult -FieldName "error")
+        throw "Failed to position mouse on player character before actor screenshot: $ErrorText"
+    }
+
+    $PickResult = Invoke-BridgeRequest -BridgeState $BridgeState -Method "control_runtime_inspector" -Params @{ action = "right_mouse_pick_input" } -TimeoutSeconds 30
+    if (-not [bool](Get-BridgeFieldValue -BridgeResult $PickResult -FieldName "success")) {
+        $ErrorText = [string](Get-BridgeFieldValue -BridgeResult $PickResult -FieldName "error")
+        throw "Failed to run actor screenshot pick input: $ErrorText"
+    }
+    if (-not [bool](Get-BridgeFieldValue -BridgeResult $PickResult -FieldName "inputHandled")) {
+        $DebugText = [string](Get-BridgeFieldValue -BridgeResult $PickResult -FieldName "lastPickDebug")
+        throw "Actor screenshot pick input was not handled: $DebugText"
+    }
+
+    Write-Host ("Actor screenshot pick -> {0}" -f ([string](Get-BridgeFieldValue -BridgeResult $PickResult -FieldName "lastPickDebug")))
+    Start-Sleep -Milliseconds 500
+}
+
 function Capture-InspectorShot {
     param(
         [string]$ShotName,
@@ -326,41 +476,17 @@ function Capture-InspectorShot {
         [string]$FileName
     )
 
-    Invoke-FabCaptureSelfTest -ShotName $ShotName -PageName $PageName
-    [void](Invoke-BridgeRequest -BridgeState $BridgeState -Method "control_runtime_inspector" -Params @{ action = "open" } -TimeoutSeconds 30)
-    [void](Invoke-BridgeRequest -BridgeState $BridgeState -Method "control_runtime_inspector" -Params @{ action = "show_page"; page = $PageName } -TimeoutSeconds 30)
-    Start-Sleep -Milliseconds 750
-    $AutomationSummary = Get-InspectorAutomationSummary -BridgeState $BridgeState -AttemptCount 24
-    $RawHostDebug = [string](Get-BridgeFieldValue -BridgeResult $AutomationSummary -FieldName "panelHostWindowDebug")
-    $HostWindowTitle = Get-WindowTitleFromSummary -Summary $RawHostDebug
-    if ([string]::IsNullOrWhiteSpace($HostWindowTitle)) {
-        $SummarySuccess = [string][bool](Get-BridgeFieldValue -BridgeResult $AutomationSummary -FieldName "success")
-        $SummaryError = [string](Get-BridgeFieldValue -BridgeResult $AutomationSummary -FieldName "error")
-        $RoutingDebug = [string](Get-BridgeFieldValue -BridgeResult $AutomationSummary -FieldName "pageRoutingDebug")
-        $PresentationDebug = [string](Get-BridgeFieldValue -BridgeResult $AutomationSummary -FieldName "panelPresentationDebug")
-        throw "Failed to resolve RuntimeInspector host window title before capturing $FileName | success=$SummarySuccess | error=$SummaryError | panelHostWindowDebug=$RawHostDebug | pageRoutingDebug=$RoutingDebug | panelPresentationDebug=$PresentationDebug"
+    if ($ShotName -eq "foundation" -and $PageName -eq "Actor") {
+        Invoke-ActorPagePickForCapture
     }
+    Invoke-FabCaptureSelfTest -ShotName $ShotName -PageName $PageName
+    Start-Sleep -Milliseconds 750
+    $DetectedHostWindowTitle = ""
+    $HostWindowTitle = "PluginMaker Preview"
 
     $TargetPath = Join-Path $OutputRoot $FileName
-    $CaptureResult = Invoke-BridgeRequest -BridgeState $BridgeState -Method "capture_window_screenshot" -Params @{
-        filename = $TargetPath
-        showUI = $true
-        windowTitleContains = $HostWindowTitle
-    } -TimeoutSeconds 30
-    if (-not [bool](Get-BridgeFieldValue -BridgeResult $CaptureResult -FieldName "success")) {
-        throw "capture_window_screenshot failed for $FileName"
-    }
-    if ([string](Get-BridgeFieldValue -BridgeResult $CaptureResult -FieldName "captureMode") -ne "window") {
-        throw "capture_window_screenshot did not use host window mode for $FileName"
-    }
-
-    $CaptureFilename = [string](Get-BridgeFieldValue -BridgeResult $CaptureResult -FieldName "filename")
-    $ResolvedPath = if (-not [string]::IsNullOrWhiteSpace($CaptureFilename)) {
-        $CaptureFilename
-    } else {
-        $TargetPath
-    }
-    $ResolvedPath = Wait-ForFile -Path $ResolvedPath -LeafName $FileName -TimeoutSeconds 5
+    $CaptureResult = Save-NativeWindowScreenshot -WindowTitleContains $HostWindowTitle -TargetPath $TargetPath
+    $ResolvedPath = Wait-ForFile -Path $CaptureResult.path -LeafName $FileName -TimeoutSeconds 5
     if (-not $ResolvedPath) {
         throw "Screenshot file was not produced: $FileName"
     }
@@ -368,6 +494,10 @@ function Capture-InspectorShot {
     $Line = "{0} -> {1}" -f $FileName, $ResolvedPath
     Write-Utf8FileLine -Path $ManifestPath -Line $Line
     Write-Host $Line
+    Write-Host ("Captured window: {0} ({1}x{2})" -f $CaptureResult.title, $CaptureResult.width, $CaptureResult.height)
+    if (-not [string]::IsNullOrWhiteSpace($DetectedHostWindowTitle) -and $DetectedHostWindowTitle -ne $HostWindowTitle) {
+        Write-Host ("Detected host title: {0}" -f $DetectedHostWindowTitle)
+    }
     return $ResolvedPath
 }
 
@@ -401,10 +531,15 @@ $Shots = @(
     @{ File = "screenshot_01_actor_panel.png"; Shot = "foundation"; Page = "Actor" },
     @{ File = "screenshot_02_changes_workflow.png"; Shot = "foundation"; Page = "Changes" },
     @{ File = "screenshot_03_settings.png"; Shot = "foundation"; Page = "Settings" },
-    @{ File = "screenshot_04_tools.png"; Shot = "foundation"; Page = "Tools" },
-    @{ File = "screenshot_05_remote_session.png"; Shot = "remote_session"; Page = "Changes" },
-    @{ File = "screenshot_06_promote_or_audit.png"; Shot = "promote_or_audit"; Page = "Changes" }
+    @{ File = "screenshot_04_tools.png"; Shot = "foundation"; Page = "Tools" }
 )
+
+if ($IncludeOptionalShots) {
+    $Shots += @(
+        @{ File = "screenshot_05_remote_session.png"; Shot = "remote_session"; Page = "Changes" },
+        @{ File = "screenshot_06_promote_or_audit.png"; Shot = "promote_or_audit"; Page = "Changes" }
+    )
+}
 
 $Results = @()
 foreach ($Shot in $Shots) {
