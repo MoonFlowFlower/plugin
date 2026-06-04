@@ -318,11 +318,21 @@ public class NativeWindowCapture
     [DllImport("user32.dll")]
     public static extern bool SetForegroundWindow(IntPtr hWnd);
 
+    [DllImport("user32.dll")]
+    public static extern bool BringWindowToTop(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("user32.dll")]
+    public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+
     public static IntPtr FindWindowContaining(string needle, out string title)
     {
         title = String.Empty;
         IntPtr found = IntPtr.Zero;
         string foundTitle = String.Empty;
+        long foundArea = 0;
         EnumWindows(delegate(IntPtr hWnd, IntPtr lParam)
         {
             if (!IsWindowVisible(hWnd))
@@ -340,9 +350,26 @@ public class NativeWindowCapture
 
             if (currentTitle.IndexOf(needle, StringComparison.OrdinalIgnoreCase) >= 0)
             {
-                found = hWnd;
-                foundTitle = currentTitle;
-                return false;
+                RECT rect;
+                if (!GetWindowRect(hWnd, out rect))
+                {
+                    return true;
+                }
+
+                int width = rect.Right - rect.Left;
+                int height = rect.Bottom - rect.Top;
+                if (width < 300 || height < 200)
+                {
+                    return true;
+                }
+
+                long area = (long)width * (long)height;
+                if (area > foundArea)
+                {
+                    found = hWnd;
+                    foundTitle = currentTitle;
+                    foundArea = area;
+                }
             }
 
             return true;
@@ -382,8 +409,18 @@ function Save-NativeWindowScreenshot {
         throw "Invalid window bounds for $FoundTitle : ${Width}x${Height}"
     }
 
+    $HWND_TOPMOST = [IntPtr](-1)
+    $HWND_NOTOPMOST = [IntPtr](-2)
+    $SWP_NOMOVE = 0x0002
+    $SWP_NOSIZE = 0x0001
+    $SWP_SHOWWINDOW = 0x0040
+    $WindowPlacementFlags = $SWP_NOMOVE -bor $SWP_NOSIZE -bor $SWP_SHOWWINDOW
+
+    [void][RuntimeInspector.NativeWindowCapture]::ShowWindow($WindowHandle, 9)
+    [void][RuntimeInspector.NativeWindowCapture]::SetWindowPos($WindowHandle, $HWND_TOPMOST, 0, 0, 0, 0, $WindowPlacementFlags)
+    [void][RuntimeInspector.NativeWindowCapture]::BringWindowToTop($WindowHandle)
     [void][RuntimeInspector.NativeWindowCapture]::SetForegroundWindow($WindowHandle)
-    Start-Sleep -Milliseconds 250
+    Start-Sleep -Milliseconds 500
 
     New-Item -ItemType Directory -Path (Split-Path -Parent $TargetPath) -Force | Out-Null
     $Bitmap = New-Object System.Drawing.Bitmap $Width, $Height
@@ -394,6 +431,7 @@ function Save-NativeWindowScreenshot {
     } finally {
         $Graphics.Dispose()
         $Bitmap.Dispose()
+        [void][RuntimeInspector.NativeWindowCapture]::SetWindowPos($WindowHandle, $HWND_NOTOPMOST, 0, 0, 0, 0, $WindowPlacementFlags)
     }
 
     return [pscustomobject]@{

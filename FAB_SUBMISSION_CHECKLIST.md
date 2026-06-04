@@ -7,10 +7,12 @@ For implementation rules and development workflow authority, use `docs/AGENT_DEV
 ## Current RC Status
 
 - Current RC branch: `codex/runtimeinspector-fab-rc`
-- Product RC commit: `0a26995c1f057972bb175afa483326cb1c2df886`
-- Product RC summary: `Fix RuntimeInspector Fab plugin package build`
-- Repo-local package, automated blank-load validation, final screenshots, media manifest, and demo video are prepared.
-- Do not claim Fab-ready until blank-host manual interaction smoke is signed.
+- Product RC commit: `88dacaae56b5aa834ec435c2c5d0d5ba91f73762`
+- Product RC summary: `Fix RuntimeInspector blank host dock scaling`
+- Superseded RC: `0a26995c1f057972bb175afa483326cb1c2df886`
+  - reason: blank validation host revealed a DPI scaling bug in the dock UI.
+- Repo-local package, automated blank-load validation, DPI-aware dock validation, final screenshots, media manifest, and demo video are prepared.
+- Do not claim Fab-ready until full blank-host manual tab smoke is signed.
 - Remaining external follow-up: replace `MarketplaceURL` after the Fab listing exists.
 
 ## Package
@@ -44,9 +46,9 @@ For implementation rules and development workflow authority, use `docs/AGENT_DEV
   - `FabMedia/fab_media_manifest.json`
 - [x] Record demo video:
   - `FabMedia/demo.mp4`
-  - ffprobe: H.264, `1920x1080`, `30 fps`, `35.000000s`, `734861` bytes
+  - ffprobe: H.264, `1920x1080`, `30 fps`, `35.000000s`, `810418` bytes
 - [x] Confirm screenshots match the current shipped UE 5.5 UI surface.
-- [x] Automated capture path is available:
+- [x] Automated capture path is available and now guards against minimized/foreground-window capture:
   - `Scripts/CaptureFabMedia.ps1`
 - [x] Media normalization tool is available:
   - `Scripts/NormalizeFabMedia.py`
@@ -62,11 +64,12 @@ For implementation rules and development workflow authority, use `docs/AGENT_DEV
   - `Saved/fab_blank_project_validation.log`
 - [x] Preserved blank validation host exists:
   - `Saved/FabRelease/BlankProjectValidation/RuntimeInspectorBlank_UE55/RuntimeInspectorBlank/RuntimeInspectorBlank.uproject`
-- [ ] Blank-host manual interaction smoke is signed.
-  - 2026-06-04 attempt opened the host but stayed on UE shader compilation during the wait window.
-  - Evidence:
-    - `Saved/FabRelease/blank_manual_smoke_editor.png`
-    - `Saved/FabRelease/blank_manual_smoke_editor_after_wait.png`
+- [x] Blank-host packaged PIE/open/readability smoke passed for the scaling fix:
+  - `Saved/FabRelease/blank_host_dpi_fix_printwindow.png`
+  - `Saved/FabRelease/blank_host_pid_48944.png`
+- [ ] Full blank-host manual tab smoke is signed.
+  - `Actor / Changes` have blank-host visual evidence.
+  - `Settings / Tools` need a human/operator click-through in the blank host because OS coordinate automation was not reliable enough to sign them.
 - [x] Capture Fab screenshots from the main `PluginMaker` editor state, not the blank validation host.
   - `Saved/RuntimeInspector/FabMediaCapture/capture_fab_media.log`
   - `Saved/RuntimeInspector/FabMediaCapture/capture_manifest.txt`

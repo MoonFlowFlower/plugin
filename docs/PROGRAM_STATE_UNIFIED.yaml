@@ -20,37 +20,42 @@ doc_authority:
 
 current_baseline:
   branch: codex/runtimeinspector-fab-rc
-  product_rc_commit: 0a26995c1f057972bb175afa483326cb1c2df886
-  product_rc_summary: Fix RuntimeInspector Fab plugin package build
+  product_rc_commit: 88dacaae56b5aa834ec435c2c5d0d5ba91f73762
+  product_rc_summary: Fix RuntimeInspector blank host dock scaling
+  superseded_product_rc_commit: 0a26995c1f057972bb175afa483326cb1c2df886
+  superseded_reason: blank_host_editor_pie_dpi_scaling_bug
   worktree_state: dirty_with_signoff_artifacts
-  stability_status: rc_product_frozen_signoff_artifacts_ready_pending_manual_smoke
+  stability_status: rc_product_patched_artifacts_ready_pending_full_blank_tab_smoke
 
 current_focus:
   program_goal: >
     Keep RuntimeInspector usable as a real runtime inspection, change review,
     validation, and controlled promote workbench inside Editor + PIE.
   current_stage_goal: >
-    Finish the human blank-host smoke on the preserved validation host, then use
-    the prepared package, screenshots, demo, and checklist for Fab submission.
+    Finish the full human blank-host tab smoke on the preserved validation host,
+    then use the prepared package, screenshots, demo, and checklist for Fab
+    submission unless the smoke reveals a product issue.
   stage_success_criteria:
     - Product RC commit is frozen and pushed on codex/runtimeinspector-fab-rc.
     - Package generation passes from the product RC.
     - Blank-host automated load validation passes.
+    - Blank-host packaged PIE/open/readability smoke shows side panels are no longer physically tiny.
     - Final listing screenshots are normalized to 1920x1080 and under 3MB each.
     - Demo media exists, is 30-45 seconds, 1080p, and H.264.
-    - Blank-host manual interaction smoke is signed after shader compilation completes.
+    - Full blank-host manual interaction smoke is signed.
     - Signoff docs distinguish repo-local evidence from Fab backend/manual-only follow-ups.
   next_decision_gate: >
-    After blank-host manual smoke is signed, decide whether the remaining work is
-    only Fab backend metadata/MarketplaceURL or whether a product/package patch is needed.
+    After full blank-host manual tab smoke is signed, decide whether the remaining
+    work is only Fab backend metadata/MarketplaceURL or whether a product/package
+    patch is needed.
 
 active_risks:
   - id: blank_host_manual_smoke
     status: active
     summary: >
-      Automated blank-host load validation passed, but human interaction smoke is
-      not signed. A 2026-06-04 attempt opened the validation host, but the editor
-      stayed on shader compilation during the wait window. Do not call the RC
+      Automated blank-host load validation passed, and packaged PIE/open/readability
+      evidence shows the scaling bug is fixed. Full human tab smoke across
+      Actor/Changes/Settings/Tools is still not signed. Do not call the RC
       Fab-ready until this manual step is completed.
   - id: media_submission
     status: mitigated
@@ -58,6 +63,8 @@ active_risks:
       Final FabMedia images are normalized to 1920x1080 PNG and under 3MB. The
       demo is 35 seconds, H.264, 1920x1080, and under 25MB. The demo is a
       deterministic screenshot-sequence video, not a live operation recording.
+      CaptureFabMedia now skips minimized windows and temporarily foregrounds
+      the largest valid PluginMaker Preview window before capture.
   - id: marketplace_url
     status: external_pending
     summary: >
@@ -80,12 +87,15 @@ validation_authority:
     pending-validation or local-only when only compile/self-test evidence exists.
 
 release_evidence:
-  product_rc_commit: 0a26995c1f057972bb175afa483326cb1c2df886
+  product_rc_commit: 88dacaae56b5aa834ec435c2c5d0d5ba91f73762
   package_root: Saved/FabRelease/Package/RuntimeInspector_UE55/RuntimeInspector
   package_log: Saved/build_runtimeinspector_fab_release.log
   blank_validation_host: Saved/FabRelease/BlankProjectValidation/RuntimeInspectorBlank_UE55/RuntimeInspectorBlank/RuntimeInspectorBlank.uproject
   blank_automated_load_log: Saved/fab_blank_project_validation.log
-  blank_manual_smoke_status: pending_human_signoff
+  blank_packaged_pie_readability_evidence:
+    - Saved/FabRelease/blank_host_dpi_fix_printwindow.png
+    - Saved/FabRelease/blank_host_pid_48944.png
+  blank_manual_smoke_status: pending_full_tab_human_signoff
   media_manifest: FabMedia/fab_media_manifest.json
   demo_path: FabMedia/demo.mp4
 
