@@ -33,6 +33,7 @@ public:
     bool IsScalarValueVisibleForAutomation() const;
     bool IsScalarTextBoxVisibleForAutomation() const;
     bool HasFavoriteButtonForAutomation() const;
+    bool HasFavoriteVisualContractForAutomation() const;
     bool TryGetDisplayedColorSwatchForAutomation(FLinearColor& OutColor) const;
     float GetValueControlHeightForAutomation() const;
     float GetFavoriteButtonHeightForAutomation() const;

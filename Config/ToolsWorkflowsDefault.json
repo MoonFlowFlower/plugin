@@ -384,6 +384,7 @@
       { "ActionType": "RunSelfTest", "RefId": "favorite_row_navigation_route" },
       { "ActionType": "RunSelfTest", "RefId": "function_row_parameter_run_route" },
       { "ActionType": "RunSelfTest", "RefId": "favorite_star_toggle_route" },
+      { "ActionType": "RunSelfTest", "RefId": "favorite_icon_visual_contract" },
       { "ActionType": "RunSelfTest", "RefId": "row_text_overflow_contract" },
       { "ActionType": "RunSelfTest", "RefId": "function_run_button_visual_contract" },
       { "ActionType": "RunSelfTest", "RefId": "search_syncs_subsystem" },

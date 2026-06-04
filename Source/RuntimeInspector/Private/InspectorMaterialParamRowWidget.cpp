@@ -19,7 +19,7 @@ namespace
 {
     static FLinearColor RI_MaterialRowColor()
     {
-        return RICompactUI::GetRowSurfaceBackgroundColor();
+        return FLinearColor(0.001518f, 0.001518f, 0.001518f, 0.12f);
     }
 
     static FLinearColor RI_MaterialTextColor()
@@ -180,6 +180,11 @@ bool UInspectorMaterialParamRowWidget::HasFavoriteButtonForAutomation() const
     return FavoriteButton && FavoriteButton->GetVisibility() == ESlateVisibility::Visible;
 }
 
+bool UInspectorMaterialParamRowWidget::HasFavoriteVisualContractForAutomation() const
+{
+    return RICompactUI::HasFavoriteGhostButtonContract(FavoriteButton, FavoriteSizeBox, FavoriteIcon);
+}
+
 bool UInspectorMaterialParamRowWidget::TryGetDisplayedColorSwatchForAutomation(FLinearColor& OutColor) const
 {
     OutColor = FLinearColor::Black;
@@ -272,33 +277,28 @@ void UInspectorMaterialParamRowWidget::BuildWidgetTree()
     RootBox = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_MaterialParamRowBox"));
     RootBorder->SetContent(RootBox);
 
-    FavoriteButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("RI_MaterialParamFavoriteButton"));
-    RICompactUI::ConfigureButton(FavoriteButton, RICompactUI::ERIButtonVisualStyle::Secondary, false);
-    FavoriteSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_MaterialParamFavoriteSize"));
-    const float FavoriteButtonSize = 22.0f;
-    const float FavoriteIconSize = 12.0f;
-    FavoriteSizeBox->SetWidthOverride(FavoriteButtonSize);
-    FavoriteSizeBox->SetHeightOverride(FavoriteButtonSize);
-    FavoriteIcon = RICompactUI::MakeFavoriteIcon(
+    UImage* NewFavoriteIcon = nullptr;
+    USizeBox* NewFavoriteSizeBox = nullptr;
+    FavoriteButton = RICompactUI::MakeFavoriteGhostButton(
         WidgetTree,
+        TEXT("RI_MaterialParamFavoriteButton"),
+        TEXT("RI_MaterialParamFavoriteSize"),
         TEXT("RI_MaterialParamFavoriteIcon"),
-        FavoriteIconSize,
         false,
         RI_MaterialFavoriteActiveColor(),
-        RI_MaterialMutedColor());
-    FavoriteSizeBox->SetContent(FavoriteIcon);
-    FavoriteButton->AddChild(FavoriteSizeBox);
-    if (UButtonSlot* FavoriteButtonSlot = Cast<UButtonSlot>(FavoriteButton->GetContentSlot()))
+        RI_MaterialMutedColor(),
+        &NewFavoriteIcon,
+        &NewFavoriteSizeBox);
+    FavoriteIcon = NewFavoriteIcon;
+    FavoriteSizeBox = NewFavoriteSizeBox;
+    if (FavoriteButton)
     {
-        FavoriteButtonSlot->SetHorizontalAlignment(HAlign_Center);
-        FavoriteButtonSlot->SetVerticalAlignment(VAlign_Center);
-        FavoriteButtonSlot->SetPadding(FMargin(0.f));
+        FavoriteButton->OnClicked.AddDynamic(this, &UInspectorMaterialParamRowWidget::HandleFavoriteClicked);
     }
-    FavoriteButton->OnClicked.AddDynamic(this, &UInspectorMaterialParamRowWidget::HandleFavoriteClicked);
     if (UHorizontalBoxSlot* FavoriteSlot = RootBox->AddChildToHorizontalBox(FavoriteButton))
     {
         FavoriteSlot->SetVerticalAlignment(VAlign_Center);
-        FavoriteSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
+        FavoriteSlot->SetPadding(FMargin(0.f, 0.f, 5.f, 0.f));
     }
 
     NameText = RICompactUI::MakeEllipsisText(WidgetTree, TEXT("Material Parameter"), RICompactUI::GetLabelFontSize(), true, RI_MaterialTextColor());
@@ -399,7 +399,7 @@ void UInspectorMaterialParamRowWidget::RefreshRow()
         RICompactUI::SetFavoriteIconState(
             FavoriteIcon,
             bFavorited,
-            12.0f,
+            RICompactUI::GetFavoriteIconSize(),
             RI_MaterialFavoriteActiveColor(),
             RI_MaterialMutedColor());
     }

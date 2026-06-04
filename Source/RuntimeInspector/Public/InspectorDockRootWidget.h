@@ -112,6 +112,7 @@ public:
     void CancelOpenHydrationRefresh();
     bool FlushHostedActorSectionsDeferredRefreshForAutomation();
     double GetLastComponentFocusIntentMsForAutomation() const { return LastComponentFocusIntentMs; }
+    bool HasLeftFavoriteStarVisualContractForAutomation() const { return bLastLeftFavoriteStarVisualContractOk; }
 
     UInspectorFilePageWidget* GetHostedFilePage() const { return FilePageWidget.Get(); }
     UInspectorSettingsPageWidget* GetHostedSettingsPage() const { return SettingsPageWidget.Get(); }
@@ -294,5 +295,6 @@ private:
     bool bLeftPanelCompact = false;
     bool bSuppressSearchTextChanged = false;
     bool bOpenHydrationPending = false;
+    bool bLastLeftFavoriteStarVisualContractOk = true;
     int32 OpenHydrationSerial = 0;
 };

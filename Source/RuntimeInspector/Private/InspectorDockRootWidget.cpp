@@ -14,6 +14,7 @@
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
 #include "Components/BorderSlot.h"
+#include "Components/BackgroundBlur.h"
 #include "Components/Button.h"
 #include "Components/CheckBox.h"
 #include "Components/EditableTextBox.h"
@@ -24,14 +25,17 @@
 #include "Components/OverlaySlot.h"
 #include "Components/ScrollBox.h"
 #include "Components/SizeBox.h"
+#include "Components/SizeBoxSlot.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
 #include "Components/WidgetSwitcher.h"
 #include "Components/WidgetSwitcherSlot.h"
+#include "Engine/Texture2D.h"
 #include "Engine/World.h"
 #include "HAL/PlatformTime.h"
 #include "InspectorWorldSubsystem.h"
+#include "Styling/SlateBrush.h"
 #include "TimerManager.h"
 
 namespace
@@ -43,6 +47,11 @@ namespace
     static constexpr float RI_DockMinimumExpandedCenterWidth = 520.0f;
     static constexpr float RI_DockFavoritesFrameHeight = 190.0f;
     static constexpr float RI_DockFunctionsFrameHeight = 220.0f;
+    static constexpr float RI_DockPanelBorderThickness = 1.0f;
+    static constexpr float RI_DockPanelBlurStrength = 8.0f;
+    static constexpr float RI_DockPanelGridTileSize = 256.0f;
+    static constexpr float RI_DockHeaderBarHeight = 40.0f;
+    static constexpr float RI_DockRightHeaderStackGap = 8.0f;
 
     static FString RI_TabLabel(ERIInspectorTab Tab)
     {
@@ -92,16 +101,214 @@ namespace
         }
     }
 
-    static UBorder* RI_MakePanelSurface(UWidgetTree* WidgetTree, const FName& Name)
+    static void RI_AddHorizontalCentered(UHorizontalBox* Box, UWidget* Child, const FMargin& Padding = FMargin(0.f), ESlateSizeRule::Type SizeRule = ESlateSizeRule::Automatic)
     {
-        UBorder* Border = RICompactUI::MakeSurfaceCard(WidgetTree, Name, RICompactUI::GetPageBackgroundColor(), RICompactUI::GetPanelPadding());
-        Border->SetVisibility(ESlateVisibility::Visible);
+        if (!Box || !Child)
+        {
+            return;
+        }
+
+        if (UHorizontalBoxSlot* Slot = Box->AddChildToHorizontalBox(Child))
+        {
+            Slot->SetPadding(Padding);
+            Slot->SetHorizontalAlignment(SizeRule == ESlateSizeRule::Fill ? HAlign_Fill : HAlign_Center);
+            Slot->SetVerticalAlignment(VAlign_Center);
+            Slot->SetSize(FSlateChildSize(SizeRule));
+        }
+    }
+
+    static void RI_AddOverlayFill(UOverlay* Overlay, UWidget* Child, const FMargin& Padding = FMargin(0.f))
+    {
+        if (!Overlay || !Child)
+        {
+            return;
+        }
+
+        if (UOverlaySlot* Slot = Overlay->AddChildToOverlay(Child))
+        {
+            Slot->SetHorizontalAlignment(HAlign_Fill);
+            Slot->SetVerticalAlignment(VAlign_Fill);
+            Slot->SetPadding(Padding);
+        }
+    }
+
+    static FLinearColor RI_GetDockPanelBorderColor()
+    {
+        return FLinearColor(0.196f, 0.784f, 1.000f, 0.75f);
+    }
+
+    static FLinearColor RI_GetDockPanelWashColor()
+    {
+        return FLinearColor(0.001518f, 0.001518f, 0.001518f, 0.0f);
+    }
+
+    static FLinearColor RI_GetDockPanelBaseColor()
+    {
+        return FLinearColor(0.001518f, 0.001518f, 0.001518f, 0.70f);
+    }
+
+    static FLinearColor RI_GetDockPanelGridColor()
+    {
+        return FLinearColor(0.196f, 0.784f, 1.000f, 0.20f);
+    }
+
+    static FLinearColor RI_GetDockHeaderBarColor()
+    {
+        return FLinearColor(0.022f, 0.024f, 0.026f, 0.86f);
+    }
+
+    static FLinearColor RI_GetDockSectionSurfaceColor()
+    {
+        return FLinearColor(0.001518f, 0.001518f, 0.001518f, 0.06f);
+    }
+
+    static FLinearColor RI_GetDockRowSurfaceColor()
+    {
+        return FLinearColor(0.001518f, 0.001518f, 0.001518f, 0.12f);
+    }
+
+    static FLinearColor RI_GetDockSelectedRowSurfaceColor()
+    {
+        return FLinearColor(0.045f, 0.180f, 0.280f, 0.36f);
+    }
+
+    static FMargin RI_GetDockBodyMargin(float Top = 0.f, float Bottom = 0.f)
+    {
+        const FMargin PanelPadding = RICompactUI::GetPanelPadding();
+        return FMargin(PanelPadding.Left, Top, PanelPadding.Right, Bottom);
+    }
+
+    static FMargin RI_GetDockSectionTitleColumnMargin(float Top = 0.f, float Bottom = 0.f)
+    {
+        const FMargin PanelPadding = RICompactUI::GetPanelPadding();
+        const FMargin SectionPadding = RICompactUI::GetSurfaceCardPadding(true);
+        return FMargin(PanelPadding.Left + SectionPadding.Left, Top, PanelPadding.Right + SectionPadding.Right, Bottom);
+    }
+
+    static float RI_GetDockHeaderIconColumnInset()
+    {
+        const FMargin PanelPadding = RICompactUI::GetPanelPadding();
+        return PanelPadding.Left;
+    }
+
+    static void RI_AlignBorderContentCenterFill(UBorder* Border)
+    {
+        if (Border)
+        {
+            if (UBorderSlot* ContentSlot = Cast<UBorderSlot>(Border->GetContentSlot()))
+            {
+                ContentSlot->SetHorizontalAlignment(HAlign_Fill);
+                ContentSlot->SetVerticalAlignment(VAlign_Center);
+            }
+        }
+    }
+
+    static USizeBox* RI_WrapDockHeaderBar(UWidgetTree* WidgetTree, UWidget* HeaderWidget, const FName& Name)
+    {
+        if (!WidgetTree || !HeaderWidget)
+        {
+            return nullptr;
+        }
+
+        USizeBox* HeaderFrame = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), Name);
+        HeaderFrame->SetHeightOverride(RI_DockHeaderBarHeight);
+        HeaderFrame->SetContent(HeaderWidget);
+        if (USizeBoxSlot* HeaderSlot = Cast<USizeBoxSlot>(HeaderFrame->GetContentSlot()))
+        {
+            HeaderSlot->SetPadding(FMargin(0.f));
+            HeaderSlot->SetHorizontalAlignment(HAlign_Fill);
+            HeaderSlot->SetVerticalAlignment(VAlign_Fill);
+        }
+        return HeaderFrame;
+    }
+
+    static bool RI_DockWidgetExists(const UWidgetTree* WidgetTree, const TCHAR* WidgetName)
+    {
+        return WidgetTree && WidgetName && WidgetTree->FindWidget(FName(WidgetName)) != nullptr;
+    }
+
+    static UBorder* RI_MakePanelSurface(
+        UWidgetTree* WidgetTree,
+        const FName& Name,
+        const FName& EdgeBorderName,
+        const FName& BlurName,
+        const FName& BaseName,
+        const FName& WashName,
+        const FName& GridName,
+        EHorizontalAlignment EdgeAlignment,
+        UWidget* ContentWidget)
+    {
+        UBorder* Border = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), Name);
+        Border->SetPadding(FMargin(0.f));
+        Border->SetBrushColor(FLinearColor::Transparent);
+        Border->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+
+        UOverlay* ChromeOverlay = WidgetTree->ConstructWidget<UOverlay>(UOverlay::StaticClass());
+        ChromeOverlay->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+        Border->SetContent(ChromeOverlay);
+
+        UBackgroundBlur* Blur = WidgetTree->ConstructWidget<UBackgroundBlur>(UBackgroundBlur::StaticClass(), BlurName);
+        Blur->SetBlurStrength(RI_DockPanelBlurStrength);
+        Blur->SetApplyAlphaToBlur(true);
+        FSlateBrush BlurFallbackBrush;
+        BlurFallbackBrush.DrawAs = ESlateBrushDrawType::Box;
+        BlurFallbackBrush.TintColor = FSlateColor(RI_GetDockPanelBaseColor());
+        Blur->SetLowQualityFallbackBrush(BlurFallbackBrush);
+        Blur->SetVisibility(ESlateVisibility::HitTestInvisible);
+        RI_AddOverlayFill(ChromeOverlay, Blur);
+
+        UBorder* Base = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), BaseName);
+        Base->SetPadding(FMargin(0.f));
+        Base->SetBrushColor(RI_GetDockPanelBaseColor());
+        Base->SetVisibility(ESlateVisibility::HitTestInvisible);
+        RI_AddOverlayFill(ChromeOverlay, Base);
+
+        UBorder* Wash = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), WashName);
+        Wash->SetPadding(FMargin(0.f));
+        Wash->SetBrushColor(RI_GetDockPanelWashColor());
+        Wash->SetVisibility(ESlateVisibility::HitTestInvisible);
+        RI_AddOverlayFill(ChromeOverlay, Wash);
+
+        UImage* Grid = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), GridName);
+        if (UTexture2D* GridTexture = RICompactUI::LoadIconTexture(TEXT("grid_white_tiling_256")))
+        {
+            Grid->SetBrushFromTexture(GridTexture, false);
+        }
+        FSlateBrush GridBrush = Grid->GetBrush();
+        GridBrush.DrawAs = ESlateBrushDrawType::Image;
+        GridBrush.Tiling = ESlateBrushTileType::Both;
+        GridBrush.ImageSize = FVector2D(RI_DockPanelGridTileSize, RI_DockPanelGridTileSize);
+        Grid->SetBrush(GridBrush);
+        Grid->SetColorAndOpacity(RI_GetDockPanelGridColor());
+        Grid->SetVisibility(ESlateVisibility::HitTestInvisible);
+        RI_AddOverlayFill(ChromeOverlay, Grid);
+
+        if (ContentWidget)
+        {
+            ContentWidget->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+            RI_AddOverlayFill(ChromeOverlay, ContentWidget);
+        }
+
+        USizeBox* EdgeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+        EdgeBox->SetWidthOverride(RI_DockPanelBorderThickness);
+        EdgeBox->SetVisibility(ESlateVisibility::HitTestInvisible);
+        UBorder* EdgeBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), EdgeBorderName);
+        EdgeBorder->SetPadding(FMargin(0.f));
+        EdgeBorder->SetBrushColor(RI_GetDockPanelBorderColor());
+        EdgeBorder->SetVisibility(ESlateVisibility::HitTestInvisible);
+        EdgeBox->SetContent(EdgeBorder);
+        if (UOverlaySlot* EdgeSlot = ChromeOverlay->AddChildToOverlay(EdgeBox))
+        {
+            EdgeSlot->SetHorizontalAlignment(EdgeAlignment);
+            EdgeSlot->SetVerticalAlignment(VAlign_Fill);
+        }
+
         return Border;
     }
 
     static UBorder* RI_MakeSectionCard(UWidgetTree* WidgetTree, const FName& Name)
     {
-        return RICompactUI::MakeSurfaceCard(WidgetTree, Name, RICompactUI::GetSectionSurfaceBackgroundColor(), RICompactUI::GetSurfaceCardPadding());
+        return RICompactUI::MakeSurfaceCard(WidgetTree, Name, RI_GetDockSectionSurfaceColor(), RICompactUI::GetSurfaceCardPadding());
     }
 
     static FVector2D RI_GetDockLogicalViewportSize(UWidget* Widget)
@@ -279,9 +486,17 @@ void UInspectorDockRootWidget::BuildWidgetTreeIfNeeded()
 
     LeftPanelSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_DockLeftPanelSize"));
     LeftPanelSizeBox->SetWidthOverride(RI_DockSidePanelWidth);
-    UBorder* LeftSurface = RI_MakePanelSurface(WidgetTree, TEXT("RI_DockLeftPanelSurface"));
     LeftPanelBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_DockLeftPanel"));
-    LeftSurface->SetContent(LeftPanelBox);
+    UBorder* LeftSurface = RI_MakePanelSurface(
+        WidgetTree,
+        TEXT("RI_DockLeftPanelSurface"),
+        TEXT("RI_DockLeftPanelViewportBorder"),
+        TEXT("RI_DockLeftPanelBackgroundBlur"),
+        TEXT("RI_DockLeftPanelBackgroundBase"),
+        TEXT("RI_DockLeftPanelBackgroundWash"),
+        TEXT("RI_DockLeftPanelBackgroundGrid"),
+        HAlign_Right,
+        LeftPanelBox);
     LeftPanelSizeBox->SetContent(LeftSurface);
     RI_AddHorizontal(DockBox, LeftPanelSizeBox, FMargin(0.f, 0.f, RI_DockPanelGap, 0.f));
     BuildLeftPanel(LeftPanelBox);
@@ -293,9 +508,17 @@ void UInspectorDockRootWidget::BuildWidgetTreeIfNeeded()
 
     RightPanelSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_DockRightPanelSize"));
     RightPanelSizeBox->SetWidthOverride(RI_DockSidePanelWidth);
-    UBorder* RightSurface = RI_MakePanelSurface(WidgetTree, TEXT("RI_DockRightPanelSurface"));
     RightPanelBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_DockRightInspector"));
-    RightSurface->SetContent(RightPanelBox);
+    UBorder* RightSurface = RI_MakePanelSurface(
+        WidgetTree,
+        TEXT("RI_DockRightPanelSurface"),
+        TEXT("RI_DockRightPanelViewportBorder"),
+        TEXT("RI_DockRightPanelBackgroundBlur"),
+        TEXT("RI_DockRightPanelBackgroundBase"),
+        TEXT("RI_DockRightPanelBackgroundWash"),
+        TEXT("RI_DockRightPanelBackgroundGrid"),
+        HAlign_Left,
+        RightPanelBox);
     RightPanelSizeBox->SetContent(RightSurface);
     RI_AddHorizontal(DockBox, RightPanelSizeBox, FMargin(RI_DockPanelGap, 0.f, 0.f, 0.f));
     BuildRightInspector(RightPanelBox);
@@ -319,12 +542,14 @@ void UInspectorDockRootWidget::BuildLeftPanel(UVerticalBox* OutPanel)
     }
 
     UBorder* ActorCard = RI_MakeSectionCard(WidgetTree, TEXT("RI_SelectedActorCard"));
+    ActorCard->SetBrushColor(RI_GetDockHeaderBarColor());
+    ActorCard->SetPadding(FMargin(RI_GetDockHeaderIconColumnInset(), 2.f, 6.f, 2.f));
     UVerticalBox* ActorCardBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
     ActorCard->SetContent(ActorCardBox);
     UHorizontalBox* ActorTopRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_SelectedActorTopRow"));
     if (USizeBox* ActorIcon = RI_MakeIconBox(WidgetTree, TEXT("RI_SelectedActorIcon"), TEXT("shape:object"), 16.0f, RICompactUI::GetSuccessTextColor()))
     {
-        RI_AddHorizontal(ActorTopRow, ActorIcon, FMargin(0.f, 1.f, RICompactUI::GetInlineGap() + 3.f, 0.f));
+        RI_AddHorizontal(ActorTopRow, ActorIcon, FMargin(0.f, 0.f, RICompactUI::GetInlineGap() + 3.f, 0.f));
     }
     UVerticalBox* ActorTextStack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_SelectedActorTextStack"));
     ActorNameText = MakeBoundText(TEXT("RI_SelectedActorName"));
@@ -337,8 +562,9 @@ void UInspectorDockRootWidget::BuildLeftPanel(UVerticalBox* OutPanel)
     RI_AddVertical(ActorTextStack, ActorClassText, FMargin(0.f, 2.f, 0.f, 0.f));
     RI_AddHorizontal(ActorTopRow, ActorTextStack, FMargin(0.f), ESlateSizeRule::Fill);
     RI_AddVertical(ActorCardBox, ActorTopRow);
-    RI_AddVertical(ActorCardBox, ActorPathText, FMargin(0.f, 6.f, 0.f, 0.f));
-    RI_AddVertical(OutPanel, ActorCard, FMargin(0.f, 0.f, 0.f, RICompactUI::GetSectionGap()));
+    RI_AddVertical(ActorCardBox, ActorPathText, FMargin(0.f, 1.f, 0.f, 0.f));
+    RI_AlignBorderContentCenterFill(ActorCard);
+    RI_AddVertical(OutPanel, RI_WrapDockHeaderBar(WidgetTree, ActorCard, TEXT("RI_SelectedActorHeaderFrame")), FMargin(0.f, 0.f, 0.f, RICompactUI::GetSectionGap()));
 
     UBorder* StagedBanner = RI_MakeSectionCard(WidgetTree, TEXT("RI_StagedStateBanner"));
     StagedBanner->SetBrushColor(RICompactUI::GetContextStatusCellBackgroundColor());
@@ -350,7 +576,7 @@ void UInspectorDockRootWidget::BuildLeftPanel(UVerticalBox* OutPanel)
     StagedBannerText = MakeBoundText(TEXT("RI_StagedStateText"));
     RI_AddHorizontal(StagedRow, StagedBannerText, FMargin(0.f), ESlateSizeRule::Fill);
     StagedBanner->SetContent(StagedRow);
-    RI_AddVertical(OutPanel, StagedBanner, FMargin(0.f, 0.f, 0.f, RICompactUI::GetSectionGap()));
+    RI_AddVertical(OutPanel, StagedBanner, RI_GetDockBodyMargin(0.f, RICompactUI::GetSectionGap()));
 
     SearchTextBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("RI_SearchBar"));
     RICompactUI::ConfigureEditableTextBox(SearchTextBox, RICompactUI::GetStrongTextColor(), RICompactUI::GetValueFontSize(), RICompactUI::ERIInputVisualStyle::Muted);
@@ -359,22 +585,22 @@ void UInspectorDockRootWidget::BuildLeftPanel(UVerticalBox* OutPanel)
     UBorder* SearchSurface = RI_MakeSectionCard(WidgetTree, TEXT("RI_SearchBarSurface"));
     SearchSurface->SetBrushColor(RICompactUI::GetContextSecondaryCellBackgroundColor());
     UHorizontalBox* SearchRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_SearchBarRow"));
-    if (USizeBox* SearchIcon = RI_MakeIconBox(WidgetTree, TEXT("RI_SearchIcon"), TEXT("search_white_64"), 13.0f, RICompactUI::GetMutedTextColor()))
+    if (USizeBox* SearchIcon = RI_MakeIconBox(WidgetTree, TEXT("RI_SearchIcon"), TEXT("shape:search"), 13.0f, RICompactUI::GetMutedTextColor()))
     {
         RI_AddHorizontal(SearchRow, SearchIcon, FMargin(0.f, 3.f, RICompactUI::GetInlineGap() + 2.f, 0.f));
     }
     RI_AddHorizontal(SearchRow, RICompactUI::WrapValueControl(WidgetTree, SearchTextBox), FMargin(0.f), ESlateSizeRule::Fill);
     SearchSurface->SetContent(SearchRow);
-    RI_AddVertical(OutPanel, SearchSurface, FMargin(0.f, 0.f, 0.f, RICompactUI::GetSectionGap()));
+    RI_AddVertical(OutPanel, SearchSurface, RI_GetDockBodyMargin(0.f, RICompactUI::GetSectionGap()));
 
     ComponentTitleWidget = RI_MakeIconSectionTitle(WidgetTree, TEXT("shape:components"), TEXT("Components"), RICompactUI::ERISectionVisualStyle::Standard, TEXT("RI_ComponentTreeTitle"));
-    RI_AddVertical(OutPanel, ComponentTitleWidget);
+    RI_AddVertical(OutPanel, ComponentTitleWidget, RI_GetDockBodyMargin());
     UBorder* ComponentCard = RI_MakeSectionCard(WidgetTree, TEXT("RI_ComponentTreeCard"));
     UScrollBox* ComponentScrollBox = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("RI_ComponentTreeScroll"));
     ComponentListBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ComponentTree"));
     ComponentScrollBox->AddChild(ComponentListBox);
     ComponentCard->SetContent(ComponentScrollBox);
-    RI_AddVertical(OutPanel, ComponentCard, FMargin(0.f, 2.f, 0.f, RICompactUI::GetSectionGap()), ESlateSizeRule::Fill);
+    RI_AddVertical(OutPanel, ComponentCard, RI_GetDockBodyMargin(2.f, RICompactUI::GetSectionGap()), ESlateSizeRule::Fill);
 
     FavoritesFrameSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_FavoritesFrameSize"));
     FavoritesFrameSizeBox->SetHeightOverride(RI_DockFavoritesFrameHeight);
@@ -382,7 +608,7 @@ void UInspectorDockRootWidget::BuildLeftPanel(UVerticalBox* OutPanel)
     UVerticalBox* FavoritesFrameBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_FavoritesFrame"));
     FavoritesFrameSizeBox->SetContent(FavoritesFrameBox);
 
-    FavoritesTitleWidget = RI_MakeIconSectionTitle(WidgetTree, TEXT("star_white_outline_64"), TEXT("Favorites"), RICompactUI::ERISectionVisualStyle::Standard, TEXT("RI_FavoritesTitle"));
+    FavoritesTitleWidget = RI_MakeIconSectionTitle(WidgetTree, TEXT("shape:star-outline"), TEXT("Favorites"), RICompactUI::ERISectionVisualStyle::Standard, TEXT("RI_FavoritesTitle"));
     RI_AddVertical(FavoritesFrameBox, FavoritesTitleWidget);
     UBorder* FavoritesCard = RI_MakeSectionCard(WidgetTree, TEXT("RI_FavoritesCard"));
     FavoritesCard->SetClipping(EWidgetClipping::ClipToBounds);
@@ -391,7 +617,7 @@ void UInspectorDockRootWidget::BuildLeftPanel(UVerticalBox* OutPanel)
     FavoritesScrollBox->AddChild(FavoritesListBox);
     FavoritesCard->SetContent(FavoritesScrollBox);
     RI_AddVertical(FavoritesFrameBox, FavoritesCard, FMargin(0.f, 2.f, 0.f, 0.f), ESlateSizeRule::Fill);
-    RI_AddVertical(OutPanel, FavoritesFrameSizeBox);
+    RI_AddVertical(OutPanel, FavoritesFrameSizeBox, RI_GetDockBodyMargin());
 }
 
 void UInspectorDockRootWidget::BuildCenterOverlay(UOverlay* OutOverlay)
@@ -410,17 +636,31 @@ void UInspectorDockRootWidget::BuildRightInspector(UVerticalBox* OutPanel)
     }
 
     UBorder* HeaderSurface = RI_MakeSectionCard(WidgetTree, TEXT("RI_RightInspectorHeaderSurface"));
-    HeaderSurface->SetBrushColor(RICompactUI::GetFooterBackgroundColor());
-    UHorizontalBox* HeaderRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_RightInspectorHeaderRow"));
+    HeaderSurface->SetBrushColor(RI_GetDockHeaderBarColor());
+    HeaderSurface->SetPadding(FMargin(RI_GetDockHeaderIconColumnInset(), 0.f, 6.f, 0.f));
+    UOverlay* HeaderOverlay = WidgetTree->ConstructWidget<UOverlay>(UOverlay::StaticClass(), TEXT("RI_RightInspectorHeaderOverlay"));
     if (USizeBox* HeaderIcon = RI_MakeIconBox(WidgetTree, TEXT("RI_RightInspectorHeaderIcon"), TEXT("shape:object"), 16.0f, RICompactUI::GetSuccessTextColor()))
     {
-        RI_AddHorizontal(HeaderRow, HeaderIcon, FMargin(0.f, 1.f, RICompactUI::GetInlineGap() + 3.f, 0.f));
+        if (UOverlaySlot* IconSlot = HeaderOverlay->AddChildToOverlay(HeaderIcon))
+        {
+            IconSlot->SetHorizontalAlignment(HAlign_Left);
+            IconSlot->SetVerticalAlignment(VAlign_Center);
+            IconSlot->SetPadding(FMargin(0.f));
+        }
     }
     HeaderText = MakeBoundText(TEXT("RI_RightInspectorHeader"));
     RICompactUI::ApplyTextStyle(HeaderText, RICompactUI::GetSectionTitleFontSize() + 3, true, RICompactUI::GetStrongTextColor());
-    RI_AddHorizontal(HeaderRow, HeaderText, FMargin(0.f), ESlateSizeRule::Fill);
-    HeaderSurface->SetContent(HeaderRow);
-    RI_AddVertical(OutPanel, HeaderSurface, FMargin(0.f, 0.f, 0.f, RICompactUI::GetSectionGap()));
+    HeaderText->SetAutoWrapText(false);
+    HeaderText->SetJustification(ETextJustify::Left);
+    if (UOverlaySlot* TextSlot = HeaderOverlay->AddChildToOverlay(HeaderText))
+    {
+        TextSlot->SetHorizontalAlignment(HAlign_Left);
+        TextSlot->SetVerticalAlignment(VAlign_Center);
+        TextSlot->SetPadding(FMargin(16.f + RICompactUI::GetInlineGap() + 3.f, 0.f, 0.f, 0.f));
+    }
+    HeaderSurface->SetContent(HeaderOverlay);
+    RI_AlignBorderContentCenterFill(HeaderSurface);
+    RI_AddVertical(OutPanel, RI_WrapDockHeaderBar(WidgetTree, HeaderSurface, TEXT("RI_RightInspectorHeaderFrame")), FMargin(0.f, 0.f, 0.f, RI_DockRightHeaderStackGap));
 
     TabButtonBox = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_TabBar"));
     ActorTabButton = MakeDockButton(TEXT("RI_TabActor"), TEXT("Actor"), false, 0.0f, RICompactUI::GetMutedFontSize() + 1);
@@ -435,7 +675,7 @@ void UInspectorDockRootWidget::BuildRightInspector(UVerticalBox* OutPanel)
     RI_AddHorizontal(TabButtonBox, ChangesTabButton, FMargin(0.f, 0.f, RICompactUI::GetInlineGap(), 0.f), ESlateSizeRule::Fill);
     RI_AddHorizontal(TabButtonBox, SettingsTabButton, FMargin(0.f, 0.f, RICompactUI::GetInlineGap(), 0.f), ESlateSizeRule::Fill);
     RI_AddHorizontal(TabButtonBox, ToolsTabButton, FMargin(0.f), ESlateSizeRule::Fill);
-    RI_AddVertical(OutPanel, TabButtonBox, FMargin(0.f, 0.f, 0.f, RICompactUI::GetSectionGap()));
+    RI_AddVertical(OutPanel, TabButtonBox, RI_GetDockSectionTitleColumnMargin(0.f, RI_DockRightHeaderStackGap));
 
     TabSwitcher = WidgetTree->ConstructWidget<UWidgetSwitcher>(UWidgetSwitcher::StaticClass(), TEXT("RI_TabContent"));
     ActorTabPageBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ActorTabPage"));
@@ -448,7 +688,7 @@ void UInspectorDockRootWidget::BuildRightInspector(UVerticalBox* OutPanel)
     TabSwitcher->AddChild(ChangesTabScrollBox);
     TabSwitcher->AddChild(SettingsHostBox);
     TabSwitcher->AddChild(ToolsHostBox);
-    RI_AddVertical(OutPanel, TabSwitcher, FMargin(0.f, 0.f, 0.f, RICompactUI::GetSectionGap()), ESlateSizeRule::Fill);
+    RI_AddVertical(OutPanel, TabSwitcher, RI_GetDockBodyMargin(0.f, RICompactUI::GetSectionGap()), ESlateSizeRule::Fill);
 
     ActionBarBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ActionBar"));
     UHorizontalBox* ActionTopRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_ActionBarTopRow"));
@@ -462,9 +702,9 @@ void UInspectorDockRootWidget::BuildRightInspector(UVerticalBox* OutPanel)
     OnlyModifyCheckSize->SetHeightOverride(16.0f);
     OnlyModifyCheckSize->SetContent(OnlyModifyCheckBox);
     RICompactUI::CenterSizeBoxContent(OnlyModifyCheckSize);
-    RI_AddHorizontal(OnlyModifyBox, OnlyModifyCheckSize);
-    RI_AddHorizontal(OnlyModifyBox, RICompactUI::MakeText(WidgetTree, TEXT("Only Modify"), RICompactUI::GetLabelFontSize(), true, RICompactUI::GetSecondaryTextColor()), FMargin(4.f, 0.f, 0.f, 0.f));
-    RI_AddHorizontal(ActionTopRow, OnlyModifyBox, FMargin(0.f, 0.f, RICompactUI::GetInlineGap(), 0.f), ESlateSizeRule::Fill);
+    RI_AddHorizontalCentered(OnlyModifyBox, OnlyModifyCheckSize);
+    RI_AddHorizontalCentered(OnlyModifyBox, RICompactUI::MakeText(WidgetTree, TEXT("Only Modify"), RICompactUI::GetLabelFontSize(), true, RICompactUI::GetSecondaryTextColor()), FMargin(4.f, 0.f, 0.f, 0.f));
+    RI_AddHorizontalCentered(ActionTopRow, OnlyModifyBox, FMargin(0.f, 0.f, RICompactUI::GetInlineGap(), 0.f), ESlateSizeRule::Fill);
 
     const int32 ActionFontSize = RICompactUI::GetMutedFontSize();
     UButton* RefreshButton = MakeDockIconButton(TEXT("RI_ActionRefresh"), TEXT("Refresh"), TEXT(""), false, 52.0f, ActionFontSize, 0.0f);
@@ -477,18 +717,18 @@ void UInspectorDockRootWidget::BuildRightInspector(UVerticalBox* OutPanel)
     UndoButton->OnClicked.AddDynamic(this, &UInspectorDockRootWidget::HandleUndoClicked);
     RedoButton->OnClicked.AddDynamic(this, &UInspectorDockRootWidget::HandleRedoClicked);
     ApplyButton->OnClicked.AddDynamic(this, &UInspectorDockRootWidget::HandleApplyClicked);
-    RI_AddHorizontal(ActionTopRow, RefreshButton, FMargin(0.f, 0.f, RICompactUI::GetInlineGap(), 0.f));
-    RI_AddHorizontal(ActionTopRow, ResetButton);
-    RI_AddHorizontal(ActionBottomRow, UndoButton, FMargin(0.f, 0.f, RICompactUI::GetInlineGap(), 0.f));
-    RI_AddHorizontal(ActionBottomRow, RedoButton, FMargin(0.f, 0.f, RICompactUI::GetInlineGap(), 0.f));
-    RI_AddHorizontal(ActionBottomRow, ApplyButton);
+    RI_AddHorizontalCentered(ActionTopRow, RefreshButton, FMargin(0.f, 0.f, RICompactUI::GetInlineGap(), 0.f));
+    RI_AddHorizontalCentered(ActionTopRow, ResetButton);
+    RI_AddHorizontalCentered(ActionBottomRow, UndoButton, FMargin(0.f, 0.f, RICompactUI::GetInlineGap(), 0.f));
+    RI_AddHorizontalCentered(ActionBottomRow, RedoButton, FMargin(0.f, 0.f, RICompactUI::GetInlineGap(), 0.f));
+    RI_AddHorizontalCentered(ActionBottomRow, ApplyButton);
     RI_AddVertical(ActionBarBox, ActionTopRow, FMargin(0.f, 0.f, 0.f, 3.f));
     RI_AddVertical(ActionBarBox, ActionBottomRow);
-    RI_AddVertical(OutPanel, ActionBarBox);
+    RI_AddVertical(OutPanel, ActionBarBox, RI_GetDockBodyMargin());
 
     ActionStatusText = MakeBoundText(TEXT("RI_ActionStatusText"));
     RICompactUI::ApplyTextStyle(ActionStatusText, RICompactUI::GetMutedFontSize(), false, RICompactUI::GetMutedTextColor());
-    RI_AddVertical(OutPanel, ActionStatusText, FMargin(0.f, RICompactUI::GetInlineGap(), 0.f, 0.f));
+    RI_AddVertical(OutPanel, ActionStatusText, RI_GetDockBodyMargin(RICompactUI::GetInlineGap(), 0.f));
 }
 
 void UInspectorDockRootWidget::BuildActorTab(UVerticalBox* OutPanel)
@@ -909,7 +1149,7 @@ void UInspectorDockRootWidget::RefreshActorContext(const FRIInspectorViewModel& 
                 UBorder* RowSurface = RICompactUI::MakeSurfaceCard(
                     WidgetTree,
                     NAME_None,
-                    Component.bSelected ? RICompactUI::GetSelectedRowSurfaceBackgroundColor() : RICompactUI::GetRowSurfaceBackgroundColor(),
+                    Component.bSelected ? RI_GetDockSelectedRowSurfaceColor() : RI_GetDockRowSurfaceColor(),
                     RICompactUI::GetSurfaceCardPadding(true));
                 UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), NAME_None);
                 const FLinearColor RowColor = Component.bSelected ? RICompactUI::GetSuccessTextColor() : RICompactUI::GetSecondaryTextColor();
@@ -922,11 +1162,11 @@ void UInspectorDockRootWidget::RefreshActorContext(const FRIInspectorViewModel& 
                     RI_AddHorizontal(Row, Indent);
                 }
 
-                const TCHAR* ExpanderGlyph = Component.bCanExpand
-                    ? (Component.bExpanded ? TEXT("glyph:v") : TEXT("glyph:>"))
-                    : TEXT("glyph:.");
+                const TCHAR* ExpanderIcon = Component.bCanExpand
+                    ? (Component.bExpanded ? TEXT("shape:chevron-down") : TEXT("shape:chevron-right"))
+                    : TEXT("shape:blank");
                 const FLinearColor ExpanderColor = Component.bCanExpand ? RowColor : RICompactUI::GetMutedTextColor();
-                if (USizeBox* RowIcon = RI_MakeIconBox(WidgetTree, NAME_None, ExpanderGlyph, 9.0f, ExpanderColor))
+                if (USizeBox* RowIcon = RI_MakeIconBox(WidgetTree, NAME_None, ExpanderIcon, 11.0f, ExpanderColor))
                 {
                     RI_AddHorizontal(Row, RowIcon, FMargin(0.f, 2.f, RICompactUI::GetInlineGap() + 1.f, 0.f));
                 }
@@ -966,16 +1206,17 @@ void UInspectorDockRootWidget::RefreshActorContext(const FRIInspectorViewModel& 
     if (FavoritesListBox)
     {
         FavoritesListBox->ClearChildren();
+        bLastLeftFavoriteStarVisualContractOk = true;
         if (bLeftPanelCompact)
         {
-            if (USizeBox* CompactIcon = RI_MakeIconBox(WidgetTree, NAME_None, TEXT("star_white_solid_64"), 13.0f, RICompactUI::GetWarningTextColor()))
+            if (USizeBox* CompactIcon = RI_MakeIconBox(WidgetTree, NAME_None, TEXT("shape:star-solid"), 13.0f, RICompactUI::GetWarningTextColor()))
             {
                 RI_AddVertical(FavoritesListBox, CompactIcon, FMargin(0.f, 2.f, 0.f, 2.f));
             }
         }
         else if (ViewModel.Favorites.Num() == 0)
         {
-            RI_AddVertical(FavoritesListBox, RI_MakeIconLabel(WidgetTree, TEXT("star_white_outline_64"), TEXT("No favorites"), 11.0f, RICompactUI::GetLabelFontSize(), false, RICompactUI::GetMutedTextColor(), RICompactUI::GetMutedTextColor()));
+            RI_AddVertical(FavoritesListBox, RI_MakeIconLabel(WidgetTree, TEXT("shape:star-outline"), TEXT("No favorites"), 11.0f, RICompactUI::GetLabelFontSize(), false, RICompactUI::GetMutedTextColor(), RICompactUI::GetMutedTextColor()));
         }
         else
         {
@@ -984,36 +1225,34 @@ void UInspectorDockRootWidget::RefreshActorContext(const FRIInspectorViewModel& 
                 UBorder* RowSurface = RICompactUI::MakeSurfaceCard(
                     WidgetTree,
                     NAME_None,
-                    RICompactUI::GetRowSurfaceBackgroundColor(),
+                    RI_GetDockRowSurfaceColor(),
                     RICompactUI::GetSurfaceCardPadding(true));
                 UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), NAME_None);
 
-                UButton* StarButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), NAME_None);
-                USizeBox* StarHitBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), NAME_None);
-                StarHitBox->SetWidthOverride(22.0f);
-                StarHitBox->SetHeightOverride(22.0f);
-                StarHitBox->SetVisibility(ESlateVisibility::HitTestInvisible);
-                if (USizeBox* StarIcon = RI_MakeIconBox(WidgetTree, NAME_None, TEXT("star_white_solid_64"), 12.0f, RICompactUI::GetWarningTextColor()))
-                {
-                    StarIcon->SetVisibility(ESlateVisibility::HitTestInvisible);
-                    StarHitBox->SetContent(StarIcon);
-                }
-                RICompactUI::CenterSizeBoxContent(StarHitBox);
-                StarButton->AddChild(StarHitBox);
-                RICompactUI::ConfigureGhostIconButton(StarButton);
-                if (UButtonSlot* StarSlot = Cast<UButtonSlot>(StarButton->GetContentSlot()))
-                {
-                    StarSlot->SetHorizontalAlignment(HAlign_Center);
-                    StarSlot->SetVerticalAlignment(VAlign_Center);
-                    StarSlot->SetPadding(FMargin(0.f));
-                }
+                UImage* StarIcon = nullptr;
+                USizeBox* StarHitBox = nullptr;
+                UButton* StarButton = RICompactUI::MakeFavoriteGhostButton(
+                    WidgetTree,
+                    NAME_None,
+                    NAME_None,
+                    NAME_None,
+                    true,
+                    RICompactUI::GetWarningTextColor(),
+                    RICompactUI::GetMutedTextColor(),
+                    &StarIcon,
+                    &StarHitBox);
+                bLastLeftFavoriteStarVisualContractOk = bLastLeftFavoriteStarVisualContractOk
+                    && RICompactUI::HasFavoriteGhostButtonContract(StarButton, StarHitBox, StarIcon);
 
                 UInspectorDockFavoriteActionProxy* ToggleProxy = NewObject<UInspectorDockFavoriteActionProxy>(this);
                 ToggleProxy->Owner = this;
                 ToggleProxy->SourceItem = Favorite.SourceItem;
                 ToggleProxy->bToggleFavorite = true;
                 ActionProxies.Add(ToggleProxy);
-                StarButton->OnClicked.AddDynamic(ToggleProxy, &UInspectorDockFavoriteActionProxy::HandleClicked);
+                if (StarButton)
+                {
+                    StarButton->OnClicked.AddDynamic(ToggleProxy, &UInspectorDockFavoriteActionProxy::HandleClicked);
+                }
                 RI_AddHorizontal(Row, StarButton, FMargin(0.f, 0.f, RICompactUI::GetInlineGap(), 0.f));
 
                 UButton* TextButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), NAME_None);
@@ -1078,7 +1317,7 @@ void UInspectorDockRootWidget::RefreshComponentSelectionPresentation(const FStri
         const FLinearColor RowColor = bSelected ? RICompactUI::GetSuccessTextColor() : RICompactUI::GetSecondaryTextColor();
         if (UBorder* Surface = RowPair.Value.Get())
         {
-            Surface->SetBrushColor(bSelected ? RICompactUI::GetSelectedRowSurfaceBackgroundColor() : RICompactUI::GetRowSurfaceBackgroundColor());
+            Surface->SetBrushColor(bSelected ? RI_GetDockSelectedRowSurfaceColor() : RI_GetDockRowSurfaceColor());
         }
         if (const TWeakObjectPtr<UTextBlock>* TextPtr = ComponentRowTexts.Find(RowPair.Key))
         {
@@ -1137,7 +1376,7 @@ void UInspectorDockRootWidget::RefreshChangesTab(const FRIInspectorViewModel& Vi
     for (const FRIPatchViewModel& Patch : ViewModel.StagedPatches)
     {
         UBorder* RowCard = RI_MakeSectionCard(WidgetTree, NAME_None);
-        RowCard->SetBrushColor(RICompactUI::GetRowSurfaceBackgroundColor());
+        RowCard->SetBrushColor(RI_GetDockRowSurfaceColor());
         UVerticalBox* Row = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
         RowCard->SetContent(Row);
 
@@ -1431,8 +1670,19 @@ FString UInspectorDockRootWidget::GetDockLayoutDebugSummary() const
             && (FavoritesTitleWidget == nullptr || FavoritesTitleWidget->GetVisibility() == ESlateVisibility::Collapsed));
     const int32 AttributeRows = ActorAttributesWidget ? ActorAttributesWidget->GetEntryWidgetCountForAutomation() : INDEX_NONE;
     const int32 HostedFunctionRows = ActorFunctionsWidget ? ActorFunctionsWidget->GetEntryWidgetCountForAutomation() : INDEX_NONE;
+    const bool bPanelBorder = RI_DockWidgetExists(WidgetTree, TEXT("RI_DockLeftPanelViewportBorder"))
+        && RI_DockWidgetExists(WidgetTree, TEXT("RI_DockRightPanelViewportBorder"));
+    const bool bPanelBlur = RI_DockWidgetExists(WidgetTree, TEXT("RI_DockLeftPanelBackgroundBlur"))
+        && RI_DockWidgetExists(WidgetTree, TEXT("RI_DockRightPanelBackgroundBlur"));
+    const bool bPanelBase = RI_DockWidgetExists(WidgetTree, TEXT("RI_DockLeftPanelBackgroundBase"))
+        && RI_DockWidgetExists(WidgetTree, TEXT("RI_DockRightPanelBackgroundBase"));
+    const bool bPanelWash = RI_DockWidgetExists(WidgetTree, TEXT("RI_DockLeftPanelBackgroundWash"))
+        && RI_DockWidgetExists(WidgetTree, TEXT("RI_DockRightPanelBackgroundWash"));
+    const bool bPanelGrid = RI_DockWidgetExists(WidgetTree, TEXT("RI_DockLeftPanelBackgroundGrid"))
+        && RI_DockWidgetExists(WidgetTree, TEXT("RI_DockRightPanelBackgroundGrid"));
+    const bool bPanelChrome = bPanelBorder && bPanelBlur && bPanelBase && bPanelWash && bPanelGrid;
     return FString::Printf(
-        TEXT("DockRoot=1 LeftPanel=%s RightPanel=1 SideWidth=%.0f CenterWidth=%.0f LogicalWidth=%.0f ExpandedAt1080=%d ExpandedAt1390=%d CompactAt1000=%d CompactTextHidden=%d CenterPassThrough=1 CenterSelectionPill=0 FavoritesFrame=%d FavoritesScroll=%d FunctionsFrame=%d ActionBar=%d PatchRows=%d FunctionRows=%d AttributeRows=%d AttributesTransform=%d AttributesPending=%d FunctionsPending=%d OpenHydrationPending=%d ViewModelMs=%.2f HostedCreateMs=%.2f LastComponentFocusIntentMs=%.2f ActiveTab=%d"),
+        TEXT("DockRoot=1 LeftPanel=%s RightPanel=1 SideWidth=%.0f CenterWidth=%.0f LogicalWidth=%.0f ExpandedAt1080=%d ExpandedAt1390=%d CompactAt1000=%d CompactTextHidden=%d CenterPassThrough=1 CenterSelectionPill=0 PanelChrome=%d PanelBorder=%d PanelBlur=%d PanelBase=%d PanelGrid=%d PanelWash=%d FavoritesFrame=%d FavoritesScroll=%d FunctionsFrame=%d ActionBar=%d PatchRows=%d FunctionRows=%d AttributeRows=%d AttributesTransform=%d AttributesPending=%d FunctionsPending=%d OpenHydrationPending=%d ViewModelMs=%.2f HostedCreateMs=%.2f LastComponentFocusIntentMs=%.2f ActiveTab=%d"),
         bLeftPanelCompact ? TEXT("Compact") : TEXT("Expanded"),
         RI_DockSidePanelWidth,
         CenterWidth,
@@ -1441,6 +1691,12 @@ FString UInspectorDockRootWidget::GetDockLayoutDebugSummary() const
         bExpandedAtReferenceWidth ? 1 : 0,
         bCompactAtNarrowWidth ? 1 : 0,
         bCompactTextHidden ? 1 : 0,
+        bPanelChrome ? 1 : 0,
+        bPanelBorder ? 1 : 0,
+        bPanelBlur ? 1 : 0,
+        bPanelBase ? 1 : 0,
+        bPanelGrid ? 1 : 0,
+        bPanelWash ? 1 : 0,
         FavoritesFrameSizeBox ? 1 : 0,
         FavoritesScrollBox ? 1 : 0,
         ActorFunctionsFrameSizeBox ? 1 : 0,

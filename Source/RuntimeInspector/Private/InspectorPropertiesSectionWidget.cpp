@@ -35,7 +35,12 @@ namespace
 
     static FLinearColor RI_PropertySectionColor()
     {
-        return RICompactUI::GetSectionSurfaceBackgroundColor();
+        return FLinearColor(0.001518f, 0.001518f, 0.001518f, 0.06f);
+    }
+
+    static FLinearColor RI_PropertyBodyColor()
+    {
+        return FLinearColor(0.001518f, 0.001518f, 0.001518f, 0.03f);
     }
 
     static FString RI_SanitizeCategoryToken(const FString& InValue)
@@ -313,7 +318,7 @@ void UInspectorPropertiesSectionWidget::BuildWidgetTree()
 
     UBorder* BodyBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("RI_ActorPropertiesBodyBorder"));
     BodyBorder->SetPadding(RICompactUI::GetSurfaceCardPadding(true));
-    BodyBorder->SetBrushColor(RICompactUI::GetRowSurfaceBackgroundColor());
+    BodyBorder->SetBrushColor(RI_PropertyBodyColor());
 
     ScrollBox = WidgetTree->ConstructWidget<UInspectorTouchScrollBox>(UInspectorTouchScrollBox::StaticClass(), TEXT("RI_ActorPropertiesScroll"));
     EntriesBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ActorPropertiesEntries"));
@@ -471,7 +476,7 @@ UWidget* UInspectorPropertiesSectionWidget::CreateActorTransformBlock(const TArr
 
     UBorder* BlockBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("RI_ActorTransformBlock"));
     BlockBorder->SetPadding(FMargin(0.f));
-    BlockBorder->SetBrushColor(RICompactUI::GetRowSurfaceBackgroundColor());
+    BlockBorder->SetBrushColor(RI_PropertyBodyColor());
 
     UVerticalBox* BlockBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ActorTransformBlockBox"));
     BlockBorder->SetContent(BlockBox);

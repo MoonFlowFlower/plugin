@@ -24,7 +24,7 @@ namespace
 {
     static FLinearColor RI_FunctionRowColor()
     {
-        return RICompactUI::GetRowSurfaceBackgroundColor();
+        return FLinearColor(0.001518f, 0.001518f, 0.001518f, 0.12f);
     }
 
     static FLinearColor RI_FunctionRowTextColor()
@@ -42,8 +42,6 @@ namespace
         return RICompactUI::GetWarningTextColor();
     }
 
-    static constexpr float RI_FunctionFavoriteButtonSize = 22.0f;
-    static constexpr float RI_FunctionFavoriteIconSize = 12.0f;
     static constexpr float RI_FunctionTitleMaxWidth = 104.0f;
     static constexpr float RI_FunctionRunButtonWidth = 54.0f;
     static constexpr float RI_FunctionRunButtonHeight = 20.0f;
@@ -126,10 +124,15 @@ bool UInspectorFunctionRowWidget::ToggleFavoriteForAutomation(FString& OutError)
     return false;
 }
 
+bool UInspectorFunctionRowWidget::HasFavoriteVisualContractForAutomation() const
+{
+    return RICompactUI::HasFavoriteGhostButtonContract(FavoriteButton, FavoriteSizeBox, FavoriteIcon);
+}
+
 bool UInspectorFunctionRowWidget::HasOverflowLayoutForAutomation() const
 {
     return FavoriteSizeBox
-        && FMath::IsNearlyEqual(FavoriteSizeBox->GetWidthOverride(), RI_FunctionFavoriteButtonSize)
+        && FMath::IsNearlyEqual(FavoriteSizeBox->GetWidthOverride(), RICompactUI::GetFavoriteButtonHitSize())
         && TitleSizeBox
         && FMath::IsNearlyEqual(TitleSizeBox->GetMaxDesiredWidth(), RI_FunctionTitleMaxWidth);
 }
@@ -213,32 +216,23 @@ void UInspectorFunctionRowWidget::BuildWidgetTree()
         HeaderSlot->SetPadding(FMargin(0.f, 0.f, 0.f, RICompactUI::GetInlineGap()));
     }
 
-    FavoriteButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("RI_FunctionRowFavoriteButton"));
-    FavoriteButton->OnClicked.AddDynamic(this, &UInspectorFunctionRowWidget::HandleFavoriteClicked);
-    FavoriteSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_FunctionRowFavoriteSize"));
-    FavoriteSizeBox->SetWidthOverride(RI_FunctionFavoriteButtonSize);
-    FavoriteSizeBox->SetHeightOverride(RI_FunctionFavoriteButtonSize);
-    FavoriteIcon = RICompactUI::MakeFavoriteIcon(
+    UImage* NewFavoriteIcon = nullptr;
+    USizeBox* NewFavoriteSizeBox = nullptr;
+    FavoriteButton = RICompactUI::MakeFavoriteGhostButton(
         WidgetTree,
+        TEXT("RI_FunctionRowFavoriteButton"),
+        TEXT("RI_FunctionRowFavoriteSize"),
         TEXT("RI_FunctionRowFavoriteIcon"),
-        RI_FunctionFavoriteIconSize,
         false,
         RI_FunctionFavoriteActiveColor(),
-        RI_FunctionRowMutedColor());
-    if (FavoriteIcon)
+        RI_FunctionRowMutedColor(),
+        &NewFavoriteIcon,
+        &NewFavoriteSizeBox);
+    FavoriteIcon = NewFavoriteIcon;
+    FavoriteSizeBox = NewFavoriteSizeBox;
+    if (FavoriteButton)
     {
-        FavoriteIcon->SetVisibility(ESlateVisibility::HitTestInvisible);
-    }
-    FavoriteSizeBox->SetContent(FavoriteIcon);
-    FavoriteSizeBox->SetVisibility(ESlateVisibility::HitTestInvisible);
-    RICompactUI::CenterSizeBoxContent(FavoriteSizeBox);
-    FavoriteButton->AddChild(FavoriteSizeBox);
-    RICompactUI::ConfigureGhostIconButton(FavoriteButton);
-    if (UButtonSlot* FavoriteButtonSlot = Cast<UButtonSlot>(FavoriteButton->GetContentSlot()))
-    {
-        FavoriteButtonSlot->SetHorizontalAlignment(HAlign_Center);
-        FavoriteButtonSlot->SetVerticalAlignment(VAlign_Center);
-        FavoriteButtonSlot->SetPadding(FMargin(0.f));
+        FavoriteButton->OnClicked.AddDynamic(this, &UInspectorFunctionRowWidget::HandleFavoriteClicked);
     }
     if (UHorizontalBoxSlot* FavoriteSlot = HeaderRow->AddChildToHorizontalBox(FavoriteButton))
     {
@@ -581,7 +575,7 @@ void UInspectorFunctionRowWidget::UpdateCachedDisplayState(bool bFavorited)
         RICompactUI::SetFavoriteIconState(
             FavoriteIcon,
             bFavorited,
-            RI_FunctionFavoriteIconSize,
+            RICompactUI::GetFavoriteIconSize(),
             RI_FunctionFavoriteActiveColor(),
             RI_FunctionRowMutedColor());
     }

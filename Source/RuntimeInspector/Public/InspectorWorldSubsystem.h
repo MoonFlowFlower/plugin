@@ -1322,6 +1322,7 @@ private:
     double MaxColorPreviewMs = 0.0;
     FString LastColorPreviewUiRefreshMode = TEXT("None");
     int32 ColorPreviewCount = 0;
+    int32 ColorFinalRowRefreshCount = 0;
     int32 ColorFullRefreshCount = 0;
 
     // ����Ժ��������������Ӳ����һ��Ĭ��·��

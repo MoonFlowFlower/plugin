@@ -44,6 +44,7 @@ public:
     float GetFavoriteButtonHeightForAutomation() const;
     float GetParameterInputHeightForAutomation() const;
     bool ToggleFavoriteForAutomation(FString& OutError);
+    bool HasFavoriteVisualContractForAutomation() const;
     bool HasOverflowLayoutForAutomation() const;
     bool HasCompactRunButtonForAutomation() const;
     bool NavigateForAutomation(FString& OutError);

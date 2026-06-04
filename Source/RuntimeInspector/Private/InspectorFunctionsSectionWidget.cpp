@@ -23,7 +23,12 @@ namespace
 {
     static FLinearColor RI_FunctionSectionColor()
     {
-        return RICompactUI::GetSectionSurfaceBackgroundColor();
+        return FLinearColor(0.001518f, 0.001518f, 0.001518f, 0.06f);
+    }
+
+    static FLinearColor RI_FunctionBodyColor()
+    {
+        return FLinearColor(0.001518f, 0.001518f, 0.001518f, 0.03f);
     }
 
     static FLinearColor RI_FunctionTextColor()
@@ -171,7 +176,7 @@ void UInspectorFunctionsSectionWidget::BuildWidgetTree()
 
     UBorder* BodyBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("RI_ActorFunctionsBodyBorder"));
     BodyBorder->SetPadding(RICompactUI::GetSurfaceCardPadding(true));
-    BodyBorder->SetBrushColor(RICompactUI::GetRowSurfaceBackgroundColor());
+    BodyBorder->SetBrushColor(RI_FunctionBodyColor());
     BodyBorder->SetContent(ScrollBox);
     BodySizeBox->SetContent(BodyBorder);
 

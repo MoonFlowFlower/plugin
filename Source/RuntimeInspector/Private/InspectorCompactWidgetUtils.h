@@ -657,8 +657,15 @@ namespace RICompactUI
         return Text;
     }
 
+    inline UTexture2D* GetGeneratedShapeIconTexture(const FString& Shape);
+
     inline UTexture2D* GetFavoriteIconTexture(bool bFavorited)
     {
+        if (UTexture2D* GeneratedTexture = GetGeneratedShapeIconTexture(bFavorited ? TEXT("star-solid") : TEXT("star-outline")))
+        {
+            return GeneratedTexture;
+        }
+
         static TWeakObjectPtr<UTexture2D> OutlineTexture;
         static TWeakObjectPtr<UTexture2D> SolidTexture;
 
@@ -824,7 +831,8 @@ namespace RICompactUI
         float Height,
         const FMargin& Padding,
         EHorizontalAlignment HorizontalAlignment,
-        EVerticalAlignment VerticalAlignment)
+        EVerticalAlignment VerticalAlignment,
+        float AngleDegrees = 0.0f)
     {
         if (!WidgetTree || !Icon)
         {
@@ -836,6 +844,11 @@ namespace RICompactUI
         {
             return;
         }
+        if (!FMath::IsNearlyZero(AngleDegrees))
+        {
+            Part->SetRenderTransformPivot(FVector2D(0.5f, 0.5f));
+            Part->SetRenderTransformAngle(AngleDegrees);
+        }
 
         if (UOverlaySlot* Slot = Icon->AddChildToOverlay(Part))
         {
@@ -843,6 +856,308 @@ namespace RICompactUI
             Slot->SetHorizontalAlignment(HorizontalAlignment);
             Slot->SetVerticalAlignment(VerticalAlignment);
         }
+    }
+
+    inline void AddGeneratedIconFrameAt(
+        UWidgetTree* WidgetTree,
+        UOverlay* Icon,
+        const FLinearColor& Tint,
+        float Left,
+        float Top,
+        float Size,
+        float Stroke)
+    {
+        AddGeneratedIconPart(WidgetTree, Icon, Tint, Size, Stroke, FMargin(Left, Top, 0.f, 0.f), HAlign_Left, VAlign_Top);
+        AddGeneratedIconPart(WidgetTree, Icon, Tint, Size, Stroke, FMargin(Left, Top + Size - Stroke, 0.f, 0.f), HAlign_Left, VAlign_Top);
+        AddGeneratedIconPart(WidgetTree, Icon, Tint, Stroke, Size, FMargin(Left, Top, 0.f, 0.f), HAlign_Left, VAlign_Top);
+        AddGeneratedIconPart(WidgetTree, Icon, Tint, Stroke, Size, FMargin(Left + Size - Stroke, Top, 0.f, 0.f), HAlign_Left, VAlign_Top);
+    }
+
+    inline float GetGeneratedIconDistanceToSegment(const FVector2D& Point, const FVector2D& Start, const FVector2D& End)
+    {
+        const FVector2D Segment = End - Start;
+        const float SegmentLengthSquared = Segment.SizeSquared();
+        if (SegmentLengthSquared <= KINDA_SMALL_NUMBER)
+        {
+            return FVector2D::Distance(Point, Start);
+        }
+
+        const float T = FMath::Clamp(FVector2D::DotProduct(Point - Start, Segment) / SegmentLengthSquared, 0.0f, 1.0f);
+        return FVector2D::Distance(Point, Start + Segment * T);
+    }
+
+    inline void BlendGeneratedIconAlpha(TArray<float>& Alpha, int32 TextureSize, int32 X, int32 Y, float Coverage)
+    {
+        if (X < 0 || Y < 0 || X >= TextureSize || Y >= TextureSize)
+        {
+            return;
+        }
+
+        const int32 Index = Y * TextureSize + X;
+        Alpha[Index] = FMath::Max(Alpha[Index], FMath::Clamp(Coverage, 0.0f, 1.0f));
+    }
+
+    inline void DrawGeneratedIconSegment(TArray<float>& Alpha, int32 TextureSize, const FVector2D& Start, const FVector2D& End, float Stroke)
+    {
+        const float HalfStroke = Stroke * 0.5f;
+        const float Feather = 1.35f / static_cast<float>(TextureSize);
+        for (int32 Y = 0; Y < TextureSize; ++Y)
+        {
+            for (int32 X = 0; X < TextureSize; ++X)
+            {
+                const FVector2D Point(
+                    (static_cast<float>(X) + 0.5f) / static_cast<float>(TextureSize),
+                    (static_cast<float>(Y) + 0.5f) / static_cast<float>(TextureSize));
+                const float Distance = GetGeneratedIconDistanceToSegment(Point, Start, End);
+                const float Coverage = (HalfStroke + Feather - Distance) / Feather;
+                if (Coverage > 0.0f)
+                {
+                    BlendGeneratedIconAlpha(Alpha, TextureSize, X, Y, Coverage);
+                }
+            }
+        }
+    }
+
+    inline void DrawGeneratedIconCircle(TArray<float>& Alpha, int32 TextureSize, const FVector2D& Center, float Radius, bool bFilled, float Stroke = 0.08f)
+    {
+        const float Feather = 1.35f / static_cast<float>(TextureSize);
+        const float HalfStroke = Stroke * 0.5f;
+        for (int32 Y = 0; Y < TextureSize; ++Y)
+        {
+            for (int32 X = 0; X < TextureSize; ++X)
+            {
+                const FVector2D Point(
+                    (static_cast<float>(X) + 0.5f) / static_cast<float>(TextureSize),
+                    (static_cast<float>(Y) + 0.5f) / static_cast<float>(TextureSize));
+                const float Distance = FVector2D::Distance(Point, Center);
+                const float EdgeDistance = bFilled ? Distance : FMath::Abs(Distance - Radius);
+                const float Target = bFilled ? Radius : HalfStroke;
+                const float Coverage = (Target + Feather - EdgeDistance) / Feather;
+                if (Coverage > 0.0f)
+                {
+                    BlendGeneratedIconAlpha(Alpha, TextureSize, X, Y, Coverage);
+                }
+            }
+        }
+    }
+
+    inline void DrawGeneratedIconRectOutline(TArray<float>& Alpha, int32 TextureSize, const FVector2D& Min, const FVector2D& Max, float Stroke)
+    {
+        DrawGeneratedIconSegment(Alpha, TextureSize, FVector2D(Min.X, Min.Y), FVector2D(Max.X, Min.Y), Stroke);
+        DrawGeneratedIconSegment(Alpha, TextureSize, FVector2D(Max.X, Min.Y), FVector2D(Max.X, Max.Y), Stroke);
+        DrawGeneratedIconSegment(Alpha, TextureSize, FVector2D(Max.X, Max.Y), FVector2D(Min.X, Max.Y), Stroke);
+        DrawGeneratedIconSegment(Alpha, TextureSize, FVector2D(Min.X, Max.Y), FVector2D(Min.X, Min.Y), Stroke);
+    }
+
+    inline TArray<FVector2D> MakeGeneratedStarPoints()
+    {
+        TArray<FVector2D> Points;
+        Points.Reserve(10);
+        constexpr float Pi = 3.14159265358979323846f;
+        for (int32 Index = 0; Index < 10; ++Index)
+        {
+            const float Angle = (-90.0f + static_cast<float>(Index) * 36.0f) * Pi / 180.0f;
+            const float Radius = (Index % 2 == 0) ? 0.34f : 0.15f;
+            Points.Add(FVector2D(0.50f + FMath::Cos(Angle) * Radius, 0.52f + FMath::Sin(Angle) * Radius));
+        }
+        return Points;
+    }
+
+    inline bool IsGeneratedPointInPolygon(const FVector2D& Point, const TArray<FVector2D>& Points)
+    {
+        if (Points.Num() < 3)
+        {
+            return false;
+        }
+
+        bool bInside = false;
+        for (int32 Index = 0, Prev = Points.Num() - 1; Index < Points.Num(); Prev = Index++)
+        {
+            const FVector2D& A = Points[Index];
+            const FVector2D& B = Points[Prev];
+            const float Denominator = FMath::Abs(B.Y - A.Y) <= KINDA_SMALL_NUMBER ? KINDA_SMALL_NUMBER : (B.Y - A.Y);
+            const bool bIntersects = ((A.Y > Point.Y) != (B.Y > Point.Y))
+                && (Point.X < (B.X - A.X) * (Point.Y - A.Y) / Denominator + A.X);
+            if (bIntersects)
+            {
+                bInside = !bInside;
+            }
+        }
+        return bInside;
+    }
+
+    inline float GetGeneratedPolygonEdgeDistance(const FVector2D& Point, const TArray<FVector2D>& Points)
+    {
+        float MinDistance = TNumericLimits<float>::Max();
+        for (int32 Index = 0; Index < Points.Num(); ++Index)
+        {
+            const FVector2D& A = Points[Index];
+            const FVector2D& B = Points[(Index + 1) % Points.Num()];
+            MinDistance = FMath::Min(MinDistance, GetGeneratedIconDistanceToSegment(Point, A, B));
+        }
+        return MinDistance;
+    }
+
+    inline void DrawGeneratedIconClosedPolyline(TArray<float>& Alpha, int32 TextureSize, const TArray<FVector2D>& Points, float Stroke)
+    {
+        for (int32 Index = 0; Index < Points.Num(); ++Index)
+        {
+            DrawGeneratedIconSegment(Alpha, TextureSize, Points[Index], Points[(Index + 1) % Points.Num()], Stroke);
+        }
+    }
+
+    inline void DrawGeneratedIconFilledPolygon(TArray<float>& Alpha, int32 TextureSize, const TArray<FVector2D>& Points)
+    {
+        const float Feather = 1.35f / static_cast<float>(TextureSize);
+        for (int32 Y = 0; Y < TextureSize; ++Y)
+        {
+            for (int32 X = 0; X < TextureSize; ++X)
+            {
+                const FVector2D Point(
+                    (static_cast<float>(X) + 0.5f) / static_cast<float>(TextureSize),
+                    (static_cast<float>(Y) + 0.5f) / static_cast<float>(TextureSize));
+                const float Distance = GetGeneratedPolygonEdgeDistance(Point, Points);
+                const bool bInside = IsGeneratedPointInPolygon(Point, Points);
+                const float Coverage = bInside ? 1.0f : (Feather - Distance) / Feather;
+                if (Coverage > 0.0f)
+                {
+                    BlendGeneratedIconAlpha(Alpha, TextureSize, X, Y, Coverage);
+                }
+            }
+        }
+    }
+
+    inline void DrawGeneratedIconShapeAlpha(const FString& ShapeKey, TArray<float>& Alpha, int32 TextureSize)
+    {
+        const float Stroke = 0.085f;
+        if (ShapeKey.Equals(TEXT("object"), ESearchCase::IgnoreCase))
+        {
+            const float Corner = 0.18f;
+            DrawGeneratedIconSegment(Alpha, TextureSize, FVector2D(0.22f, 0.22f), FVector2D(0.22f + Corner, 0.22f), Stroke);
+            DrawGeneratedIconSegment(Alpha, TextureSize, FVector2D(0.22f, 0.22f), FVector2D(0.22f, 0.22f + Corner), Stroke);
+            DrawGeneratedIconSegment(Alpha, TextureSize, FVector2D(0.78f, 0.22f), FVector2D(0.78f - Corner, 0.22f), Stroke);
+            DrawGeneratedIconSegment(Alpha, TextureSize, FVector2D(0.78f, 0.22f), FVector2D(0.78f, 0.22f + Corner), Stroke);
+            DrawGeneratedIconSegment(Alpha, TextureSize, FVector2D(0.22f, 0.78f), FVector2D(0.22f + Corner, 0.78f), Stroke);
+            DrawGeneratedIconSegment(Alpha, TextureSize, FVector2D(0.22f, 0.78f), FVector2D(0.22f, 0.78f - Corner), Stroke);
+            DrawGeneratedIconSegment(Alpha, TextureSize, FVector2D(0.78f, 0.78f), FVector2D(0.78f - Corner, 0.78f), Stroke);
+            DrawGeneratedIconSegment(Alpha, TextureSize, FVector2D(0.78f, 0.78f), FVector2D(0.78f, 0.78f - Corner), Stroke);
+        }
+        else if (ShapeKey.Equals(TEXT("components"), ESearchCase::IgnoreCase))
+        {
+            const FVector2D NodeSize(0.13f, 0.13f);
+            const TArray<float> Rows = { 0.25f, 0.50f, 0.75f };
+            DrawGeneratedIconSegment(Alpha, TextureSize, FVector2D(0.30f, Rows[0]), FVector2D(0.30f, Rows[2]), Stroke * 0.72f);
+            for (float Y : Rows)
+            {
+                DrawGeneratedIconRectOutline(
+                    Alpha,
+                    TextureSize,
+                    FVector2D(0.20f, Y - NodeSize.Y * 0.5f),
+                    FVector2D(0.20f + NodeSize.X, Y + NodeSize.Y * 0.5f),
+                    Stroke * 0.72f);
+                DrawGeneratedIconSegment(Alpha, TextureSize, FVector2D(0.33f, Y), FVector2D(0.78f, Y), Stroke * 0.72f);
+            }
+        }
+        else if (ShapeKey.Equals(TEXT("status"), ESearchCase::IgnoreCase))
+        {
+            DrawGeneratedIconSegment(Alpha, TextureSize, FVector2D(0.50f, 0.18f), FVector2D(0.82f, 0.78f), Stroke * 0.92f);
+            DrawGeneratedIconSegment(Alpha, TextureSize, FVector2D(0.82f, 0.78f), FVector2D(0.18f, 0.78f), Stroke * 0.92f);
+            DrawGeneratedIconSegment(Alpha, TextureSize, FVector2D(0.18f, 0.78f), FVector2D(0.50f, 0.18f), Stroke * 0.92f);
+            DrawGeneratedIconSegment(Alpha, TextureSize, FVector2D(0.50f, 0.39f), FVector2D(0.50f, 0.57f), Stroke * 0.72f);
+            DrawGeneratedIconCircle(Alpha, TextureSize, FVector2D(0.50f, 0.68f), 0.035f, true);
+        }
+        else if (ShapeKey.Equals(TEXT("search"), ESearchCase::IgnoreCase))
+        {
+            DrawGeneratedIconCircle(Alpha, TextureSize, FVector2D(0.44f, 0.43f), 0.20f, false, Stroke * 0.88f);
+            DrawGeneratedIconSegment(Alpha, TextureSize, FVector2D(0.59f, 0.58f), FVector2D(0.77f, 0.76f), Stroke * 0.88f);
+        }
+        else if (ShapeKey.Equals(TEXT("star-outline"), ESearchCase::IgnoreCase))
+        {
+            DrawGeneratedIconClosedPolyline(Alpha, TextureSize, MakeGeneratedStarPoints(), Stroke * 0.78f);
+        }
+        else if (ShapeKey.Equals(TEXT("star-solid"), ESearchCase::IgnoreCase))
+        {
+            DrawGeneratedIconFilledPolygon(Alpha, TextureSize, MakeGeneratedStarPoints());
+        }
+        else if (ShapeKey.Equals(TEXT("chevron-right"), ESearchCase::IgnoreCase))
+        {
+            DrawGeneratedIconSegment(Alpha, TextureSize, FVector2D(0.38f, 0.26f), FVector2D(0.62f, 0.50f), Stroke);
+            DrawGeneratedIconSegment(Alpha, TextureSize, FVector2D(0.62f, 0.50f), FVector2D(0.38f, 0.74f), Stroke);
+        }
+        else if (ShapeKey.Equals(TEXT("chevron-down"), ESearchCase::IgnoreCase))
+        {
+            DrawGeneratedIconSegment(Alpha, TextureSize, FVector2D(0.26f, 0.38f), FVector2D(0.50f, 0.62f), Stroke);
+            DrawGeneratedIconSegment(Alpha, TextureSize, FVector2D(0.50f, 0.62f), FVector2D(0.74f, 0.38f), Stroke);
+        }
+        else if (ShapeKey.Equals(TEXT("dot"), ESearchCase::IgnoreCase))
+        {
+            DrawGeneratedIconCircle(Alpha, TextureSize, FVector2D(0.50f, 0.50f), 0.10f, true);
+        }
+        else if (ShapeKey.Equals(TEXT("blank"), ESearchCase::IgnoreCase))
+        {
+            return;
+        }
+        else
+        {
+            DrawGeneratedIconSegment(Alpha, TextureSize, FVector2D(0.24f, 0.50f), FVector2D(0.76f, 0.50f), Stroke);
+        }
+    }
+
+    inline UTexture2D* CreateGeneratedShapeIconTexture(const FString& ShapeKey)
+    {
+        constexpr int32 TextureSize = 128;
+        TArray<float> Alpha;
+        Alpha.Init(0.0f, TextureSize * TextureSize);
+        DrawGeneratedIconShapeAlpha(ShapeKey, Alpha, TextureSize);
+
+        TArray<FColor> Pixels;
+        Pixels.SetNumZeroed(TextureSize * TextureSize);
+        for (int32 Index = 0; Index < Pixels.Num(); ++Index)
+        {
+            const uint8 A = static_cast<uint8>(FMath::Clamp(FMath::RoundToInt(Alpha[Index] * 255.0f), 0, 255));
+            Pixels[Index] = FColor(255, 255, 255, A);
+        }
+
+        const FString TextureNameString = FString::Printf(TEXT("RI_GeneratedShape_%s"), *ShapeKey.Replace(TEXT("-"), TEXT("_")));
+        UTexture2D* Texture = UTexture2D::CreateTransient(TextureSize, TextureSize, PF_B8G8R8A8, MakeUniqueObjectName(GetTransientPackage(), UTexture2D::StaticClass(), *TextureNameString));
+        if (!Texture || !Texture->GetPlatformData() || Texture->GetPlatformData()->Mips.Num() == 0)
+        {
+            return nullptr;
+        }
+
+        Texture->SRGB = true;
+        Texture->NeverStream = true;
+        Texture->LODGroup = TEXTUREGROUP_UI;
+        Texture->Filter = TF_Bilinear;
+        FTexture2DMipMap& Mip = Texture->GetPlatformData()->Mips[0];
+        void* TextureData = Mip.BulkData.Lock(LOCK_READ_WRITE);
+        FMemory::Memcpy(TextureData, Pixels.GetData(), Pixels.Num() * sizeof(FColor));
+        Mip.BulkData.Unlock();
+        Texture->UpdateResource();
+        Texture->AddToRoot();
+        return Texture;
+    }
+
+    inline UTexture2D* GetGeneratedShapeIconTexture(const FString& Shape)
+    {
+        if (Shape.IsEmpty())
+        {
+            return nullptr;
+        }
+
+        static TMap<FString, UTexture2D*> CachedTextures;
+        const FString ShapeKey = Shape.ToLower();
+        if (UTexture2D** CachedTexture = CachedTextures.Find(ShapeKey))
+        {
+            if (*CachedTexture)
+            {
+                return *CachedTexture;
+            }
+        }
+
+        UTexture2D* Texture = CreateGeneratedShapeIconTexture(ShapeKey);
+        CachedTextures.Add(ShapeKey, Texture);
+        return Texture;
     }
 
     inline UWidget* MakeShapeIcon(
@@ -857,56 +1172,20 @@ namespace RICompactUI
             return nullptr;
         }
 
-        UOverlay* Icon = WidgetTree->ConstructWidget<UOverlay>(UOverlay::StaticClass(), Name);
-        Icon->SetVisibility(ESlateVisibility::HitTestInvisible);
-
         const float Size = FMath::Max(8.0f, DesiredSize);
-        USizeBox* IconRoot = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-        IconRoot->SetWidthOverride(Size);
-        IconRoot->SetHeightOverride(Size);
-        IconRoot->SetContent(Icon);
-        IconRoot->SetVisibility(ESlateVisibility::HitTestInvisible);
-        if (USizeBoxSlot* RootSlot = Cast<USizeBoxSlot>(IconRoot->GetContentSlot()))
+        UImage* Image = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), Name);
+        if (UTexture2D* Texture = GetGeneratedShapeIconTexture(Shape))
         {
-            RootSlot->SetHorizontalAlignment(HAlign_Fill);
-            RootSlot->SetVerticalAlignment(VAlign_Fill);
-            RootSlot->SetPadding(FMargin(0.f));
+            Image->SetBrushFromTexture(Texture, false);
         }
-
-        const float Stroke = FMath::Max(1.0f, FMath::RoundToFloat(Size * 0.1f));
-        const float Inset = FMath::Max(2.0f, FMath::RoundToFloat(Size * 0.18f));
-        const float ObjectSpan = FMath::Max(6.0f, Size - (Inset * 2.0f));
-
-        if (Shape.Equals(TEXT("object"), ESearchCase::IgnoreCase))
-        {
-            AddGeneratedIconPart(WidgetTree, Icon, Tint, ObjectSpan, Stroke, FMargin(0.f, Inset, 0.f, 0.f), HAlign_Center, VAlign_Top);
-            AddGeneratedIconPart(WidgetTree, Icon, Tint, ObjectSpan, Stroke, FMargin(0.f, 0.f, 0.f, Inset), HAlign_Center, VAlign_Bottom);
-            AddGeneratedIconPart(WidgetTree, Icon, Tint, Stroke, ObjectSpan, FMargin(Inset, 0.f, 0.f, 0.f), HAlign_Left, VAlign_Center);
-            AddGeneratedIconPart(WidgetTree, Icon, Tint, Stroke, ObjectSpan, FMargin(0.f, 0.f, Inset, 0.f), HAlign_Right, VAlign_Center);
-        }
-        else if (Shape.Equals(TEXT("components"), ESearchCase::IgnoreCase))
-        {
-            const float RowWidth = FMath::Max(7.0f, Size * 0.58f);
-            const float DotSize = FMath::Max(1.5f, Stroke * 1.5f);
-            const float RowGap = FMath::Max(3.0f, Size * 0.22f);
-            for (int32 Index = 0; Index < 3; ++Index)
-            {
-                const float YPadding = RowGap * static_cast<float>(Index);
-                AddGeneratedIconPart(WidgetTree, Icon, Tint, DotSize, DotSize, FMargin(Inset, YPadding, 0.f, 0.f), HAlign_Left, VAlign_Top);
-                AddGeneratedIconPart(WidgetTree, Icon, Tint, RowWidth, Stroke, FMargin(Inset + DotSize + Stroke * 2.0f, YPadding, 0.f, 0.f), HAlign_Left, VAlign_Top);
-            }
-        }
-        else if (Shape.Equals(TEXT("status"), ESearchCase::IgnoreCase))
-        {
-            AddGeneratedIconPart(WidgetTree, Icon, Tint, Stroke, Size * 0.48f, FMargin(0.f, Inset, 0.f, 0.f), HAlign_Center, VAlign_Top);
-            AddGeneratedIconPart(WidgetTree, Icon, Tint, Stroke * 1.4f, Stroke * 1.4f, FMargin(0.f, 0.f, 0.f, Inset), HAlign_Center, VAlign_Bottom);
-        }
-        else
-        {
-            AddGeneratedIconPart(WidgetTree, Icon, Tint, ObjectSpan, Stroke, FMargin(0.f), HAlign_Center, VAlign_Center);
-        }
-
-        return IconRoot;
+        FSlateBrush Brush = Image->GetBrush();
+        Brush.DrawAs = ESlateBrushDrawType::Image;
+        Brush.ImageSize = FVector2D(Size, Size);
+        Image->SetBrush(Brush);
+        Image->SetDesiredSizeOverride(FVector2D(Size, Size));
+        Image->SetColorAndOpacity(Tint);
+        Image->SetVisibility(ESlateVisibility::HitTestInvisible);
+        return Image;
     }
 
     inline UWidget* MakeIconWidget(
@@ -931,6 +1210,20 @@ namespace RICompactUI
         if (TryGetGlyphIcon(IconName, Glyph))
         {
             return MakeGlyphIcon(WidgetTree, Name, Glyph, DesiredSize, Tint);
+        }
+
+        const FString AssetIconName(IconName);
+        if (AssetIconName.Equals(TEXT("search_white_64"), ESearchCase::IgnoreCase))
+        {
+            return MakeShapeIcon(WidgetTree, Name, TEXT("search"), DesiredSize, Tint);
+        }
+        if (AssetIconName.Equals(TEXT("star_white_solid_64"), ESearchCase::IgnoreCase))
+        {
+            return MakeShapeIcon(WidgetTree, Name, TEXT("star-solid"), DesiredSize, Tint);
+        }
+        if (AssetIconName.Equals(TEXT("star_white_outline_64"), ESearchCase::IgnoreCase))
+        {
+            return MakeShapeIcon(WidgetTree, Name, TEXT("star-outline"), DesiredSize, Tint);
         }
 
         return MakeIcon(WidgetTree, Name, IconName, DesiredSize, Tint);
@@ -1142,17 +1435,20 @@ namespace RICompactUI
         ButtonStyle.Pressed.DrawAs = ESlateBrushDrawType::RoundedBox;
         ButtonStyle.Disabled.DrawAs = ESlateBrushDrawType::RoundedBox;
         const bool bTabButton = Style == ERIButtonVisualStyle::TabActive || Style == ERIButtonVisualStyle::TabInactive;
-        const bool bHeaderButton = Style == ERIButtonVisualStyle::Header;
         const float ButtonCornerRadius = bTabButton ? FMath::Max(2.0f, Metrics.CornerRadius - 2.0f) : Metrics.CornerRadius;
         ButtonStyle.Normal.OutlineSettings.CornerRadii = FVector4(ButtonCornerRadius, ButtonCornerRadius, ButtonCornerRadius, ButtonCornerRadius);
         ButtonStyle.Hovered.OutlineSettings.CornerRadii = FVector4(ButtonCornerRadius, ButtonCornerRadius, ButtonCornerRadius, ButtonCornerRadius);
         ButtonStyle.Pressed.OutlineSettings.CornerRadii = FVector4(ButtonCornerRadius, ButtonCornerRadius, ButtonCornerRadius, ButtonCornerRadius);
         ButtonStyle.Disabled.OutlineSettings.CornerRadii = FVector4(ButtonCornerRadius, ButtonCornerRadius, ButtonCornerRadius, ButtonCornerRadius);
-        const float OutlineWidth = (bTabButton || bHeaderButton) ? 0.0f : Metrics.BorderWidth;
+        const float OutlineWidth = 0.0f;
         ButtonStyle.Normal.OutlineSettings.Width = OutlineWidth;
         ButtonStyle.Hovered.OutlineSettings.Width = OutlineWidth;
         ButtonStyle.Pressed.OutlineSettings.Width = OutlineWidth;
         ButtonStyle.Disabled.OutlineSettings.Width = OutlineWidth;
+        ButtonStyle.Normal.OutlineSettings.Color = FSlateColor(FLinearColor::Transparent);
+        ButtonStyle.Hovered.OutlineSettings.Color = FSlateColor(FLinearColor::Transparent);
+        ButtonStyle.Pressed.OutlineSettings.Color = FSlateColor(FLinearColor::Transparent);
+        ButtonStyle.Disabled.OutlineSettings.Color = FSlateColor(FLinearColor::Transparent);
         Button->WidgetStyle = ButtonStyle;
         PRAGMA_ENABLE_DEPRECATION_WARNINGS
 
@@ -1259,6 +1555,95 @@ namespace RICompactUI
             ButtonSlot->SetVerticalAlignment(VAlign_Center);
             ButtonSlot->SetPadding(FMargin(0.f));
         }
+    }
+
+    inline float GetFavoriteButtonHitSize()
+    {
+        return 22.0f;
+    }
+
+    inline float GetFavoriteIconSize()
+    {
+        return 12.0f;
+    }
+
+    inline UButton* MakeFavoriteGhostButton(
+        UWidgetTree* WidgetTree,
+        const FName& ButtonName,
+        const FName& SizeBoxName,
+        const FName& IconName,
+        bool bFavorited,
+        const FLinearColor& ActiveColor,
+        const FLinearColor& InactiveColor,
+        UImage** OutIcon,
+        USizeBox** OutSizeBox)
+    {
+        if (OutIcon)
+        {
+            *OutIcon = nullptr;
+        }
+        if (OutSizeBox)
+        {
+            *OutSizeBox = nullptr;
+        }
+        if (!WidgetTree)
+        {
+            return nullptr;
+        }
+
+        UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), ButtonName);
+        USizeBox* SizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), SizeBoxName);
+        SizeBox->SetWidthOverride(GetFavoriteButtonHitSize());
+        SizeBox->SetHeightOverride(GetFavoriteButtonHitSize());
+        SizeBox->SetVisibility(ESlateVisibility::HitTestInvisible);
+
+        UImage* Icon = MakeFavoriteIcon(
+            WidgetTree,
+            IconName,
+            GetFavoriteIconSize(),
+            bFavorited,
+            ActiveColor,
+            InactiveColor);
+        if (Icon)
+        {
+            Icon->SetVisibility(ESlateVisibility::HitTestInvisible);
+            SizeBox->SetContent(Icon);
+        }
+
+        CenterSizeBoxContent(SizeBox);
+        Button->AddChild(SizeBox);
+        ConfigureGhostIconButton(Button);
+        if (OutIcon)
+        {
+            *OutIcon = Icon;
+        }
+        if (OutSizeBox)
+        {
+            *OutSizeBox = SizeBox;
+        }
+        return Button;
+    }
+
+    inline bool HasFavoriteGhostButtonContract(const UButton* Button, const USizeBox* SizeBox, const UImage* Icon)
+    {
+        if (!Button || !SizeBox || !Icon)
+        {
+            return false;
+        }
+
+        PRAGMA_DISABLE_DEPRECATION_WARNINGS
+        const bool bHasGhostButtonStyle =
+            FMath::IsNearlyZero(Button->WidgetStyle.Normal.OutlineSettings.Width)
+            && FMath::IsNearlyZero(Button->WidgetStyle.Hovered.OutlineSettings.Width)
+            && FMath::IsNearlyZero(Button->WidgetStyle.Pressed.OutlineSettings.Width)
+            && FMath::IsNearlyZero(Button->WidgetStyle.Disabled.OutlineSettings.Width);
+        PRAGMA_ENABLE_DEPRECATION_WARNINGS
+
+        return FMath::IsNearlyEqual(SizeBox->GetWidthOverride(), GetFavoriteButtonHitSize())
+            && FMath::IsNearlyEqual(SizeBox->GetHeightOverride(), GetFavoriteButtonHitSize())
+            && SizeBox->GetVisibility() == ESlateVisibility::HitTestInvisible
+            && Icon->GetVisibility() == ESlateVisibility::HitTestInvisible
+            && bHasGhostButtonStyle;
     }
 
     inline void ConfigureCheckBox(UCheckBox* CheckBox)

@@ -431,6 +431,7 @@ static const FName RI_SelfTestId_DockMaterialEditRoute(TEXT("dock_material_edit_
 static const FName RI_SelfTestId_FavoriteRowNavigationRoute(TEXT("favorite_row_navigation_route"));
 static const FName RI_SelfTestId_FunctionRowParameterRunRoute(TEXT("function_row_parameter_run_route"));
 static const FName RI_SelfTestId_FavoriteStarToggleRoute(TEXT("favorite_star_toggle_route"));
+static const FName RI_SelfTestId_FavoriteIconVisualContract(TEXT("favorite_icon_visual_contract"));
 static const FName RI_SelfTestId_RowTextOverflowContract(TEXT("row_text_overflow_contract"));
 static const FName RI_SelfTestId_FunctionRunButtonVisualContract(TEXT("function_run_button_visual_contract"));
 static const FName RI_SelfTestId_SearchSyncsSubsystem(TEXT("search_syncs_subsystem"));
@@ -12503,16 +12504,13 @@ void UInspectorWorldSubsystem::RefreshColorEditItemDisplay(UObject* ItemObject, 
         return;
     }
 
-    ++ColorFullRefreshCount;
+    ++ColorFinalRowRefreshCount;
     LastColorPreviewUiRefreshMode = ApplyMode == ERIColorEditApplyMode::Restore
-        ? TEXT("RestoreFull")
-        : TEXT("CommitFull");
+        ? TEXT("RestoreRowOnly")
+        : TEXT("CommitRowOnly");
 
     if (UUserWidget* Panel = PanelWidget.Get())
     {
-        RI_RefreshPropertyList(Panel, EInspectorRefreshReason::ValuesChanged);
-        RefreshPanel(EInspectorRefreshReason::ValuesChanged);
-        RI_RefreshLegacyPropertyPanelWidgets(Panel);
         if (bHasUpdatedColor)
         {
             RI_SyncLegacyPropertyListSwatch(Panel, ItemObject, UpdatedColor);
@@ -12531,6 +12529,7 @@ void UInspectorWorldSubsystem::ResetColorPickerPerfDiagnostics()
     MaxColorPreviewMs = 0.0;
     LastColorPreviewUiRefreshMode = TEXT("None");
     ColorPreviewCount = 0;
+    ColorFinalRowRefreshCount = 0;
     ColorFullRefreshCount = 0;
 }
 
@@ -13772,6 +13771,12 @@ bool UInspectorWorldSubsystem::ExecuteLegacyToolNativeBridgeAction(FName BridgeI
             && Summary.Contains(TEXT("CompactTextHidden=1"))
             && Summary.Contains(TEXT("CenterPassThrough=1"))
             && Summary.Contains(TEXT("CenterSelectionPill=0"))
+            && Summary.Contains(TEXT("PanelChrome=1"))
+            && Summary.Contains(TEXT("PanelBorder=1"))
+            && Summary.Contains(TEXT("PanelBlur=1"))
+            && Summary.Contains(TEXT("PanelBase=1"))
+            && Summary.Contains(TEXT("PanelGrid=1"))
+            && Summary.Contains(TEXT("PanelWash=1"))
             && Summary.Contains(TEXT("FavoritesFrame=1"))
             && Summary.Contains(TEXT("FavoritesScroll=1"))
             && Summary.Contains(TEXT("FunctionsFrame=1"))
@@ -14496,6 +14501,181 @@ bool UInspectorWorldSubsystem::ExecuteLegacyToolNativeBridgeAction(FName BridgeI
             *GetNameSafe(RunItem),
             bRunOk ? 1 : 0,
             *RunError);
+        CleanupDockContractActor(TestActor, bSpawnedActor, PreviousActor);
+        return true;
+    }
+
+    if (BridgeId == RI_SelfTestId_FavoriteIconVisualContract)
+    {
+        if (!bOpen)
+        {
+            Open();
+        }
+
+        const TWeakObjectPtr<AActor> PreviousActor = SelectedActor;
+        bool bSpawnedActor = false;
+        AActor* TestActor = ResolveDockContractActor(bSpawnedActor);
+        if (TestActor && SelectedActor.Get() != TestActor)
+        {
+            SetSelectedActor(TestActor);
+        }
+
+        FString ActorPageError;
+        SetVisiblePageByName(TEXT("Actor"), ActorPageError);
+        SetPropertyView_Full();
+        if (URuntimeInspectorController* Controller = GetOrCreateRuntimeInspectorController())
+        {
+            Controller->SetSearchText(FText::GetEmpty());
+        }
+
+        auto CreateRowWidget = [this](UClass* WidgetClass) -> UUserWidget*
+        {
+            if (!WidgetClass)
+            {
+                return nullptr;
+            }
+            if (APlayerController* PC = GetLocalPC())
+            {
+                return CreateWidget<UUserWidget>(PC, WidgetClass);
+            }
+            if (UWorld* World = GetWorld())
+            {
+                return CreateWidget<UUserWidget>(World, WidgetClass);
+            }
+            return nullptr;
+        };
+
+        TArray<UObject*> PropertyItems;
+        GetPropertyItemsForSelectedEx(TEXT(""), false, PropertyItems);
+        UInspectorPropertyItem* PropertyCandidate = nullptr;
+        for (UObject* ItemObject : PropertyItems)
+        {
+            UInspectorPropertyItem* PropertyItem = Cast<UInspectorPropertyItem>(ItemObject);
+            if (PropertyItem && PropertyItem->GetTargetObject())
+            {
+                PropertyCandidate = PropertyItem;
+                break;
+            }
+        }
+
+        UInspectorPropertyRowWidget* PropertyRow = PropertyCandidate
+            ? Cast<UInspectorPropertyRowWidget>(CreateRowWidget(UInspectorPropertyRowWidget::StaticClass()))
+            : nullptr;
+        if (PropertyRow)
+        {
+            PropertyRow->TakeWidget();
+            PropertyRow->SetInspectorSubsystem(this);
+            PropertyRow->SetPropertyItem(PropertyCandidate);
+        }
+        const bool bPropertyVisualOk = PropertyRow && PropertyRow->HasFavoriteVisualContractForAutomation();
+
+        TArray<UInspectorFunctionItem*> FunctionItems;
+        GetFunctionItemsForSelected(TEXT(""), FunctionItems);
+        UInspectorFunctionItem* FunctionCandidate = nullptr;
+        for (UInspectorFunctionItem* FunctionItem : FunctionItems)
+        {
+            if (FunctionItem && FunctionItem->IsValidItem())
+            {
+                FunctionCandidate = FunctionItem;
+                break;
+            }
+        }
+
+        UInspectorFunctionRowWidget* FunctionRow = FunctionCandidate
+            ? Cast<UInspectorFunctionRowWidget>(CreateRowWidget(UInspectorFunctionRowWidget::StaticClass()))
+            : nullptr;
+        if (FunctionRow)
+        {
+            FunctionRow->TakeWidget();
+            FunctionRow->SetInspectorSubsystem(this);
+            FunctionRow->SetFunctionItem(FunctionCandidate);
+        }
+        const bool bFunctionVisualOk = FunctionRow && FunctionRow->HasFavoriteVisualContractForAutomation();
+
+        UInspectorMaterialParamItem* MaterialCandidate = nullptr;
+        if (TestActor)
+        {
+            TArray<UActorComponent*> Components;
+            TestActor->GetComponents(Components);
+            for (UActorComponent* Component : Components)
+            {
+                UStaticMeshComponent* MeshComponent = Cast<UStaticMeshComponent>(Component);
+                if (!MeshComponent)
+                {
+                    continue;
+                }
+
+                for (int32 SlotIndex = 0; SlotIndex < MeshComponent->GetNumMaterials(); ++SlotIndex)
+                {
+                    UMaterialInterface* Material = MeshComponent->GetMaterial(SlotIndex);
+                    if (!Material)
+                    {
+                        continue;
+                    }
+
+                    TArray<FMaterialParameterInfo> ScalarInfos;
+                    TArray<FMaterialParameterInfo> VectorInfos;
+                    TArray<FGuid> ParameterIds;
+                    Material->GetAllScalarParameterInfo(ScalarInfos, ParameterIds);
+                    ParameterIds.Reset();
+                    Material->GetAllVectorParameterInfo(VectorInfos, ParameterIds);
+
+                    if (ScalarInfos.Num() > 0)
+                    {
+                        MaterialCandidate = GetOrCreateMaterialItem(MeshComponent, SlotIndex, ScalarInfos[0].Name, EInspectorMatParamType::Scalar);
+                    }
+                    else if (VectorInfos.Num() > 0)
+                    {
+                        MaterialCandidate = GetOrCreateMaterialItem(MeshComponent, SlotIndex, VectorInfos[0].Name, EInspectorMatParamType::Vector);
+                    }
+
+                    if (MaterialCandidate)
+                    {
+                        break;
+                    }
+                }
+
+                if (MaterialCandidate)
+                {
+                    break;
+                }
+            }
+        }
+
+        UInspectorMaterialParamRowWidget* MaterialRow = MaterialCandidate
+            ? Cast<UInspectorMaterialParamRowWidget>(CreateRowWidget(UInspectorMaterialParamRowWidget::StaticClass()))
+            : nullptr;
+        if (MaterialRow)
+        {
+            MaterialRow->TakeWidget();
+            MaterialRow->SetInspectorSubsystem(this);
+            MaterialRow->SetMaterialItem(MaterialCandidate);
+        }
+        const bool bMaterialVisualOk = MaterialRow && MaterialRow->HasFavoriteVisualContractForAutomation();
+
+        const bool bPropertyWasFavorite = PropertyCandidate && IsFavoriteForAnyItem(PropertyCandidate);
+        if (PropertyCandidate && !bPropertyWasFavorite)
+        {
+            ToggleFavoriteForAnyItem(PropertyCandidate);
+        }
+        RefreshDockRootWidget();
+        const UInspectorDockRootWidget* RootWidget = DockRootWidget.Get();
+        const bool bLeftFavoriteVisualOk = RootWidget && RootWidget->HasLeftFavoriteStarVisualContractForAutomation();
+        if (PropertyCandidate && !bPropertyWasFavorite && IsFavoriteForAnyItem(PropertyCandidate))
+        {
+            ToggleFavoriteForAnyItem(PropertyCandidate);
+            RefreshDockRootWidget();
+        }
+
+        bOutPassed = bPropertyVisualOk && bFunctionVisualOk && bMaterialVisualOk && bLeftFavoriteVisualOk;
+        OutReport = FString::Printf(
+            TEXT("favorite_icon_visual_contract=%s | Property=%d Function=%d Material=%d Left=%d MaterialItem=%s"),
+            bOutPassed ? TEXT("PASS") : TEXT("FAIL"),
+            bPropertyVisualOk ? 1 : 0,
+            bFunctionVisualOk ? 1 : 0,
+            bMaterialVisualOk ? 1 : 0,
+            bLeftFavoriteVisualOk ? 1 : 0,
+            *GetNameSafe(MaterialCandidate));
         CleanupDockContractActor(TestActor, bSpawnedActor, PreviousActor);
         return true;
     }
@@ -16130,13 +16310,14 @@ bool UInspectorWorldSubsystem::RunConfirmDialogColorInputSelfTest(FString& OutRe
     bool bMaterialApplyOk = false;
     bool bMaterialPreviewNoFullRefresh = false;
     bool bMaterialPreviewPerfOk = false;
-    bool bMaterialFinalFullRefreshOk = false;
+    bool bMaterialFinalRowRefreshOk = false;
     bool bInjectedMaterialRowFound = false;
     bool bInjectedMaterialSwatchVisible = false;
     bool bLegacyMaterialEntryFound = false;
     bool bLegacyMaterialColorButtonFound = false;
     int32 MaterialPreviewCount = 0;
     int32 MaterialPreviewFullRefreshCount = 0;
+    int32 MaterialFinalRowRefreshCount = 0;
     int32 MaterialFinalFullRefreshCount = 0;
     double MaterialPreviewMsMax = 0.0;
     FLinearColor InjectedMaterialSwatchColor = FLinearColor::Black;
@@ -16484,8 +16665,11 @@ bool UInspectorWorldSubsystem::RunConfirmDialogColorInputSelfTest(FString& OutRe
                     FLinearColor AppliedColor = FLinearColor::Black;
                     bMaterialApplyOk = TestMaterialItem->GetVector(AppliedColor, MaterialError) && ColorNear(AppliedColor, UpdatedMaterialColor, 0.02f);
                     HandleActiveConfirmDialogAccepted();
+                    MaterialFinalRowRefreshCount = ColorFinalRowRefreshCount;
                     MaterialFinalFullRefreshCount = ColorFullRefreshCount;
-                    bMaterialFinalFullRefreshOk = MaterialFinalFullRefreshCount > MaterialPreviewFullRefreshCount;
+                    bMaterialFinalRowRefreshOk = MaterialFinalRowRefreshCount > 0
+                        && MaterialFinalFullRefreshCount == MaterialPreviewFullRefreshCount
+                        && LastColorPreviewUiRefreshMode == TEXT("CommitRowOnly");
                     bMaterialModalClearedOk = !ActiveConfirmDialogModalBlockerWidget.IsValid();
                     bMaterialPanelEnabledOk = !PanelWidget.IsValid() || PanelWidget->GetIsEnabled();
 
@@ -16509,10 +16693,10 @@ bool UInspectorWorldSubsystem::RunConfirmDialogColorInputSelfTest(FString& OutRe
         && bMaterialApplyOk
         && bMaterialPreviewNoFullRefresh
         && bMaterialPreviewPerfOk
-        && bMaterialFinalFullRefreshOk;
+        && bMaterialFinalRowRefreshOk;
 
     OutReport = FString::Printf(
-        TEXT("ConfirmDialogColorInputSelfTest=%s | DirectPage=%d | InitialUI=(%.3f, %.3f, %.3f, %.3f) | AfterRUI=%.3f HexAfterR=%s | AfterHexUI=(%.3f, %.3f, %.3f, %.3f) GAfterHex=%s HexAfterHex=%s | MaterialDialog=%d Page=%d Modal=%d ModalCleared=%d PanelEnabled=%d Swatch=%d Preview=%d Apply=%d PreviewNoFullRefresh=%d PreviewPerf=%d PreviewMsMax=%.2f PreviewMode=%s PreviewCount=%d PreviewFullRefresh=%d FinalFullRefresh=%d InjectedRow=%d InjectedSwatch=%d InjectedColor=(%.3f,%.3f,%.3f,%.3f) LegacyEntry=%d LegacyButton=%d LegacyColor=(%.3f,%.3f,%.3f,%.3f) Item=%s Hex=%s"),
+        TEXT("ConfirmDialogColorInputSelfTest=%s | DirectPage=%d | InitialUI=(%.3f, %.3f, %.3f, %.3f) | AfterRUI=%.3f HexAfterR=%s | AfterHexUI=(%.3f, %.3f, %.3f, %.3f) GAfterHex=%s HexAfterHex=%s | MaterialDialog=%d Page=%d Modal=%d ModalCleared=%d PanelEnabled=%d Swatch=%d Preview=%d Apply=%d PreviewNoFullRefresh=%d PreviewPerf=%d PreviewMsMax=%.2f PreviewMode=%s PreviewCount=%d PreviewFullRefresh=%d FinalRowOnly=%d FinalRowRefresh=%d FinalFullRefresh=%d InjectedRow=%d InjectedSwatch=%d InjectedColor=(%.3f,%.3f,%.3f,%.3f) LegacyEntry=%d LegacyButton=%d LegacyColor=(%.3f,%.3f,%.3f,%.3f) Item=%s Hex=%s"),
         bOverallSuccess ? TEXT("PASS") : TEXT("FAIL"),
         bDirectColorPageOk ? 1 : 0,
         InitialR, InitialG, InitialB, InitialA,
@@ -16535,7 +16719,9 @@ bool UInspectorWorldSubsystem::RunConfirmDialogColorInputSelfTest(FString& OutRe
         *MaterialPreviewMode,
         MaterialPreviewCount,
         MaterialPreviewFullRefreshCount,
-        bMaterialFinalFullRefreshOk ? 1 : 0,
+        bMaterialFinalRowRefreshOk ? 1 : 0,
+        MaterialFinalRowRefreshCount,
+        MaterialFinalFullRefreshCount,
         bInjectedMaterialRowFound ? 1 : 0,
         bInjectedMaterialSwatchVisible ? 1 : 0,
         InjectedMaterialSwatchColor.R,
@@ -16754,18 +16940,21 @@ bool UInspectorWorldSubsystem::RunColorPickerPreviewPerfSelfTest(FString& OutRep
     const bool bSourcePassed = RunConfirmDialogColorInputSelfTest(SourceReport);
     const bool bPreviewNoFullRefresh = SourceReport.Contains(TEXT("PreviewNoFullRefresh=1"));
     const bool bPreviewPerf = SourceReport.Contains(TEXT("PreviewPerf=1"));
-    const bool bFinalFullRefresh = SourceReport.Contains(TEXT("FinalFullRefresh=1"));
+    const bool bFinalRowOnly = SourceReport.Contains(TEXT("FinalRowOnly=1"));
+    const bool bFinalNoFullRefresh = SourceReport.Contains(TEXT("FinalFullRefresh=0"));
     const bool bPassed = bSourcePassed
         && bPreviewNoFullRefresh
         && bPreviewPerf
-        && bFinalFullRefresh;
+        && bFinalRowOnly
+        && bFinalNoFullRefresh;
 
     OutReport = FString::Printf(
-        TEXT("ColorPickerPreviewPerf=%s | PreviewNoFullRefresh=%d PreviewPerf=%d FinalFullRefresh=%d | %s"),
+        TEXT("ColorPickerPreviewPerf=%s | PreviewNoFullRefresh=%d PreviewPerf=%d FinalRowOnly=%d FinalNoFullRefresh=%d | %s"),
         bPassed ? TEXT("PASS") : TEXT("FAIL"),
         bPreviewNoFullRefresh ? 1 : 0,
         bPreviewPerf ? 1 : 0,
-        bFinalFullRefresh ? 1 : 0,
+        bFinalRowOnly ? 1 : 0,
+        bFinalNoFullRefresh ? 1 : 0,
         *SourceReport);
     UE_LOG(LogRuntimeInspector, Log, TEXT("[RI] %s"), *OutReport);
     return bPassed;

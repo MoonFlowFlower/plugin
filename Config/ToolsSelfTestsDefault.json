@@ -23,7 +23,7 @@
     "Id": "color_picker_preview_perf",
     "DisplayName": "Color Picker Preview Perf",
     "Category": "UI",
-    "Description": "Validates color picker preview uses row-only refresh and performs one full refresh on final apply/cancel.",
+    "Description": "Validates color picker preview and final apply/cancel use targeted row refresh without full property panel rebuilds.",
     "bRequiresPIE": true,
     "bMutatesRuntime": true,
     "bEnabled": true,
@@ -278,6 +278,16 @@
     "bMutatesRuntime": true,
     "bEnabled": true,
     "LegacyNativeBridgeId": "favorite_star_toggle_route"
+  },
+  {
+    "Id": "favorite_icon_visual_contract",
+    "DisplayName": "Favorite Icon Visual Contract",
+    "Category": "UI",
+    "Description": "Validates property, function, material parameter, and left Favorites stars share the compact ghost icon contract.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": true,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "favorite_icon_visual_contract"
   },
   {
     "Id": "row_text_overflow_contract",

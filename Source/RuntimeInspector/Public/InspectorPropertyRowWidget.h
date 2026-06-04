@@ -41,6 +41,7 @@ public:
     float GetFavoriteButtonHeightForAutomation() const;
     float GetColorButtonHeightForAutomation() const;
     bool ToggleFavoriteForAutomation(FString& OutError);
+    bool HasFavoriteVisualContractForAutomation() const;
     bool HasOverflowLayoutForAutomation() const;
     bool HasExpandedValueEditorForAutomation() const;
     bool CommitTextValueForAutomation(const FString& InValue, FString& OutError);

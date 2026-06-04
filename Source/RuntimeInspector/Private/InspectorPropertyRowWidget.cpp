@@ -27,7 +27,7 @@ namespace
 {
     static FLinearColor RI_PropertyRowColor()
     {
-        return RICompactUI::GetRowSurfaceBackgroundColor();
+        return FLinearColor(0.001518f, 0.001518f, 0.001518f, 0.12f);
     }
 
     static FLinearColor RI_PropertyTextColor()
@@ -68,8 +68,6 @@ namespace
     }
 
     static constexpr float RI_StructuredPreviewDelaySeconds = 0.12f;
-    static constexpr float RI_RowFavoriteButtonSize = 22.0f;
-    static constexpr float RI_RowFavoriteIconSize = 12.0f;
     static constexpr float RI_RowNameMaxWidth = 112.0f;
     static constexpr float RI_RowCheckBoxSize = 16.0f;
     static constexpr float RI_RowValueWidth = 96.0f;
@@ -198,10 +196,15 @@ bool UInspectorPropertyRowWidget::ToggleFavoriteForAutomation(FString& OutError)
     return false;
 }
 
+bool UInspectorPropertyRowWidget::HasFavoriteVisualContractForAutomation() const
+{
+    return RICompactUI::HasFavoriteGhostButtonContract(FavoriteButton, FavoriteSizeBox, FavoriteIcon);
+}
+
 bool UInspectorPropertyRowWidget::HasOverflowLayoutForAutomation() const
 {
     return FavoriteSizeBox
-        && FMath::IsNearlyEqual(FavoriteSizeBox->GetWidthOverride(), RI_RowFavoriteButtonSize)
+        && FMath::IsNearlyEqual(FavoriteSizeBox->GetWidthOverride(), RICompactUI::GetFavoriteButtonHitSize())
         && NameSizeBox
         && FMath::IsNearlyEqual(NameSizeBox->GetMaxDesiredWidth(), RI_RowNameMaxWidth)
         && ReadOnlyValueSizeBox
@@ -470,33 +473,24 @@ void UInspectorPropertyRowWidget::BuildWidgetTree()
     RootBox = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_PropertyRowBox"));
     RootBorder->SetContent(RootBox);
 
-    FavoriteButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("RI_PropertyRowFavoriteButton"));
-    FavoriteSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_PropertyRowFavoriteSize"));
-    FavoriteSizeBox->SetWidthOverride(RI_RowFavoriteButtonSize);
-    FavoriteSizeBox->SetHeightOverride(RI_RowFavoriteButtonSize);
-    FavoriteIcon = RICompactUI::MakeFavoriteIcon(
+    UImage* NewFavoriteIcon = nullptr;
+    USizeBox* NewFavoriteSizeBox = nullptr;
+    FavoriteButton = RICompactUI::MakeFavoriteGhostButton(
         WidgetTree,
+        TEXT("RI_PropertyRowFavoriteButton"),
+        TEXT("RI_PropertyRowFavoriteSize"),
         TEXT("RI_PropertyRowFavoriteIcon"),
-        RI_RowFavoriteIconSize,
         false,
         RI_PropertyFavoriteActiveColor(),
-        RI_PropertyMutedColor());
-    if (FavoriteIcon)
+        RI_PropertyMutedColor(),
+        &NewFavoriteIcon,
+        &NewFavoriteSizeBox);
+    FavoriteIcon = NewFavoriteIcon;
+    FavoriteSizeBox = NewFavoriteSizeBox;
+    if (FavoriteButton)
     {
-        FavoriteIcon->SetVisibility(ESlateVisibility::HitTestInvisible);
+        FavoriteButton->OnClicked.AddDynamic(this, &UInspectorPropertyRowWidget::HandleFavoriteClicked);
     }
-    FavoriteSizeBox->SetContent(FavoriteIcon);
-    FavoriteSizeBox->SetVisibility(ESlateVisibility::HitTestInvisible);
-    RICompactUI::CenterSizeBoxContent(FavoriteSizeBox);
-    FavoriteButton->AddChild(FavoriteSizeBox);
-    RICompactUI::ConfigureGhostIconButton(FavoriteButton);
-    if (UButtonSlot* FavoriteButtonSlot = Cast<UButtonSlot>(FavoriteButton->GetContentSlot()))
-    {
-        FavoriteButtonSlot->SetHorizontalAlignment(HAlign_Center);
-        FavoriteButtonSlot->SetVerticalAlignment(VAlign_Center);
-        FavoriteButtonSlot->SetPadding(FMargin(0.f));
-    }
-    FavoriteButton->OnClicked.AddDynamic(this, &UInspectorPropertyRowWidget::HandleFavoriteClicked);
     if (UHorizontalBoxSlot* FavoriteSlot = RootBox->AddChildToHorizontalBox(FavoriteButton))
     {
         FavoriteSlot->SetVerticalAlignment(VAlign_Top);
@@ -858,7 +852,7 @@ void UInspectorPropertyRowWidget::RefreshRow()
         RICompactUI::SetFavoriteIconState(
             FavoriteIcon,
             bFavorited,
-            RI_RowFavoriteIconSize,
+            RICompactUI::GetFavoriteIconSize(),
             RI_PropertyFavoriteActiveColor(),
             RI_PropertyMutedColor());
     }
