@@ -1,4 +1,5 @@
 #include "InspectorBPLibrary.h"
+#include "UObject/Package.h"
 #include "InspectorSettingsPageWidget.h"
 #include "InspectorWorldSubsystem.h"
 #include "Engine/World.h"

@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$EngineRoot = "D:\Software\Unreal\UE_5.5",
+    [string]$EngineRoot = "D:\Engine\Unreal\5.7.1\UE_5.7",
     [string]$TargetPlatforms = "Win64",
     [string]$StageRoot = "",
     [string]$OutputRoot = "",

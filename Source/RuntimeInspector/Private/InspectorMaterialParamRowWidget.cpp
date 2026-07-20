@@ -303,6 +303,9 @@ void UInspectorMaterialParamRowWidget::BuildWidgetTree()
 
     NameText = RICompactUI::MakeEllipsisText(WidgetTree, TEXT("Material Parameter"), RICompactUI::GetLabelFontSize(), true, RI_MaterialTextColor());
     NameText->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+    // Keep the parameter name readable even when the value control is wide;
+    // without this the fill slot can collapse the name to a bare ellipsis.
+    NameText->SetMinDesiredWidth(72.f);
     if (UHorizontalBoxSlot* NameSlot = RootBox->AddChildToHorizontalBox(NameText))
     {
         FSlateChildSize SizeRule(ESlateSizeRule::Fill);

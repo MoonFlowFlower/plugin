@@ -71,6 +71,11 @@ public:
     UPROPERTY(EditAnywhere, config, Category = "Appearance")
     ERuntimeInspectorThemePreset ThemePreset = ERuntimeInspectorThemePreset::StudioSlate;
 
+    // Show the last-action diagnostic line at the bottom of the dock panel.
+    // Intended for troubleshooting; hidden by default.
+    UPROPERTY(EditAnywhere, config, Category = "Appearance")
+    bool bShowActionStatusLog = false;
+
     UPROPERTY(EditAnywhere, config, Category = "Tools")
     TSoftObjectPtr<UDataTable> ToolsSelfTestsTable;
 

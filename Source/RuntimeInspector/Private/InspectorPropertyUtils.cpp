@@ -1,6 +1,46 @@
 #include "InspectorPropertyUtils.h"
 
 #include "UObject/NoExportTypes.h"
+#include "UObject/UnrealType.h"
+
+// UE 5.7+ splits FProperty subclasses into per-class headers that are no
+// longer pulled in transitively by UnrealType.h in non-editor targets.
+// Guarded includes keep this file compiling across 5.5-5.7+.
+#if defined(__has_include)
+#if __has_include("UObject/StrProperty.h")
+#include "UObject/StrProperty.h"
+#endif
+#if __has_include("UObject/NameProperty.h")
+#include "UObject/NameProperty.h"
+#endif
+#if __has_include("UObject/EnumProperty.h")
+#include "UObject/EnumProperty.h"
+#endif
+#if __has_include("UObject/ByteProperty.h")
+#include "UObject/ByteProperty.h"
+#endif
+#if __has_include("UObject/BoolProperty.h")
+#include "UObject/BoolProperty.h"
+#endif
+#if __has_include("UObject/IntProperty.h")
+#include "UObject/IntProperty.h"
+#endif
+#if __has_include("UObject/FloatProperty.h")
+#include "UObject/FloatProperty.h"
+#endif
+#if __has_include("UObject/DoubleProperty.h")
+#include "UObject/DoubleProperty.h"
+#endif
+#if __has_include("UObject/StructProperty.h")
+#include "UObject/StructProperty.h"
+#endif
+#if __has_include("UObject/ObjectProperty.h")
+#include "UObject/ObjectProperty.h"
+#endif
+#if __has_include("UObject/TextProperty.h")
+#include "UObject/TextProperty.h"
+#endif
+#endif
 
 namespace InspectorPropertyUtils
 {

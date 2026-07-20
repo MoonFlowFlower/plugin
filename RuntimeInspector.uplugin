@@ -3,22 +3,29 @@
 	"Version": 100,
 	"VersionName": "1.0.0",
 	"FriendlyName": "Runtime Inspector",
-	"Description": "Inspect runtime actors and properties, capture staged patches, compare runtime-to-source state, and run editor-side audit/promote workflows in Unreal Engine 5.5.",
+	"Description": "Inspect runtime actors and properties, capture staged patches, compare runtime-to-source state, and run editor-side audit/promote workflows in Unreal Engine 5.7.",
 	"Category": "Tools",
 	"CreatedBy": "Moonlight",
 	"CreatedByURL": "https://github.com/pen364692088",
 	"DocsURL": "https://github.com/pen364692088/plugin#readme",
 	"MarketplaceURL": "",
 	"SupportURL": "https://github.com/pen364692088/plugin/issues",
+	"EngineVersion": "5.7.0",
 	"CanContainContent": true,
 	"IsBetaVersion": false,
 	"IsExperimentalVersion": false,
 	"Installed": false,
+	"SupportedTargetPlatforms": [
+		"Win64"
+	],
 	"Modules": [
 		{
 			"Name": "RuntimeInspector",
 			"Type": "Runtime",
-			"LoadingPhase": "Default"
+			"LoadingPhase": "Default",
+			"PlatformAllowList": [
+				"Win64"
+			]
 		}
 	]
 }

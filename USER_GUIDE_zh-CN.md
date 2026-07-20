@@ -4,11 +4,11 @@
 
 如果你要修改 RuntimeInspector 的实现、workflow、self-test、验收链或 UI 结构，请看 `docs/AGENT_DEVELOPMENT.md`。
 
-本文档面向首次接触 `Runtime Inspector` 的项目成员、测试人员和内容制作人员，目标是帮助你在 Unreal Engine 5.5 中完成安装、启用、基础操作和常见问题排查。
+本文档面向首次接触 `Runtime Inspector` 的项目成员、测试人员和内容制作人员，目标是帮助你在 Unreal Engine 5.7 中完成安装、启用、基础操作和常见问题排查。
 
 ## 1. 产品定位
 
-`Runtime Inspector` 是一个面向 Unreal Engine 5.5 的运行时检查与变更审阅插件。
+`Runtime Inspector` 是一个面向 Unreal Engine 5.7 的运行时检查与变更审阅插件。
 
 它的核心用途不是“通用远程调试”，而是把运行时改动变成可观察、可记录、可对比、可审阅的工作流。
 
@@ -26,7 +26,7 @@
 
 当前首发交付范围：
 
-- Unreal Engine `5.5`
+- Unreal Engine `5.7`
 - 平台以 `Win64` 为主
 - 主要工作流是 `Editor + PIE`
 - 高级工作流支持 `loopback packaged runtime session`
@@ -41,7 +41,7 @@
 ## 3. 安装与启用
 
 1. 将 `RuntimeInspector` 插件目录复制到项目的 `Plugins/` 目录。
-2. 打开 Unreal Engine 5.5 项目。
+2. 打开 Unreal Engine 5.7 项目。
 3. 在 Plugins 浏览器中确认 `Runtime Inspector` 已启用。
 4. 按提示重启编辑器。
 5. 确认 `Project Settings -> Plugins -> Runtime Inspector` 中能看到设置项。

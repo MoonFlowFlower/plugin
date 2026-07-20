@@ -1,4 +1,5 @@
 #include "InspectorPropertyRowWidget.h"
+#include "UObject/Package.h"
 
 #include "InspectorCompactWidgetUtils.h"
 #include "InspectorPropertyItem.h"
@@ -52,7 +53,7 @@ namespace
         {
             while (Text.EndsWith(TEXT("0")))
             {
-                Text.LeftChopInline(1, false);
+                Text.LeftChopInline(1, EAllowShrinking::No);
             }
             if (Text.EndsWith(TEXT(".")))
             {

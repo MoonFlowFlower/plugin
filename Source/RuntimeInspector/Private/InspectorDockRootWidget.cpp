@@ -8,6 +8,7 @@
 #include "InspectorTestPageWidget.h"
 #include "RuntimeInspector.h"
 #include "RuntimeInspectorController.h"
+#include "RuntimeInspectorSettings.h"
 
 #include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetLayoutLibrary.h"
@@ -780,6 +781,13 @@ void UInspectorDockRootWidget::BuildRightInspector(UVerticalBox* OutPanel)
     ActionStatusText = MakeBoundText(TEXT("RI_ActionStatusText"));
     RICompactUI::ApplyTextStyle(ActionStatusText, RICompactUI::GetMutedFontSize(), false, RICompactUI::GetMutedTextColor());
     RI_AddVertical(OutPanel, ActionStatusText, RI_GetDockBodyMargin(RICompactUI::GetInlineGap(), 0.f));
+
+    // Diagnostic line is hidden by default; enable via Project Settings -> Plugins -> Runtime Inspector.
+    const URuntimeInspectorSettings* RISettings = GetDefault<URuntimeInspectorSettings>();
+    if (!RISettings || !RISettings->bShowActionStatusLog)
+    {
+        ActionStatusText->SetVisibility(ESlateVisibility::Collapsed);
+    }
 }
 
 void UInspectorDockRootWidget::BuildActorTab(UVerticalBox* OutPanel)

@@ -10,7 +10,7 @@ Runtime Inspector
 
 ## Short Description
 
-Inspect live actors in PIE, review staged runtime changes, and move approved patch data back through controlled editor workflows in Unreal Engine 5.5.
+Inspect live actors in PIE, review staged runtime changes, and move approved patch data back through controlled editor workflows in Unreal Engine 5.7.
 
 ## One-Line Positioning
 
@@ -26,7 +26,7 @@ Runtime-state inspection and controlled review workflows for Unreal Engine teams
 
 ## Long Description
 
-Runtime Inspector is a UE 5.5 plugin for teams that need to inspect live gameplay state, make controlled runtime edits, and keep review authority in the editor.
+Runtime Inspector is a UE 5.7 plugin for teams that need to inspect live gameplay state, make controlled runtime edits, and keep review authority in the editor.
 
 Inside PIE, you can select a live actor, inspect supported properties, apply edits, stage those edits into patch data, and audit runtime state against the source baseline before moving forward. The workflow is designed for verification and review, not blind mutation.
 
@@ -36,7 +36,7 @@ For advanced setups, the plugin can discover supported loopback packaged-runtime
 
 ## Supported Release Scope
 
-- Unreal Engine 5.5
+- Unreal Engine 5.7
 - Win64 first-release submission target
 - Primary supported workflow: editor + PIE
 - Advanced supported workflow: loopback packaged-runtime session pullback into editor authority

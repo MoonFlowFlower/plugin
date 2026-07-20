@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$EngineRoot = "D:\Software\Unreal\UE_5.5",
+    [string]$EngineRoot = "D:\Engine\Unreal\5.7.1\UE_5.7",
     [string]$TestId = "actor_page_structure",
     [string]$ScreenshotName = "actor_page_structure.png",
     [int]$EditorLaunchTimeoutSeconds = 180
