@@ -197,6 +197,7 @@ void UInspectorSettingsPageWidget::ResetControlReferences()
     AutoLockOnCloseCheckBox = nullptr;
     OutlineWeightSpinBox = nullptr;
     ApplyDebounceSecondsSpinBox = nullptr;
+    UIScaleSpinBox = nullptr;
 }
 
 void UInspectorSettingsPageWidget::EnsureThemePresetOptions()
@@ -260,6 +261,11 @@ void UInspectorSettingsPageWidget::BindControlDelegates()
     {
         OutlineWeightSpinBox->OnValueChanged.RemoveDynamic(this, &UInspectorSettingsPageWidget::HandleOutlineWeightChanged);
         OutlineWeightSpinBox->OnValueChanged.AddDynamic(this, &UInspectorSettingsPageWidget::HandleOutlineWeightChanged);
+    }
+    if (UIScaleSpinBox)
+    {
+        UIScaleSpinBox->OnValueChanged.RemoveDynamic(this, &UInspectorSettingsPageWidget::HandleUIScaleChanged);
+        UIScaleSpinBox->OnValueChanged.AddDynamic(this, &UInspectorSettingsPageWidget::HandleUIScaleChanged);
     }
     if (EnableApplyDebounceCheckBox)
     {
@@ -459,6 +465,7 @@ void UInspectorSettingsPageWidget::BuildWidgetTree()
         TEXT("RI_SettingsAppearanceCard"));
     AddCardChild(AppearanceCard, CreateCheckRow(TEXT("Enable Outline"), EnableOutlineCheckBox, TEXT("EnableOutlineCheckBox")));
     AddCardChild(AppearanceCard, CreateSpinRow(TEXT("Outline Weight"), OutlineWeightSpinBox, TEXT("OutlineWeightSpinBox")));
+    AddCardChild(AppearanceCard, CreateSpinRow(TEXT("UI Scale"), UIScaleSpinBox, TEXT("UIScaleSpinBox")));
     AddCardChild(AppearanceCard, CreateThemePresetRow(TEXT("Theme Preset"), ThemePresetComboBox, TEXT("ThemePresetComboBox")), true);
 
     UVerticalBox* ApplyCard = AddGroupCard(
@@ -799,6 +806,14 @@ void UInspectorSettingsPageWidget::UpdateUIFromState()
         OutlineWeightSpinBox->SetValue(DraftSettings.OutlinePPWeight);
         SetEnabledState(OutlineWeightSpinBox, bEditable && DraftSettings.bEnableOutlinePP, OutlineDisabledReason, TEXT("Adjust the outline post-process weight."));
     }
+    if (UIScaleSpinBox)
+    {
+        UIScaleSpinBox->SetMinValue(0.8f);
+        UIScaleSpinBox->SetMaxValue(1.5f);
+        UIScaleSpinBox->SetDelta(0.05f);
+        UIScaleSpinBox->SetValue(DraftSettings.UIScale);
+        SetEnabledState(UIScaleSpinBox, bEditable, EditDisabledReason, TEXT("Scale the inspector UI fonts and controls."));
+    }
     if (EnableApplyDebounceCheckBox)
     {
         EnableApplyDebounceCheckBox->SetIsChecked(DraftSettings.bEnableApplyDebounce);
@@ -960,6 +975,10 @@ void UInspectorSettingsPageWidget::SyncDraftSettingsFromControls()
     if (OutlineWeightSpinBox)
     {
         DraftSettings.OutlinePPWeight = OutlineWeightSpinBox->GetValue();
+    }
+    if (UIScaleSpinBox)
+    {
+        DraftSettings.UIScale = UIScaleSpinBox->GetValue();
     }
     if (EnableApplyDebounceCheckBox)
     {
@@ -1127,6 +1146,14 @@ void UInspectorSettingsPageWidget::HandleOutlineWeightChanged(float InValue)
     if (ShouldIgnoreControlChange()) return;
     FRIEditableSettings Candidate = DraftSettings;
     Candidate.OutlinePPWeight = InValue;
+    ApplyPreviewSettings(Candidate);
+}
+
+void UInspectorSettingsPageWidget::HandleUIScaleChanged(float InValue)
+{
+    if (ShouldIgnoreControlChange()) return;
+    FRIEditableSettings Candidate = DraftSettings;
+    Candidate.UIScale = InValue;
     ApplyPreviewSettings(Candidate);
 }
 

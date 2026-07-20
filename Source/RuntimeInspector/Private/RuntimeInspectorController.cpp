@@ -348,6 +348,12 @@ FRIInspectorViewModel URuntimeInspectorController::GetCurrentViewModel(ERIViewMo
                 FavoriteViewModel.OwnerLabel = FText::FromString(TEXT("Material"));
                 FavoriteViewModel.ValueText = RI_TextFromString(MaterialItem->GetValueText());
             }
+            else if (UInspectorFunctionItem* FunctionItem = Cast<UInspectorFunctionItem>(PinnedItem))
+            {
+                FavoriteViewModel.DisplayName = RI_TextFromString(FunctionItem->GetDisplayName().IsEmpty() ? FunctionItem->GetFunctionName() : FunctionItem->GetDisplayName());
+                FavoriteViewModel.OwnerLabel = FText::FromString(TEXT("Function"));
+                FavoriteViewModel.ValueText = RI_TextFromString(FunctionItem->GetSignatureText());
+            }
             else if (PinnedItem)
             {
                 FavoriteViewModel.DisplayName = RI_TextFromString(PinnedItem->GetName());

@@ -333,7 +333,10 @@ namespace
 
     static float RI_GetDockReadableScale(float ViewportScale)
     {
-        return FMath::Clamp(1.0f / FMath::Max(ViewportScale, 0.01f), 1.0f, 1.25f);
+        const float BaseScale = FMath::Clamp(1.0f / FMath::Max(ViewportScale, 0.01f), 1.0f, 1.25f);
+        const URuntimeInspectorSettings* Settings = GetDefault<URuntimeInspectorSettings>();
+        const float UserScale = Settings ? FMath::Clamp(Settings->UIScale, 0.8f, 1.5f) : 1.0f;
+        return BaseScale * UserScale;
     }
 
     static float RI_GetDockExpandedSidePanelPhysicalWidth(float PhysicalViewportWidth)
@@ -619,9 +622,10 @@ void UInspectorDockRootWidget::BuildLeftPanel(UVerticalBox* OutPanel)
     RI_AddVertical(OutPanel, RI_WrapDockHeaderBar(WidgetTree, ActorCard, TEXT("RI_SelectedActorHeaderFrame")), FMargin(0.f, 0.f, 0.f, RICompactUI::GetSectionGap()));
 
     UBorder* StagedBanner = RI_MakeSectionCard(WidgetTree, TEXT("RI_StagedStateBanner"));
-    StagedBanner->SetBrushColor(RICompactUI::GetContextStatusCellBackgroundColor());
+    // Neutral by default; refresh elevates to the status color only when staged patches exist.
+    StagedBanner->SetBrushColor(RI_GetDockSectionSurfaceColor());
     UHorizontalBox* StagedRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_StagedStateRow"));
-    if (USizeBox* StagedIcon = RI_MakeIconBox(WidgetTree, TEXT("RI_StagedStateIcon"), TEXT("shape:status"), 13.0f, RICompactUI::GetWarningTextColor()))
+    if (USizeBox* StagedIcon = RI_MakeIconBox(WidgetTree, TEXT("RI_StagedStateIcon"), TEXT("shape:status"), 13.0f, RICompactUI::GetMutedTextColor()))
     {
         RI_AddHorizontal(StagedRow, StagedIcon, FMargin(0.f, 0.f, RICompactUI::GetInlineGap() + 2.f, 0.f));
     }
@@ -1213,6 +1217,10 @@ void UInspectorDockRootWidget::RefreshActorContext(const FRIInspectorViewModel& 
         StagedBannerText->SetVisibility(bLeftPanelCompact ? ESlateVisibility::Collapsed : ESlateVisibility::HitTestInvisible);
         StagedBannerText->SetText(FText::FromString(PatchCount > 0 ? FString::Printf(TEXT("%d staged changes"), PatchCount) : TEXT("No staged patch")));
         RICompactUI::ApplyTextStyle(StagedBannerText, RICompactUI::GetLabelFontSize(), true, PatchCount > 0 ? RICompactUI::GetWarningTextColor() : RICompactUI::GetMutedTextColor());
+        if (UBorder* StagedBannerBorder = Cast<UBorder>(GetWidgetFromName(TEXT("RI_StagedStateBanner"))))
+        {
+            StagedBannerBorder->SetBrushColor(PatchCount > 0 ? RICompactUI::GetContextStatusCellBackgroundColor() : RI_GetDockSectionSurfaceColor());
+        }
     }
     if (SearchTextBox && Controller)
     {

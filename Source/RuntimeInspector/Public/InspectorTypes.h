@@ -128,6 +128,9 @@ struct FRIEditableSettings
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Settings")
     bool bAutoLockOnClose = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuntimeInspector|Settings")
+    float UIScale = 1.0f;
 };
 
 USTRUCT(BlueprintType)

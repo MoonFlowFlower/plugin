@@ -786,7 +786,8 @@ static bool RI_AreEditableSettingsEqual(const FRIEditableSettings& A, const FRIE
         && A.bEnableApplyDebounce == B.bEnableApplyDebounce
         && FMath::IsNearlyEqual(A.ApplyDebounceSeconds, B.ApplyDebounceSeconds, KINDA_SMALL_NUMBER)
         && A.bRequireUnlock == B.bRequireUnlock
-        && A.bAutoLockOnClose == B.bAutoLockOnClose;
+        && A.bAutoLockOnClose == B.bAutoLockOnClose
+        && FMath::IsNearlyEqual(A.UIScale, B.UIScale, KINDA_SMALL_NUMBER);
 }
 
 static FRIEditableSettings RI_MakeEditableSettings(const URuntimeInspectorSettings* Settings)
@@ -810,6 +811,7 @@ static FRIEditableSettings RI_MakeEditableSettings(const URuntimeInspectorSettin
     Result.ApplyDebounceSeconds = Settings->ApplyDebounceSeconds;
     Result.bRequireUnlock = Settings->bRequireUnlock;
     Result.bAutoLockOnClose = Settings->bAutoLockOnClose;
+    Result.UIScale = Settings->UIScale;
     return Result;
 }
 
@@ -896,6 +898,7 @@ static void RI_ApplyEditableSettingsToRuntimeInspectorSettings(URuntimeInspector
     Settings->ApplyDebounceSeconds = FMath::Clamp(InSettings.ApplyDebounceSeconds, 0.0f, 0.20f);
     Settings->bRequireUnlock = InSettings.bRequireUnlock;
     Settings->bAutoLockOnClose = InSettings.bAutoLockOnClose;
+    Settings->UIScale = FMath::Clamp(InSettings.UIScale, 0.8f, 1.5f);
 }
 
 static void RI_ReadEditableSettingsFromConfigFile(FRIEditableSettings& InOutSettings, const FString& Filename)
@@ -936,6 +939,7 @@ static void RI_ReadEditableSettingsFromConfigFile(FRIEditableSettings& InOutSett
     GConfig->GetFloat(*Section, TEXT("ApplyDebounceSeconds"), InOutSettings.ApplyDebounceSeconds, Filename);
     GConfig->GetBool(*Section, TEXT("bRequireUnlock"), InOutSettings.bRequireUnlock, Filename);
     GConfig->GetBool(*Section, TEXT("bAutoLockOnClose"), InOutSettings.bAutoLockOnClose, Filename);
+    GConfig->GetFloat(*Section, TEXT("UIScale"), InOutSettings.UIScale, Filename);
 }
 
 static void RI_WriteEditableSettingsToConfigFile(const FRIEditableSettings& InSettings, const FString& Filename)
@@ -959,6 +963,7 @@ static void RI_WriteEditableSettingsToConfigFile(const FRIEditableSettings& InSe
     GConfig->SetFloat(*Section, TEXT("ApplyDebounceSeconds"), InSettings.ApplyDebounceSeconds, Filename);
     GConfig->SetBool(*Section, TEXT("bRequireUnlock"), InSettings.bRequireUnlock, Filename);
     GConfig->SetBool(*Section, TEXT("bAutoLockOnClose"), InSettings.bAutoLockOnClose, Filename);
+    GConfig->SetFloat(*Section, TEXT("UIScale"), InSettings.UIScale, Filename);
 }
 
 static void RI_LoadSettingsFromConfigAuthority(URuntimeInspectorSettings* Settings)
@@ -10701,7 +10706,15 @@ void UInspectorWorldSubsystem::GetFunctionItemsForSelected(const FString& Search
                 || FunctionName.StartsWith(TEXT("K2_"))
                 || FunctionName.StartsWith(TEXT("ExecuteUbergraph"))
                 || RI_FunctionHasMetadataRuntimeSafe(Function, TEXT("DeprecatedFunction"))
+                || RI_FunctionHasMetadataRuntimeSafe(Function, TEXT("DeprecationMessage"))
                 || RI_FunctionHasMetadataRuntimeSafe(Function, TEXT("BlueprintInternalUseOnly")))
+            {
+                continue;
+            }
+
+            // Some engine functions mark deprecation only in their display name.
+            if (RI_GetFunctionDisplayNameRuntimeSafe(Function).Contains(TEXT("Deprecated"), ESearchCase::IgnoreCase)
+                || FunctionName.Contains(TEXT("Deprecated"), ESearchCase::IgnoreCase))
             {
                 continue;
             }

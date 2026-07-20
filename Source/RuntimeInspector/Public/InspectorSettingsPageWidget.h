@@ -115,6 +115,9 @@ private:
     void HandleOutlineWeightChanged(float InValue);
 
     UFUNCTION()
+    void HandleUIScaleChanged(float InValue);
+
+    UFUNCTION()
     void HandleEnableApplyDebounceChanged(bool bIsChecked);
 
     UFUNCTION()
@@ -253,4 +256,7 @@ private:
 
     UPROPERTY(Transient, meta = (BindWidgetOptional))
     USpinBox* ApplyDebounceSecondsSpinBox = nullptr;
+
+    UPROPERTY(Transient, meta = (BindWidgetOptional))
+    USpinBox* UIScaleSpinBox = nullptr;
 };

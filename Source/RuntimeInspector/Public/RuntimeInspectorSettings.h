@@ -76,6 +76,10 @@ public:
     UPROPERTY(EditAnywhere, config, Category = "Appearance")
     bool bShowActionStatusLog = false;
 
+    // Global scale multiplier for the inspector UI (fonts and controls).
+    UPROPERTY(EditAnywhere, config, Category = "Appearance", meta = (ClampMin = "0.8", ClampMax = "1.5", UIMin = "0.8", UIMax = "1.5"))
+    float UIScale = 1.0f;
+
     UPROPERTY(EditAnywhere, config, Category = "Tools")
     TSoftObjectPtr<UDataTable> ToolsSelfTestsTable;
 
