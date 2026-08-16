@@ -6720,6 +6720,15 @@ bool UInspectorWorldSubsystem::HandlePanelPointerDownAt(const FVector2D& Cursor)
 #if !RUNTIME_INSPECTOR_ENABLED
     return false;
 #else
+    if (IsDockRootActive())
+    {
+        // The native dock owns its own UMG/Slate hit testing. Never let stale
+        // floating-panel gesture state consume a dock button press.
+        bDraggingPanel = false;
+        bResizingPanelVertically = false;
+        return false;
+    }
+
     EnsurePanelInteractionInitialized();
 
     UUserWidget* Panel = PanelWidget.Get();
@@ -6790,6 +6799,13 @@ bool UInspectorWorldSubsystem::HandlePanelPointerMoveTo(const FVector2D& Cursor)
 #if !RUNTIME_INSPECTOR_ENABLED
     return false;
 #else
+    if (IsDockRootActive())
+    {
+        bDraggingPanel = false;
+        bResizingPanelVertically = false;
+        return false;
+    }
+
     if ((!bDraggingPanel && !bResizingPanelVertically) || !IsOpen())
     {
         return false;
@@ -6850,6 +6866,13 @@ bool UInspectorWorldSubsystem::HandlePanelPointerUp()
 #if !RUNTIME_INSPECTOR_ENABLED
     return false;
 #else
+    if (IsDockRootActive())
+    {
+        bDraggingPanel = false;
+        bResizingPanelVertically = false;
+        return false;
+    }
+
     const bool bHandled = bDraggingPanel || bResizingPanelVertically;
     bDraggingPanel = false;
     bResizingPanelVertically = false;
@@ -20942,11 +20965,89 @@ bool UInspectorWorldSubsystem::RunPanelInteractionSelfTest(FString& OutReport)
     Open();
     EnsurePanelInteractionInitialized();
 
+    UInspectorDockRootWidget* RootWidget = DockRootWidget.Get();
+    if (RootWidget)
+    {
+        RootWidget->ForceLayoutPrepass();
+        for (int32 Attempt = 0; Attempt < 3; ++Attempt)
+        {
+            if (FSlateApplication::IsInitialized())
+            {
+                FSlateApplication::Get().Tick(ESlateTickType::All);
+            }
+            RootWidget->ForceLayoutPrepass();
+        }
+    }
+
+    const bool bDockRootWasActive = IsDockRootActive();
+    int32 DockTabCenterCount = 0;
+    int32 DockPointerViolationCount = 0;
+    const FVector2D DockProbeOriginalTranslation = PanelTranslation;
+    const float DockProbeOriginalHeight = PanelHeight;
+    const ERIInspectorTab DockTabs[] = {
+        ERIInspectorTab::Actor,
+        ERIInspectorTab::Changes,
+        ERIInspectorTab::Settings,
+        ERIInspectorTab::Tools
+    };
+    for (const ERIInspectorTab Tab : DockTabs)
+    {
+        FVector2D ScreenCenter = FVector2D::ZeroVector;
+        if (RootWidget && RootWidget->TryGetTabButtonScreenCenterForAutomation(Tab, ScreenCenter))
+        {
+            ++DockTabCenterCount;
+
+            // Seed stale legacy state before each entry point. Native dock mode
+            // must clear it without consuming the pointer event; otherwise a
+            // prior floating-panel gesture can swallow a real UMG tab click.
+            bDraggingPanel = true;
+            bResizingPanelVertically = false;
+            const bool bDownConsumed = HandlePanelPointerDownAt(ScreenCenter);
+            const bool bDownStateClear = !bDraggingPanel && !bResizingPanelVertically;
+
+            bDraggingPanel = true;
+            bResizingPanelVertically = false;
+            PanelInteractionStartCursor = ScreenCenter;
+            PanelInteractionStartTranslation = DockProbeOriginalTranslation;
+            const bool bMoveConsumed = HandlePanelPointerMoveTo(ScreenCenter + FVector2D(2.0f, 0.0f));
+
+            bDraggingPanel = false;
+            bResizingPanelVertically = true;
+            const bool bUpConsumed = HandlePanelPointerUp();
+            const bool bFinalStateClear = !bDraggingPanel && !bResizingPanelVertically;
+            if (bDownConsumed || bMoveConsumed || bUpConsumed || !bDownStateClear || !bFinalStateClear)
+            {
+                ++DockPointerViolationCount;
+            }
+
+            PanelTranslation = DockProbeOriginalTranslation;
+            PanelHeight = DockProbeOriginalHeight;
+            ApplyPanelInteractionPresentation();
+        }
+        else
+        {
+            HandlePanelPointerUp();
+        }
+    }
+    const bool bDockPointerStateClear = !bDraggingPanel && !bResizingPanelVertically;
+    const bool bDockPointerPassThrough = bDockRootWasActive
+        && DockTabCenterCount == UE_ARRAY_COUNT(DockTabs)
+        && DockPointerViolationCount == 0
+        && bDockPointerStateClear;
+
     UUserWidget* Panel = PanelWidget.Get();
     if (!Panel)
     {
         OutReport = TEXT("PanelInteractionSelfTest=FAIL | PanelMissing");
         return false;
+    }
+
+    const ESlateVisibility OriginalDockVisibility = RootWidget ? RootWidget->GetVisibility() : ESlateVisibility::Collapsed;
+    if (RootWidget)
+    {
+        // Exercise the retained floating-panel implementation independently of
+        // the active native dock. The legacy handler remains the fallback path.
+        RootWidget->SetVisibility(ESlateVisibility::Collapsed);
     }
 
     Panel->TakeWidget();
@@ -20990,6 +21091,10 @@ bool UInspectorWorldSubsystem::RunPanelInteractionSelfTest(FString& OutReport)
         PanelTranslation = OriginalTranslation;
         PanelHeight = OriginalHeight > 1.0f ? OriginalHeight : PanelDefaultHeight;
         ApplyPanelInteractionPresentation();
+        if (RootWidget)
+        {
+            RootWidget->SetVisibility(OriginalDockVisibility);
+        }
     };
 
     const FGeometry PanelGeometry = RefreshPanelGeometry();
@@ -21086,13 +21191,18 @@ bool UInspectorWorldSubsystem::RunPanelInteractionSelfTest(FString& OutReport)
     const float HeightAfterResize = PanelHeight;
     const bool bResizeChanged = HeightAfterResize > HeightBeforeResize + 30.0f;
 
-    const bool bPassed = bDefaultWidthOk && bDefaultHeightOk && bDefaultXOk && bDefaultYOk && bDefaultNotTopLeft
+    const bool bPassed = bDockPointerPassThrough
+        && bDefaultWidthOk && bDefaultHeightOk && bDefaultXOk && bDefaultYOk && bDefaultNotTopLeft
         && bDragDown && bDragMove && bDragUp && bDragMoved
         && bResizeDown && bResizeMove && bResizeUp && bResizeChanged;
 
     OutReport = FString::Printf(
-        TEXT("PanelInteractionSelfTest=%s | Mode=%s DefaultSize=%d/%d Current=%.1fx%.1f Expected=%.1fx%.1f DefaultPos=%d/%d NotTopLeft=%d Pos=(%.1f,%.1f) ExpectedPos=(%.1f,%.1f) Drag=%d/%d/%d Delta=(%.1f,%.1f) Resize=%d/%d/%d Height=%.1f->%.1f"),
+        TEXT("PanelInteractionSelfTest=%s | DockActive=%d DockTabCenters=%d/4 DockPointerViolations=%d DockPointerStateClear=%d Mode=%s DefaultSize=%d/%d Current=%.1fx%.1f Expected=%.1fx%.1f DefaultPos=%d/%d NotTopLeft=%d Pos=(%.1f,%.1f) ExpectedPos=(%.1f,%.1f) Drag=%d/%d/%d Delta=(%.1f,%.1f) Resize=%d/%d/%d Height=%.1f->%.1f"),
         bPassed ? TEXT("PASS") : TEXT("FAIL"),
+        bDockRootWasActive ? 1 : 0,
+        DockTabCenterCount,
+        DockPointerViolationCount,
+        bDockPointerStateClear ? 1 : 0,
         InteractionMode,
         bDefaultWidthOk ? 1 : 0,
         bDefaultHeightOk ? 1 : 0,

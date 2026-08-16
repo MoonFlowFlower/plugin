@@ -1804,6 +1804,46 @@ void UInspectorDockRootWidget::HandleFavoriteToggleProxyClicked(UObject* SourceI
     RefreshFromController(EInspectorRefreshReason::UIStateChanged);
 }
 
+bool UInspectorDockRootWidget::TryGetTabButtonScreenCenterForAutomation(ERIInspectorTab Tab, FVector2D& OutScreenCenter) const
+{
+    OutScreenCenter = FVector2D::ZeroVector;
+
+    UButton* Button = nullptr;
+    switch (Tab)
+    {
+    case ERIInspectorTab::Actor:
+        Button = ActorTabButton;
+        break;
+    case ERIInspectorTab::Changes:
+        Button = ChangesTabButton;
+        break;
+    case ERIInspectorTab::Settings:
+        Button = SettingsTabButton;
+        break;
+    case ERIInspectorTab::Tools:
+        Button = ToolsTabButton;
+        break;
+    default:
+        return false;
+    }
+
+    if (!Button || !Button->IsVisible())
+    {
+        return false;
+    }
+
+    Button->ForceLayoutPrepass();
+    const FGeometry Geometry = Button->GetCachedGeometry();
+    const FVector2D LocalSize = Geometry.GetLocalSize();
+    if (LocalSize.X <= 1.0f || LocalSize.Y <= 1.0f)
+    {
+        return false;
+    }
+
+    OutScreenCenter = Geometry.LocalToAbsolute(LocalSize * 0.5f);
+    return FMath::IsFinite(OutScreenCenter.X) && FMath::IsFinite(OutScreenCenter.Y);
+}
+
 FString UInspectorDockRootWidget::GetDockLayoutDebugSummary() const
 {
     const FVector2D PhysicalViewportSize = RI_GetDockPhysicalViewportSize(const_cast<UInspectorDockRootWidget*>(this));

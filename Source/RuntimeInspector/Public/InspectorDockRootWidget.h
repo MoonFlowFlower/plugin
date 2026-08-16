@@ -113,6 +113,7 @@ public:
     bool FlushHostedActorSectionsDeferredRefreshForAutomation();
     double GetLastComponentFocusIntentMsForAutomation() const { return LastComponentFocusIntentMs; }
     bool HasLeftFavoriteStarVisualContractForAutomation() const { return bLastLeftFavoriteStarVisualContractOk; }
+    bool TryGetTabButtonScreenCenterForAutomation(ERIInspectorTab Tab, FVector2D& OutScreenCenter) const;
 
     UInspectorFilePageWidget* GetHostedFilePage() const { return FilePageWidget.Get(); }
     UInspectorSettingsPageWidget* GetHostedSettingsPage() const { return SettingsPageWidget.Get(); }
