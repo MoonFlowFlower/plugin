@@ -145,8 +145,8 @@ $UProject | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $ValidationProjec
 
 $DefaultEngineIni = @"
 [/Script/EngineSettings.GameMapsSettings]
-GameDefaultMap=/Engine/Maps/Entry
-EditorStartupMap=/Engine/Maps/Entry
+GameDefaultMap=/Engine/Maps/Templates/Template_Default
+EditorStartupMap=/Engine/Maps/Templates/Template_Default
 "@
 $DefaultGameIni = @"
 [/Script/EngineSettings.GeneralProjectSettings]
