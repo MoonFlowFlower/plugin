@@ -10,89 +10,155 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
 
 $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $PluginRoot = (Resolve-Path (Join-Path $ScriptRoot "..")).Path
 $ProjectRoot = (Resolve-Path (Join-Path $PluginRoot "..\..")).Path
+$FabRoot = Join-Path $ProjectRoot "Saved\FabRelease"
+$PluginName = "RuntimeInspector"
+$ValidationProjectName = "RIFabBlank"
 
 if ([string]::IsNullOrWhiteSpace($PackageRoot)) {
-    $PackageRoot = Join-Path $ProjectRoot "Saved\FabRelease\Package\RuntimeInspector_UE55\RuntimeInspector"
+    $PackageRoot = Join-Path $FabRoot "Package\RuntimeInspector_UE57\RuntimeInspector"
 }
-
 if ([string]::IsNullOrWhiteSpace($ValidationRoot)) {
-    $ValidationRoot = Join-Path $ProjectRoot "Saved\FabRelease\BlankProjectValidation\RuntimeInspectorBlank_UE55"
+    $ValidationRoot = Join-Path $FabRoot "BlankHostLoadSmoke\RIFabBlank_UE57"
+}
+$PackageRoot = [System.IO.Path]::GetFullPath($PackageRoot)
+$ValidationRoot = [System.IO.Path]::GetFullPath($ValidationRoot)
+
+$ValidationProjectRoot = Join-Path $ValidationRoot $ValidationProjectName
+$ValidationProjectFile = Join-Path $ValidationProjectRoot "$ValidationProjectName.uproject"
+$ValidationPluginRoot = Join-Path $ValidationProjectRoot "Plugins\$PluginName"
+$ValidationProjectLogPath = Join-Path $ValidationProjectRoot "Saved\Logs\$ValidationProjectName.log"
+$ValidationLogPath = Join-Path $FabRoot "fab_blank_host_install_load_smoke_UE57.log"
+$ValidationStdOutLogPath = Join-Path $FabRoot "fab_blank_host_install_load_smoke_UE57_stdout.log"
+$ValidationStdErrLogPath = Join-Path $FabRoot "fab_blank_host_install_load_smoke_UE57_stderr.log"
+$ValidationReportPath = Join-Path $FabRoot "Contracts\RuntimeInspector_UE57\blank-host-install-load-smoke.json"
+$InputContractReportPath = Join-Path $FabRoot "Contracts\RuntimeInspector_UE57\blank-host-input-compiled-smoke.json"
+
+function Reset-SafeDirectory {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$AllowedParent
+    )
+
+    $ResolvedPath = [System.IO.Path]::GetFullPath($Path).TrimEnd("\")
+    $ResolvedParent = [System.IO.Path]::GetFullPath($AllowedParent).TrimEnd("\")
+    if (-not $ResolvedPath.StartsWith(($ResolvedParent + "\"), [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to reset validation path outside Fab output root: $ResolvedPath"
+    }
+    if (Test-Path -LiteralPath $ResolvedPath) {
+        Remove-Item -LiteralPath $ResolvedPath -Recurse -Force
+    }
 }
 
-$ValidationProjectRoot = Join-Path $ValidationRoot "RuntimeInspectorBlank"
-$ValidationProjectFile = Join-Path $ValidationProjectRoot "RuntimeInspectorBlank.uproject"
-$ValidationPluginRoot = Join-Path $ValidationProjectRoot "Plugins\RuntimeInspector"
-$ValidationProjectLogPath = Join-Path $ValidationProjectRoot "Saved\Logs\RuntimeInspectorBlank.log"
-$ValidationLogPath = Join-Path $ProjectRoot "Saved\fab_blank_project_validation.log"
-$ValidationStdOutLogPath = Join-Path $ProjectRoot "Saved\fab_blank_project_validation_stdout.log"
-$ValidationStdErrLogPath = Join-Path $ProjectRoot "Saved\fab_blank_project_validation_stderr.log"
+function Invoke-ArtifactContract {
+    param(
+        [Parameter(Mandatory = $true)][string]$Mode,
+        [Parameter(Mandatory = $true)][string]$Root,
+        [Parameter(Mandatory = $true)][string]$Report
+    )
+
+    $ContractScript = Join-Path $ScriptRoot "TestFabArtifactContract.ps1"
+    $PowerShellExe = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
+    $Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$ContractScript`" -Mode $Mode -PluginRoot `"$Root`" -ReportPath `"$Report`""
+    $Process = Start-Process -FilePath $PowerShellExe -ArgumentList $Arguments -NoNewWindow -Wait -PassThru
+    if ($Process.ExitCode -ne 0) {
+        throw "Fab artifact contract failed ($Mode). Report: $Report"
+    }
+}
 
 function Get-ValidationLifecycleLogSnapshot {
-    $LogChunks = @()
+    $Chunks = @()
     foreach ($Path in @($ValidationProjectLogPath, $ValidationStdOutLogPath, $ValidationStdErrLogPath)) {
-        if (Test-Path $Path) {
-            $LogChunks += Get-Content -LiteralPath $Path -Raw
+        if (Test-Path -LiteralPath $Path -PathType Leaf) {
+            $Chunks += Get-Content -LiteralPath $Path -Raw
         }
     }
-
-    return ($LogChunks -join "`n")
+    return ($Chunks -join "`n")
 }
 
+function Append-ValidationLog {
+    param([string]$SourcePath, [string]$DestinationPath)
+    if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) {
+        return
+    }
+    Add-Content -LiteralPath $DestinationPath -Value ("===== {0} =====" -f $SourcePath)
+    Get-Content -LiteralPath $SourcePath | Add-Content -LiteralPath $DestinationPath
+}
+
+$BuildVersionPath = Join-Path $EngineRoot "Engine\Build\Build.version"
+if (-not (Test-Path -LiteralPath $BuildVersionPath -PathType Leaf)) {
+    throw "UE Build.version not found at: $BuildVersionPath"
+}
+$BuildVersion = Get-Content -LiteralPath $BuildVersionPath -Raw -Encoding UTF8 | ConvertFrom-Json
+if ([int]$BuildVersion.MajorVersion -ne 5 -or [int]$BuildVersion.MinorVersion -ne 7) {
+    throw "Blank-host smoke requires UE 5.7; Build.version reports $($BuildVersion.MajorVersion).$($BuildVersion.MinorVersion)."
+}
+$EngineAssociation = "{0}.{1}" -f [int]$BuildVersion.MajorVersion, [int]$BuildVersion.MinorVersion
+$EngineVersion = "{0}.{1}.{2}" -f [int]$BuildVersion.MajorVersion, [int]$BuildVersion.MinorVersion, [int]$BuildVersion.PatchVersion
+
 $EditorCmd = Join-Path $EngineRoot "Engine\Binaries\Win64\UnrealEditor-Cmd.exe"
-if (-not (Test-Path $EditorCmd -PathType Leaf)) {
+if (-not (Test-Path -LiteralPath $EditorCmd -PathType Leaf)) {
     throw "UnrealEditor-Cmd.exe not found at: $EditorCmd"
 }
 
-$PackageScript = Join-Path $ScriptRoot "PackageFabRelease.ps1"
-if ($PackageFirst -or -not (Test-Path (Join-Path $PackageRoot "RuntimeInspector.uplugin") -PathType Leaf)) {
-    & $PackageScript -EngineRoot $EngineRoot
+if ($PackageFirst -or -not (Test-Path -LiteralPath (Join-Path $PackageRoot "$PluginName.uplugin") -PathType Leaf)) {
+    & (Join-Path $ScriptRoot "PackageFabRelease.ps1") -EngineRoot $EngineRoot
+}
+if (-not (Test-Path -LiteralPath (Join-Path $PackageRoot "$PluginName.uplugin") -PathType Leaf)) {
+    throw "Compiled-smoke plugin root not found: $PackageRoot"
+}
+if (-not (Test-Path -LiteralPath (Join-Path $PackageRoot "Binaries") -PathType Container)) {
+    throw "Compiled-smoke plugin is missing Binaries: $PackageRoot"
+}
+Invoke-ArtifactContract -Mode "CompiledSmoke" -Root $PackageRoot -Report $InputContractReportPath
+
+Reset-SafeDirectory -Path $ValidationRoot -AllowedParent $FabRoot
+foreach ($Path in @($ValidationLogPath, $ValidationStdOutLogPath, $ValidationStdErrLogPath)) {
+    Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
 }
 
-if (-not (Test-Path (Join-Path $PackageRoot "RuntimeInspector.uplugin") -PathType Leaf)) {
-    throw "Packaged plugin root not found: $PackageRoot"
+New-Item -ItemType Directory -Force -Path `
+    $ValidationProjectRoot, `
+    (Join-Path $ValidationProjectRoot "Config"), `
+    (Join-Path $ValidationProjectRoot "Content"), `
+    (Join-Path $ValidationProjectRoot "Plugins"), `
+    (Split-Path -Parent $ValidationReportPath) | Out-Null
+
+$UProject = [ordered]@{
+    FileVersion = 3
+    EngineAssociation = $EngineAssociation
+    Category = ""
+    Description = "Runtime Inspector Fab install/load smoke host."
+    Plugins = @(
+        [ordered]@{
+            Name = $PluginName
+            Enabled = $true
+            SupportedTargetPlatforms = @("Win64")
+        }
+    )
 }
-
-if (-not (Test-Path (Join-Path $PackageRoot "Binaries") -PathType Container)) {
-    throw "Packaged plugin is missing precompiled Binaries: $PackageRoot"
-}
-
-Remove-Item -LiteralPath $ValidationRoot -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath $ValidationLogPath -Force -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath $ValidationStdOutLogPath -Force -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath $ValidationStdErrLogPath -Force -ErrorAction SilentlyContinue
-
-New-Item -ItemType Directory -Path $ValidationProjectRoot -Force | Out-Null
-New-Item -ItemType Directory -Path (Join-Path $ValidationProjectRoot "Config") -Force | Out-Null
-New-Item -ItemType Directory -Path (Join-Path $ValidationProjectRoot "Plugins") -Force | Out-Null
-
-$UProjectJson = @"
-{
-  "FileVersion": 3,
-  "EngineAssociation": "5.5",
-  "Category": "",
-  "Description": "Runtime Inspector Fab blank-project validation host.",
-  "Plugins": [
-    {
-      "Name": "RuntimeInspector",
-      "Enabled": true
-    }
-  ]
-}
-"@
-Set-Content -LiteralPath $ValidationProjectFile -Value $UProjectJson -Encoding UTF8
+$UProject | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $ValidationProjectFile -Encoding UTF8
 
 $DefaultEngineIni = @"
 [/Script/EngineSettings.GameMapsSettings]
 GameDefaultMap=/Engine/Maps/Entry
 EditorStartupMap=/Engine/Maps/Entry
 "@
+$DefaultGameIni = @"
+[/Script/EngineSettings.GeneralProjectSettings]
+ProjectID=9C0F94E2476C40E4B9166C1EC5221FB0
+ProjectName=RIFabBlank
+Description=Runtime Inspector Fab install/load smoke host.
+"@
 Set-Content -LiteralPath (Join-Path $ValidationProjectRoot "Config\DefaultEngine.ini") -Value $DefaultEngineIni -Encoding UTF8
+Set-Content -LiteralPath (Join-Path $ValidationProjectRoot "Config\DefaultGame.ini") -Value $DefaultGameIni -Encoding UTF8
 
 Copy-Item -LiteralPath $PackageRoot -Destination $ValidationPluginRoot -Recurse -Force
+$HostContentEntryCountBeforeLaunch = @(Get-ChildItem -LiteralPath (Join-Path $ValidationProjectRoot "Content") -Force).Count
 
 $EditorArgs = @(
     $ValidationProjectFile,
@@ -104,7 +170,6 @@ $EditorArgs = @(
     "-FullStdOutLogOutput",
     "-ExecCmds=QUIT"
 )
-
 $EditorProcess = Start-Process `
     -FilePath $EditorCmd `
     -ArgumentList $EditorArgs `
@@ -114,6 +179,7 @@ $EditorProcess = Start-Process `
     -RedirectStandardError $ValidationStdErrLogPath
 
 $ForcedShutdownAfterQuit = $false
+$TimedOut = $false
 $QuitObservedAt = $null
 $Deadline = (Get-Date).AddSeconds($EditorQuitTimeoutSeconds)
 while ($true) {
@@ -122,110 +188,106 @@ while ($true) {
         break
     }
 
-    $ProjectLogSnapshot = Get-ValidationLifecycleLogSnapshot
-
-    $MountedBeforeTimeout = $ProjectLogSnapshot -match "Mounting Project plugin RuntimeInspector"
-    $ObservedQuitBeforeTimeout = $ProjectLogSnapshot -match "Cmd:\s+QUIT"
-
-    if ($MountedBeforeTimeout -and $ObservedQuitBeforeTimeout) {
+    $Snapshot = Get-ValidationLifecycleLogSnapshot
+    $Mounted = $Snapshot -match "Mounting Project plugin RuntimeInspector"
+    $QuitObserved = $Snapshot -match "Cmd:\s+QUIT"
+    if ($Mounted -and $QuitObserved) {
         if ($null -eq $QuitObservedAt) {
             $QuitObservedAt = Get-Date
         }
-
         if ((Get-Date) -ge $QuitObservedAt.AddSeconds($PostQuitGracePeriodSeconds)) {
             Stop-Process -Id $EditorProcess.Id -Force -ErrorAction SilentlyContinue
             $ForcedShutdownAfterQuit = $true
             break
         }
-
-        Start-Sleep -Milliseconds 500
-        continue
-    }
-
-    if ((Get-Date) -ge $Deadline) {
-        $ProjectLogSnapshot = Get-ValidationLifecycleLogSnapshot
-
-        $MountedBeforeTimeout = $ProjectLogSnapshot -match "Mounting Project plugin RuntimeInspector"
-        $ObservedQuitBeforeTimeout = $ProjectLogSnapshot -match "Cmd:\s+QUIT"
-
-        if ($MountedBeforeTimeout -and $ObservedQuitBeforeTimeout) {
-            Stop-Process -Id $EditorProcess.Id -Force -ErrorAction SilentlyContinue
-            $ForcedShutdownAfterQuit = $true
-            break
-        }
-
+    } elseif ((Get-Date) -ge $Deadline) {
         Stop-Process -Id $EditorProcess.Id -Force -ErrorAction SilentlyContinue
-        throw "Blank project validation timed out before observing plugin mount + QUIT. See log: $ValidationProjectLogPath"
+        $TimedOut = $true
+        break
     }
-
     Start-Sleep -Milliseconds 500
 }
 
-Start-Sleep -Milliseconds 200
+Start-Sleep -Milliseconds 250
 $EditorProcess.Refresh()
+$ProcessExitCode = if ($EditorProcess.HasExited) { [int]$EditorProcess.ExitCode } else { -1 }
 
-function Append-ValidationLog {
-    param(
-        [string]$SourcePath,
-        [string]$DestinationPath
-    )
-
-    if (-not (Test-Path $SourcePath)) {
-        return
-    }
-
-    Add-Content -LiteralPath $DestinationPath -Value ("===== {0} =====" -f $SourcePath)
-    Get-Content -LiteralPath $SourcePath | Add-Content -LiteralPath $DestinationPath
-}
-
-New-Item -ItemType File -Path $ValidationLogPath -Force | Out-Null
+New-Item -ItemType File -Force -Path $ValidationLogPath | Out-Null
 Append-ValidationLog -SourcePath $ValidationProjectLogPath -DestinationPath $ValidationLogPath
 Append-ValidationLog -SourcePath $ValidationStdOutLogPath -DestinationPath $ValidationLogPath
 Append-ValidationLog -SourcePath $ValidationStdErrLogPath -DestinationPath $ValidationLogPath
-
-if (($EditorProcess.ExitCode -ne 0) -and (-not $ForcedShutdownAfterQuit)) {
-    throw "Blank project validation failed. See log: $ValidationLogPath"
-}
-
-$ValidationLogContent = if (Test-Path $ValidationLogPath) {
+$ValidationLogContent = if (Test-Path -LiteralPath $ValidationLogPath -PathType Leaf) {
     Get-Content -LiteralPath $ValidationLogPath -Raw
 } else {
     ""
 }
 
 $MountedPlugin = $ValidationLogContent -match "Mounting Project plugin RuntimeInspector"
-$ObservedPluginLoadFailure = $false
-foreach ($Pattern in @(
-    "Plugin 'RuntimeInspector' failed to load",
-    "module 'RuntimeInspector' could not be found",
-    "Unable to load plugin 'RuntimeInspector'",
-    "Failed to load.*RuntimeInspector",
-    "Missing.*RuntimeInspector"
-)) {
-    if ($ValidationLogContent -match $Pattern) {
-        $ObservedPluginLoadFailure = $true
-        break
+$PluginIssuePatterns = @(
+    "(?i)\[RI\]\[ToolsConfig\]",
+    "(?i)(Error:|Warning:).*RuntimeInspector",
+    "(?i)RuntimeInspector.*(failed to load|could not be found|unable to load|missing|parse failed|invalid)",
+    "(?i)(ToolsSelfTestsDefault|ToolsWorkflowsDefault)\.json.*(missing|not found|parse|invalid|failed)",
+    "(?i)(Error:|Warning:).*(ToolsSelfTestsDefault|ToolsWorkflowsDefault)\.json",
+    "(?i)FConfigCacheIni::LoadFile failed loading file.*Filename was:\s+Game\b",
+    "(?i)Project RIFabBlank requires update\. Plugin RuntimeInspector"
+)
+$PluginIssueLines = [System.Collections.Generic.List[string]]::new()
+foreach ($Line in ($ValidationLogContent -split "`r?`n")) {
+    foreach ($Pattern in $PluginIssuePatterns) {
+        if ($Line -match $Pattern) {
+            $PluginIssueLines.Add($Line.Trim())
+            break
+        }
     }
 }
+$PluginIssueLines = @($PluginIssueLines | Sort-Object -Unique)
+$ExitAccepted = ($ProcessExitCode -eq 0) -or $ForcedShutdownAfterQuit
+$Passed = (-not $TimedOut) -and $ExitAccepted -and $MountedPlugin -and $PluginIssueLines.Count -eq 0
 
-if (-not $MountedPlugin) {
-    throw "Blank project validation did not detect RuntimeInspector plugin mount. See log: $ValidationLogPath"
+$Report = [ordered]@{
+    schema = "runtimeinspector.fab-blank-host-install-load-smoke.v1"
+    generatedUtc = [DateTime]::UtcNow.ToString("o")
+    passed = $Passed
+    engineVersion = $EngineVersion
+    engineAssociation = $EngineAssociation
+    projectName = $ValidationProjectName
+    projectFile = $ValidationProjectFile
+    packageRoot = $PackageRoot
+    installedPluginRoot = $ValidationPluginRoot
+    hostContentDirectoryPresent = (Test-Path -LiteralPath (Join-Path $ValidationProjectRoot "Content") -PathType Container)
+    hostContentEntryCountBeforeLaunch = $HostContentEntryCountBeforeLaunch
+    hostContentEmptyBeforeLaunch = ($HostContentEntryCountBeforeLaunch -eq 0)
+    defaultGameIniPresent = (Test-Path -LiteralPath (Join-Path $ValidationProjectRoot "Config\DefaultGame.ini") -PathType Leaf)
+    mountedPlugin = $MountedPlugin
+    processExitCode = $ProcessExitCode
+    timedOut = $TimedOut
+    forcedShutdownAfterQuit = $ForcedShutdownAfterQuit
+    pluginIssueLines = $PluginIssueLines
+    inputContractReport = $InputContractReportPath
+    combinedLog = $ValidationLogPath
 }
+$Report | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $ValidationReportPath -Encoding UTF8
 
-if ($ObservedPluginLoadFailure) {
-    throw "Blank project validation log contains RuntimeInspector load errors. Confirm the packaged plugin includes precompiled Binaries. See log: $ValidationLogPath"
+if (-not $Passed) {
+    if ($PluginIssueLines.Count -gt 0) {
+        Write-Host ($PluginIssueLines -join "`n") -ForegroundColor Red
+    }
+    throw "Fab blank-host install/load smoke failed. Report: $ValidationReportPath Log: $ValidationLogPath"
 }
 
 Write-Host ""
-Write-Host "Blank project validation passed."
-Write-Host "Project: $ValidationProjectFile"
-Write-Host "Plugin:  $ValidationPluginRoot"
-Write-Host "Log:     $ValidationLogPath"
+Write-Host "[PASS] Fab blank-host install/load smoke"
+Write-Host "       Engine:  $EngineVersion (association $EngineAssociation)"
+Write-Host "       Project: $ValidationProjectFile"
+Write-Host "       Plugin:  $ValidationPluginRoot"
+Write-Host "       Report:  $ValidationReportPath"
+Write-Host "       Log:     $ValidationLogPath"
 if ($ForcedShutdownAfterQuit) {
-    Write-Host "Editor stayed alive after QUIT; performed controlled shutdown after $PostQuitGracePeriodSeconds second grace period."
+    Write-Host "       Note: QUIT was observed; editor was stopped after a $PostQuitGracePeriodSeconds-second grace period."
 }
 
 if (-not $KeepValidationProject) {
-    Remove-Item -LiteralPath $ValidationRoot -Recurse -Force -ErrorAction SilentlyContinue
-    Write-Host "Validation project cleaned: $ValidationRoot"
+    Reset-SafeDirectory -Path $ValidationRoot -AllowedParent $FabRoot
+    Write-Host "       Cleaned smoke host: $ValidationRoot"
 }

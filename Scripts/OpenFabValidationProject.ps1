@@ -11,10 +11,10 @@ $PluginRoot = (Resolve-Path (Join-Path $ScriptRoot "..")).Path
 $ProjectRoot = (Resolve-Path (Join-Path $PluginRoot "..\..")).Path
 
 if ([string]::IsNullOrWhiteSpace($ValidationRoot)) {
-    $ValidationRoot = Join-Path $ProjectRoot "Saved\FabRelease\BlankProjectValidation\RuntimeInspectorBlank_UE55"
+    $ValidationRoot = Join-Path $ProjectRoot "Saved\FabRelease\BlankHostLoadSmoke\RIFabBlank_UE57"
 }
 
-$ValidationProjectFile = Join-Path $ValidationRoot "RuntimeInspectorBlank\RuntimeInspectorBlank.uproject"
+$ValidationProjectFile = Join-Path $ValidationRoot "RIFabBlank\RIFabBlank.uproject"
 $EditorExe = Join-Path $EngineRoot "Engine\Binaries\Win64\UnrealEditor.exe"
 
 if (-not (Test-Path $ValidationProjectFile -PathType Leaf)) {

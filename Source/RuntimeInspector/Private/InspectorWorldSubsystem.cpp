@@ -824,7 +824,11 @@ static FString RI_GetRuntimeInspectorSettingsSection()
 
 static void RI_AddUniqueNormalizedConfigPath(TArray<FString>& OutFiles, const FString& Filename)
 {
-    if (Filename.IsEmpty())
+    // UDeveloperSettings may return the logical config category ("Game")
+    // rather than a filesystem path. Passing that token to FConfigCacheIni::LoadFile
+    // emits a misleading missing/zero-size warning in a clean host. GGameIni below
+    // is the resolved authority and always carries the .ini suffix.
+    if (Filename.IsEmpty() || !Filename.EndsWith(TEXT(".ini"), ESearchCase::IgnoreCase))
     {
         return;
     }
