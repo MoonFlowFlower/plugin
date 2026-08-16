@@ -44,6 +44,9 @@ namespace
     static constexpr float RI_DockExpandedSidePanelMinPhysicalWidth = 320.0f;
     static constexpr float RI_DockExpandedSidePanelMaxPhysicalWidth = 360.0f;
     static constexpr float RI_DockExpandedSidePanelPhysicalWidthRatio = 0.20f;
+    // The right panel carries denser content (attribute rows, functions), so it
+    // gets extra width over the shared side panel base.
+    static constexpr float RI_DockRightPanelExtraPhysicalWidth = 40.0f;
     static constexpr float RI_DockLeftCompactPhysicalWidth = 64.0f;
     static constexpr float RI_DockOuterPadding = 0.0f;
     static constexpr float RI_DockPanelGapPhysical = 16.0f;
@@ -53,7 +56,7 @@ namespace
     static constexpr float RI_DockPanelBorderPhysicalThickness = 1.0f;
     static constexpr float RI_DockPanelBlurStrength = 8.0f;
     static constexpr float RI_DockPanelGridTileSize = 256.0f;
-    static constexpr float RI_DockHeaderBarPhysicalHeight = 40.0f;
+    static constexpr float RI_DockHeaderBarPhysicalHeight = 46.0f;
     static constexpr float RI_DockRightHeaderStackPhysicalGap = 8.0f;
 
     static FString RI_TabLabel(ERIInspectorTab Tab)
@@ -352,10 +355,15 @@ namespace
             RI_DockExpandedSidePanelMaxPhysicalWidth);
     }
 
+    static float RI_GetDockRightSidePanelPhysicalWidth(float PhysicalViewportWidth)
+    {
+        return RI_GetDockExpandedSidePanelPhysicalWidth(PhysicalViewportWidth) + RI_DockRightPanelExtraPhysicalWidth;
+    }
+
     static float RI_GetDockCenterPhysicalWidth(float PhysicalViewportWidth, bool bLeftCompact)
     {
         const float LeftWidth = bLeftCompact ? RI_DockLeftCompactPhysicalWidth : RI_GetDockExpandedSidePanelPhysicalWidth(PhysicalViewportWidth);
-        return PhysicalViewportWidth - LeftWidth - RI_GetDockExpandedSidePanelPhysicalWidth(PhysicalViewportWidth) - (RI_DockPanelGapPhysical * 2.0f);
+        return PhysicalViewportWidth - LeftWidth - RI_GetDockRightSidePanelPhysicalWidth(PhysicalViewportWidth) - (RI_DockPanelGapPhysical * 2.0f);
     }
 
     static bool RI_ShouldUseCompactLeftPanel(float PhysicalViewportWidth)
@@ -561,7 +569,7 @@ void UInspectorDockRootWidget::BuildWidgetTreeIfNeeded()
     BuildCenterOverlay(CenterOverlay);
 
     RightPanelSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_DockRightPanelSize"));
-    RightPanelSizeBox->SetWidthOverride(InitialExpandedSideLogicalWidth);
+    RightPanelSizeBox->SetWidthOverride(RI_PhysicalToLogical(RI_GetDockRightSidePanelPhysicalWidth(InitialPhysicalViewportSize.X), InitialViewportScale));
     RightPanelBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_DockRightInspector"));
     UBorder* RightSurface = RI_MakePanelSurface(
         WidgetTree,
@@ -606,18 +614,34 @@ void UInspectorDockRootWidget::BuildLeftPanel(UVerticalBox* OutPanel)
     {
         RI_AddHorizontal(ActorTopRow, ActorIcon, FMargin(0.f, 0.f, RICompactUI::GetInlineGap() + 3.f, 0.f));
     }
-    UVerticalBox* ActorTextStack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_SelectedActorTextStack"));
+    // Single-line header: actor name + muted class label on one baseline so the
+    // header matches the right panel's title bar height without clipping.
+    UHorizontalBox* ActorTextStack = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_SelectedActorTextStack"));
     ActorNameText = MakeBoundText(TEXT("RI_SelectedActorName"));
     ActorClassText = MakeBoundText(TEXT("RI_SelectedActorClass"));
     ActorPathText = MakeBoundText(TEXT("RI_SelectedActorPath"));
     ActorNameText->SetAutoWrapText(false);
     ActorClassText->SetAutoWrapText(false);
     ActorPathText->SetAutoWrapText(false);
-    RI_AddVertical(ActorTextStack, ActorNameText);
-    RI_AddVertical(ActorTextStack, ActorClassText, FMargin(0.f, 2.f, 0.f, 0.f));
+    ActorClassText->SetClipping(EWidgetClipping::ClipToBounds);
+    ActorClassText->SetTextOverflowPolicy(ETextOverflowPolicy::Ellipsis);
+    if (UHorizontalBoxSlot* HeaderNameSlot = ActorTextStack->AddChildToHorizontalBox(ActorNameText))
+    {
+        HeaderNameSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
+        HeaderNameSlot->SetVerticalAlignment(VAlign_Center);
+    }
+    if (UHorizontalBoxSlot* HeaderClassSlot = ActorTextStack->AddChildToHorizontalBox(ActorClassText))
+    {
+        FSlateChildSize ClassSize(ESlateSizeRule::Fill);
+        ClassSize.Value = 1.0f;
+        HeaderClassSlot->SetSize(ClassSize);
+        HeaderClassSlot->SetVerticalAlignment(VAlign_Center);
+        HeaderClassSlot->SetPadding(FMargin(6.f, 0.f, 0.f, 0.f));
+    }
     RI_AddHorizontal(ActorTopRow, ActorTextStack, FMargin(0.f), ESlateSizeRule::Fill);
     RI_AddVertical(ActorCardBox, ActorTopRow);
-    RI_AddVertical(ActorCardBox, ActorPathText, FMargin(0.f, 1.f, 0.f, 0.f));
+    // Actor path line removed from the header per UI review: noisy, always truncated.
+    ActorPathText->SetVisibility(ESlateVisibility::Collapsed);
     RI_AlignBorderContentCenterFill(ActorCard);
     RI_AddVertical(OutPanel, RI_WrapDockHeaderBar(WidgetTree, ActorCard, TEXT("RI_SelectedActorHeaderFrame")), FMargin(0.f, 0.f, 0.f, RICompactUI::GetSectionGap()));
 
@@ -649,10 +673,11 @@ void UInspectorDockRootWidget::BuildLeftPanel(UVerticalBox* OutPanel)
     SearchSurface->SetContent(SearchRow);
     RI_AddVertical(OutPanel, SearchSurface, RI_GetDockBodyMargin(0.f, RICompactUI::GetSectionGap()));
 
-    ComponentTitleWidget = RI_MakeIconSectionTitle(WidgetTree, TEXT("shape:components"), TEXT("Components"), RICompactUI::ERISectionVisualStyle::Standard, TEXT("RI_ComponentTreeTitle"));
+    ComponentTitleWidget = RI_MakeIconSectionTitle(WidgetTree, TEXT("shape:components"), TEXT("Components"), RICompactUI::ERISectionVisualStyle::Emphasis, TEXT("RI_ComponentTreeTitle"));
     RI_AddVertical(OutPanel, ComponentTitleWidget, RI_GetDockBodyMargin());
     UBorder* ComponentCard = RI_MakeSectionCard(WidgetTree, TEXT("RI_ComponentTreeCard"));
     UScrollBox* ComponentScrollBox = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("RI_ComponentTreeScroll"));
+    ComponentScrollBox->SetScrollbarThickness(FVector2D(5.f, 5.f));
     ComponentListBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ComponentTree"));
     ComponentScrollBox->AddChild(ComponentListBox);
     ComponentCard->SetContent(ComponentScrollBox);
@@ -664,11 +689,12 @@ void UInspectorDockRootWidget::BuildLeftPanel(UVerticalBox* OutPanel)
     UVerticalBox* FavoritesFrameBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_FavoritesFrame"));
     FavoritesFrameSizeBox->SetContent(FavoritesFrameBox);
 
-    FavoritesTitleWidget = RI_MakeIconSectionTitle(WidgetTree, TEXT("shape:star-outline"), TEXT("Favorites"), RICompactUI::ERISectionVisualStyle::Standard, TEXT("RI_FavoritesTitle"));
+    FavoritesTitleWidget = RI_MakeIconSectionTitle(WidgetTree, TEXT("shape:star-outline"), TEXT("Favorites"), RICompactUI::ERISectionVisualStyle::Emphasis, TEXT("RI_FavoritesTitle"));
     RI_AddVertical(FavoritesFrameBox, FavoritesTitleWidget);
     UBorder* FavoritesCard = RI_MakeSectionCard(WidgetTree, TEXT("RI_FavoritesCard"));
     FavoritesCard->SetClipping(EWidgetClipping::ClipToBounds);
     FavoritesScrollBox = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("RI_FavoritesScroll"));
+    FavoritesScrollBox->SetScrollbarThickness(FVector2D(5.f, 5.f));
     FavoritesListBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_FavoritesPanel"));
     FavoritesScrollBox->AddChild(FavoritesListBox);
     FavoritesCard->SetContent(FavoritesScrollBox);
@@ -736,6 +762,7 @@ void UInspectorDockRootWidget::BuildRightInspector(UVerticalBox* OutPanel)
     TabSwitcher = WidgetTree->ConstructWidget<UWidgetSwitcher>(UWidgetSwitcher::StaticClass(), TEXT("RI_TabContent"));
     ActorTabPageBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ActorTabPage"));
     ChangesTabScrollBox = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("RI_ChangesTabScroll"));
+    ChangesTabScrollBox->SetScrollbarThickness(FVector2D(5.f, 5.f));
     SettingsHostBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_SettingsTabHost"));
     ToolsHostBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_ToolsTabHost"));
     BuildActorTab(ActorTabPageBox);
@@ -780,7 +807,8 @@ void UInspectorDockRootWidget::BuildRightInspector(UVerticalBox* OutPanel)
     RI_AddHorizontalCentered(ActionBottomRow, ApplyButton);
     RI_AddVertical(ActionBarBox, ActionTopRow, FMargin(0.f, 0.f, 0.f, 3.f));
     RI_AddVertical(ActionBarBox, ActionBottomRow);
-    RI_AddVertical(OutPanel, ActionBarBox, RI_GetDockBodyMargin());
+    // Keep the action bar clear of the panel's bottom edge.
+    RI_AddVertical(OutPanel, ActionBarBox, RI_GetDockBodyMargin(4.f, 10.f));
 
     ActionStatusText = MakeBoundText(TEXT("RI_ActionStatusText"));
     RICompactUI::ApplyTextStyle(ActionStatusText, RICompactUI::GetMutedFontSize(), false, RICompactUI::GetMutedTextColor());
@@ -1160,7 +1188,8 @@ void UInspectorDockRootWidget::RefreshLayoutForViewport()
     }
     if (RightPanelSizeBox)
     {
-        RightPanelSizeBox->SetWidthOverride(ExpandedSideLogicalWidth);
+        const float RightSideLogicalWidth = RI_PhysicalToLogical(RI_GetDockRightSidePanelPhysicalWidth(PhysicalViewportSize.X), ViewportScale);
+        RightPanelSizeBox->SetWidthOverride(RightSideLogicalWidth);
         if (UHorizontalBoxSlot* DockSlot = Cast<UHorizontalBoxSlot>(RightPanelSizeBox->Slot))
         {
             DockSlot->SetPadding(FMargin(PanelGapLogical, 0.f, 0.f, 0.f));
@@ -1206,10 +1235,12 @@ void UInspectorDockRootWidget::RefreshActorContext(const FRIInspectorViewModel& 
     }
     if (ActorPathText)
     {
-        const bool bHidePathForTightPanel = bLeftPanelCompact || LastDockSidePanelPhysicalWidth <= 300.0f;
-        ActorPathText->SetVisibility(bHidePathForTightPanel ? ESlateVisibility::Collapsed : ESlateVisibility::HitTestInvisible);
-        ActorPathText->SetText(bHidePathForTightPanel ? FText::GetEmpty() : ViewModel.SelectedActor.ActorPath);
-        RICompactUI::ApplyTextStyle(ActorPathText, RICompactUI::GetMutedFontSize(), false, RICompactUI::GetMutedTextColor());
+        // Hidden per UI review; keep the tooltip on the name for full path access.
+        ActorPathText->SetVisibility(ESlateVisibility::Collapsed);
+        if (ActorNameText)
+        {
+            ActorNameText->SetToolTipText(ViewModel.SelectedActor.ActorPath);
+        }
     }
     if (StagedBannerText)
     {

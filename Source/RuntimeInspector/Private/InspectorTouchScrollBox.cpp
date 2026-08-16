@@ -21,6 +21,8 @@ void UInspectorTouchScrollBox::ApplyRuntimeInspectorDefaults()
 
     SetIsTouchScrollingEnabled(true);
     SetConsumeMouseWheel(EConsumeMouseWheel::WhenScrollingPossible);
+    // Slim scrollbar: the engine-default wide bar reads as unstyled against the dark theme.
+    SetScrollbarThickness(FVector2D(5.f, 5.f));
 }
 
 namespace RIInspectorTouchScroll
@@ -34,6 +36,7 @@ namespace RIInspectorTouchScroll
 
         ScrollBox->SetIsTouchScrollingEnabled(true);
         ScrollBox->SetConsumeMouseWheel(EConsumeMouseWheel::WhenScrollingPossible);
+        ScrollBox->SetScrollbarThickness(FVector2D(5.f, 5.f));
     }
 
     bool HasTouchSupport(const UScrollBox* ScrollBox)

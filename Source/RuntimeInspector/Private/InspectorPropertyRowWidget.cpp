@@ -17,6 +17,8 @@
 #include "Components/HorizontalBoxSlot.h"
 #include "Components/Image.h"
 #include "Components/SizeBox.h"
+#include "Components/SizeBoxSlot.h"
+#include "Components/Spacer.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
@@ -69,7 +71,8 @@ namespace
     }
 
     static constexpr float RI_StructuredPreviewDelaySeconds = 0.12f;
-    static constexpr float RI_RowNameMaxWidth = 112.0f;
+    static constexpr float RI_RowNameMaxWidth = 170.0f;
+    static constexpr float RI_RowNameMinWidth = 88.0f;
     static constexpr float RI_RowCheckBoxSize = 16.0f;
     static constexpr float RI_RowValueWidth = 96.0f;
 }
@@ -204,12 +207,14 @@ bool UInspectorPropertyRowWidget::HasFavoriteVisualContractForAutomation() const
 
 bool UInspectorPropertyRowWidget::HasOverflowLayoutForAutomation() const
 {
+    // Contract: favorite hit target fixed; name column capped with ellipsis;
+    // value wrapper present with no fixed width (proportional fill layout).
     return FavoriteSizeBox
         && FMath::IsNearlyEqual(FavoriteSizeBox->GetWidthOverride(), RICompactUI::GetFavoriteButtonHitSize())
         && NameSizeBox
         && FMath::IsNearlyEqual(NameSizeBox->GetMaxDesiredWidth(), RI_RowNameMaxWidth)
         && ReadOnlyValueSizeBox
-        && FMath::IsNearlyEqual(ReadOnlyValueSizeBox->GetWidthOverride(), RI_RowValueWidth);
+        && ReadOnlyValueSizeBox->GetWidthOverride() <= 0.0f;
 }
 
 bool UInspectorPropertyRowWidget::HasExpandedValueEditorForAutomation() const
@@ -535,7 +540,7 @@ void UInspectorPropertyRowWidget::BuildWidgetTree()
     NameButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("RI_PropertyRowNameButton"));
     RICompactUI::ConfigureSwatchButton(NameButton);
     NameButton->OnClicked.AddDynamic(this, &UInspectorPropertyRowWidget::HandleNameClicked);
-    NameText = RICompactUI::MakeEllipsisText(WidgetTree, TEXT("Property"), RICompactUI::GetLabelFontSize(), true, RI_PropertyTextColor());
+    NameText = RICompactUI::MakeEllipsisText(WidgetTree, TEXT("Property"), FMath::Max(8, RICompactUI::GetLabelFontSize() - 1), true, RI_PropertyTextColor());
     NameText->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
     NameButton->AddChild(NameText);
     if (UButtonSlot* NameButtonSlot = Cast<UButtonSlot>(NameButton->GetContentSlot()))
@@ -546,12 +551,15 @@ void UInspectorPropertyRowWidget::BuildWidgetTree()
     }
     NameSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_PropertyRowNameSize"));
     NameSizeBox->SetMaxDesiredWidth(RI_RowNameMaxWidth);
+    NameSizeBox->SetMinDesiredWidth(RI_RowNameMinWidth);
     NameSizeBox->SetContent(NameButton);
     if (UHorizontalBoxSlot* NameSlot = SummaryRowBox->AddChildToHorizontalBox(NameSizeBox))
     {
-        FSlateChildSize SizeRule(ESlateSizeRule::Fill);
-        SizeRule.Value = 1.0f;
-        NameSlot->SetSize(SizeRule);
+        // Proportional split with the value column (1.2 : 1.0). The name shrinks
+        // with ellipsis on narrow panels; the value column always stays on-panel.
+        FSlateChildSize NameSize(ESlateSizeRule::Fill);
+        NameSize.Value = 1.2f;
+        NameSlot->SetSize(NameSize);
         NameSlot->SetVerticalAlignment(VAlign_Center);
         NameSlot->SetPadding(FMargin(0.f, 0.f, 6.f, 0.f));
     }
@@ -559,11 +567,22 @@ void UInspectorPropertyRowWidget::BuildWidgetTree()
     ReadOnlyValueText = RICompactUI::MakeEllipsisText(WidgetTree, TEXT(""), RICompactUI::GetValueFontSize(), false, RI_PropertyMutedColor());
     ReadOnlyValueText->SetJustification(ETextJustify::Right);
     ReadOnlyValueText->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
-    ReadOnlyValueSizeBox = RICompactUI::WrapValueControl(WidgetTree, ReadOnlyValueText, 0.f, RI_RowValueWidth);
+    // No fixed width: the wrapper fills its proportional slot and the
+    // right-justified text lands flush against the panel edge.
+    ReadOnlyValueSizeBox = RICompactUI::WrapValueControl(WidgetTree, ReadOnlyValueText);
+    if (USizeBoxSlot* ReadOnlyContentSlot = Cast<USizeBoxSlot>(ReadOnlyValueSizeBox->GetContentSlot()))
+    {
+        // Vertically center the text inside the fixed-height wrapper while
+        // keeping horizontal fill so right-justification stays flush.
+        ReadOnlyContentSlot->SetHorizontalAlignment(HAlign_Fill);
+        ReadOnlyContentSlot->SetVerticalAlignment(VAlign_Center);
+    }
     if (UHorizontalBoxSlot* ValueSlot = SummaryRowBox->AddChildToHorizontalBox(ReadOnlyValueSizeBox))
     {
-        ValueSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
-        ValueSlot->SetHorizontalAlignment(HAlign_Right);
+        FSlateChildSize ValueSize(ESlateSizeRule::Fill);
+        ValueSize.Value = 1.0f;
+        ValueSlot->SetSize(ValueSize);
+        ValueSlot->SetHorizontalAlignment(HAlign_Fill);
         ValueSlot->SetVerticalAlignment(VAlign_Center);
     }
 
@@ -573,11 +592,13 @@ void UInspectorPropertyRowWidget::BuildWidgetTree()
     ValueTextBox->SetTextOverflowPolicy(ETextOverflowPolicy::Ellipsis);
     ValueTextBox->SetJustification(ETextJustify::Right);
     ValueTextBox->OnTextCommitted.AddDynamic(this, &UInspectorPropertyRowWidget::HandleValueCommitted);
-    ValueTextBoxSizeBox = RICompactUI::WrapValueControl(WidgetTree, ValueTextBox, 0.f, RI_RowValueWidth);
+    ValueTextBoxSizeBox = RICompactUI::WrapValueControl(WidgetTree, ValueTextBox);
     if (UHorizontalBoxSlot* TextBoxSlot = SummaryRowBox->AddChildToHorizontalBox(ValueTextBoxSizeBox))
     {
-        TextBoxSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
-        TextBoxSlot->SetHorizontalAlignment(HAlign_Right);
+        FSlateChildSize TextBoxSize(ESlateSizeRule::Fill);
+        TextBoxSize.Value = 1.0f;
+        TextBoxSlot->SetSize(TextBoxSize);
+        TextBoxSlot->SetHorizontalAlignment(HAlign_Fill);
         TextBoxSlot->SetVerticalAlignment(VAlign_Center);
     }
 
@@ -786,11 +807,18 @@ void UInspectorPropertyRowWidget::BuildWidgetTree()
 
 void UInspectorPropertyRowWidget::HideAllValueControls()
 {
+    // Collapse the WRAPPER size boxes too: a visible SizeBox with a collapsed
+    // child still occupies layout space (fixed width or fill weight), which
+    // starves the name column.
     if (ReadOnlyValueText) ReadOnlyValueText->SetVisibility(ESlateVisibility::Collapsed);
+    if (ReadOnlyValueSizeBox) ReadOnlyValueSizeBox->SetVisibility(ESlateVisibility::Collapsed);
     if (ValueTextBox) ValueTextBox->SetVisibility(ESlateVisibility::Collapsed);
+    if (ValueTextBoxSizeBox) ValueTextBoxSizeBox->SetVisibility(ESlateVisibility::Collapsed);
     ShowExpandedValueEditor(false);
     if (BoolCheckBox) BoolCheckBox->SetVisibility(ESlateVisibility::Collapsed);
+    if (BoolCheckBoxSizeBox) BoolCheckBoxSizeBox->SetVisibility(ESlateVisibility::Collapsed);
     if (EnumComboBox) EnumComboBox->SetVisibility(ESlateVisibility::Collapsed);
+    if (EnumComboBoxSizeBox) EnumComboBoxSizeBox->SetVisibility(ESlateVisibility::Collapsed);
     if (ColorButton) ColorButton->SetVisibility(ESlateVisibility::Collapsed);
     if (VectorEditorBox) VectorEditorBox->SetVisibility(ESlateVisibility::Collapsed);
     if (RotatorEditorBox) RotatorEditorBox->SetVisibility(ESlateVisibility::Collapsed);
@@ -817,6 +845,7 @@ void UInspectorPropertyRowWidget::RefreshRow()
         if (ReadOnlyValueText)
         {
             ReadOnlyValueText->SetVisibility(ESlateVisibility::Visible);
+            if (ReadOnlyValueSizeBox) { ReadOnlyValueSizeBox->SetVisibility(ESlateVisibility::SelfHitTestInvisible); }
             ReadOnlyValueText->SetText(FText::GetEmpty());
         }
         if (FavoriteButton) FavoriteButton->SetVisibility(ESlateVisibility::Collapsed);
@@ -901,6 +930,7 @@ void UInspectorPropertyRowWidget::RefreshRow()
         if (ReadOnlyValueText)
         {
             ReadOnlyValueText->SetVisibility(ESlateVisibility::Visible);
+            if (ReadOnlyValueSizeBox) { ReadOnlyValueSizeBox->SetVisibility(ESlateVisibility::SelfHitTestInvisible); }
             ReadOnlyValueText->SetText(FText::FromString(CurrentValue));
             RICompactUI::ConfigureEllipsisText(ReadOnlyValueText, CurrentValue);
         }
@@ -911,6 +941,7 @@ void UInspectorPropertyRowWidget::RefreshRow()
     {
         const bool bChecked = CurrentValue.Equals(TEXT("True"), ESearchCase::IgnoreCase) || CurrentValue == TEXT("1");
         BoolCheckBox->SetVisibility(ESlateVisibility::Visible);
+        if (BoolCheckBoxSizeBox) { BoolCheckBoxSizeBox->SetVisibility(ESlateVisibility::SelfHitTestInvisible); }
         BoolCheckBox->SetIsChecked(bChecked);
         return;
     }
@@ -925,6 +956,7 @@ void UInspectorPropertyRowWidget::RefreshRow()
             EnumComboBox->AddOption(Option);
         }
         EnumComboBox->SetVisibility(ESlateVisibility::Visible);
+        if (EnumComboBoxSizeBox) { EnumComboBoxSizeBox->SetVisibility(ESlateVisibility::SelfHitTestInvisible); }
         if (Options.Contains(CurrentValue))
         {
             EnumComboBox->SetSelectedOption(CurrentValue);
@@ -939,6 +971,7 @@ void UInspectorPropertyRowWidget::RefreshRow()
     if (ValueTextBox)
     {
         ValueTextBox->SetVisibility(ESlateVisibility::Visible);
+        if (ValueTextBoxSizeBox) { ValueTextBoxSizeBox->SetVisibility(ESlateVisibility::SelfHitTestInvisible); }
         ValueTextBox->SetText(FText::FromString(CurrentValue));
         ValueTextBox->SetToolTipText(FText::FromString(CurrentValue));
     }
@@ -959,6 +992,7 @@ void UInspectorPropertyRowWidget::RefreshStructuredVector(UInspectorPropertyItem
         if (ReadOnlyValueText)
         {
             ReadOnlyValueText->SetVisibility(ESlateVisibility::Visible);
+            if (ReadOnlyValueSizeBox) { ReadOnlyValueSizeBox->SetVisibility(ESlateVisibility::SelfHitTestInvisible); }
             ReadOnlyValueText->SetText(FText::FromString(Item->GetValueText()));
         }
         return;
@@ -983,6 +1017,7 @@ void UInspectorPropertyRowWidget::RefreshStructuredRotator(UInspectorPropertyIte
         if (ReadOnlyValueText)
         {
             ReadOnlyValueText->SetVisibility(ESlateVisibility::Visible);
+            if (ReadOnlyValueSizeBox) { ReadOnlyValueSizeBox->SetVisibility(ESlateVisibility::SelfHitTestInvisible); }
             ReadOnlyValueText->SetText(FText::FromString(Item->GetValueText()));
         }
         return;
@@ -1011,6 +1046,7 @@ void UInspectorPropertyRowWidget::RefreshStructuredTransform(UInspectorPropertyI
         if (ReadOnlyValueText)
         {
             ReadOnlyValueText->SetVisibility(ESlateVisibility::Visible);
+            if (ReadOnlyValueSizeBox) { ReadOnlyValueSizeBox->SetVisibility(ESlateVisibility::SelfHitTestInvisible); }
             ReadOnlyValueText->SetText(FText::FromString(Item->GetValueText()));
         }
         return;

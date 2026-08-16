@@ -13,6 +13,8 @@
 #include "Components/HorizontalBoxSlot.h"
 #include "Components/Image.h"
 #include "Components/SizeBox.h"
+#include "Components/SizeBoxSlot.h"
+#include "Components/Spacer.h"
 #include "Components/TextBlock.h"
 
 namespace
@@ -303,14 +305,18 @@ void UInspectorMaterialParamRowWidget::BuildWidgetTree()
 
     NameText = RICompactUI::MakeEllipsisText(WidgetTree, TEXT("Material Parameter"), RICompactUI::GetLabelFontSize(), true, RI_MaterialTextColor());
     NameText->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
-    // Keep the parameter name readable even when the value control is wide;
-    // without this the fill slot can collapse the name to a bare ellipsis.
-    NameText->SetMinDesiredWidth(72.f);
-    if (UHorizontalBoxSlot* NameSlot = RootBox->AddChildToHorizontalBox(NameText))
+    // Auto slot + SizeBox min/max: the name column claims 72-150px before any
+    // value control can squeeze it (Auto slots are satisfied before Fill slots).
+    USizeBox* NameSizeBoxLocal = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_MaterialParamNameSize"));
+    NameSizeBoxLocal->SetMinDesiredWidth(72.f);
+    NameSizeBoxLocal->SetMaxDesiredWidth(150.f);
+    NameSizeBoxLocal->SetContent(NameText);
+    if (UHorizontalBoxSlot* NameSlot = RootBox->AddChildToHorizontalBox(NameSizeBoxLocal))
     {
-        FSlateChildSize SizeRule(ESlateSizeRule::Fill);
-        SizeRule.Value = 1.0f;
-        NameSlot->SetSize(SizeRule);
+        // Proportional split with the value column; name ellipsizes when narrow.
+        FSlateChildSize NameSize(ESlateSizeRule::Fill);
+        NameSize.Value = 1.2f;
+        NameSlot->SetSize(NameSize);
         NameSlot->SetVerticalAlignment(VAlign_Center);
         NameSlot->SetPadding(FMargin(0.f, 0.f, 6.f, 0.f));
     }
@@ -319,6 +325,11 @@ void UInspectorMaterialParamRowWidget::BuildWidgetTree()
     ReadOnlyValueText->SetJustification(ETextJustify::Right);
     ReadOnlyValueText->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
     ReadOnlyValueSizeBox = RICompactUI::WrapValueControl(WidgetTree, ReadOnlyValueText, 96.f);
+    if (USizeBoxSlot* ReadOnlyContentSlot = Cast<USizeBoxSlot>(ReadOnlyValueSizeBox->GetContentSlot()))
+    {
+        ReadOnlyContentSlot->SetHorizontalAlignment(HAlign_Fill);
+        ReadOnlyContentSlot->SetVerticalAlignment(VAlign_Center);
+    }
     if (UHorizontalBoxSlot* ValueSlot = RootBox->AddChildToHorizontalBox(ReadOnlyValueSizeBox))
     {
         ValueSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
@@ -333,8 +344,10 @@ void UInspectorMaterialParamRowWidget::BuildWidgetTree()
     ScalarValueTextBoxSizeBox = RICompactUI::WrapValueControl(WidgetTree, ScalarValueTextBox, 96.f);
     if (UHorizontalBoxSlot* ValueSlot = RootBox->AddChildToHorizontalBox(ScalarValueTextBoxSizeBox))
     {
-        ValueSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
-        ValueSlot->SetHorizontalAlignment(HAlign_Right);
+        FSlateChildSize ValueSize(ESlateSizeRule::Fill);
+        ValueSize.Value = 1.0f;
+        ValueSlot->SetSize(ValueSize);
+        ValueSlot->SetHorizontalAlignment(HAlign_Fill);
         ValueSlot->SetVerticalAlignment(VAlign_Center);
     }
 
@@ -374,6 +387,7 @@ void UInspectorMaterialParamRowWidget::RefreshRow()
         if (ReadOnlyValueText)
         {
             ReadOnlyValueText->SetVisibility(ESlateVisibility::Visible);
+            if (ReadOnlyValueSizeBox) { ReadOnlyValueSizeBox->SetVisibility(ESlateVisibility::SelfHitTestInvisible); }
             ReadOnlyValueText->SetText(FText::GetEmpty());
         }
         if (FavoriteButton)
@@ -383,6 +397,7 @@ void UInspectorMaterialParamRowWidget::RefreshRow()
         if (ScalarValueTextBox)
         {
             ScalarValueTextBox->SetVisibility(ESlateVisibility::Collapsed);
+        if (ScalarValueTextBoxSizeBox) { ScalarValueTextBoxSizeBox->SetVisibility(ESlateVisibility::Collapsed); }
         }
         if (ColorButton)
         {
@@ -416,10 +431,12 @@ void UInspectorMaterialParamRowWidget::RefreshRow()
     if (ReadOnlyValueText)
     {
         ReadOnlyValueText->SetVisibility(ESlateVisibility::Collapsed);
+        if (ReadOnlyValueSizeBox) { ReadOnlyValueSizeBox->SetVisibility(ESlateVisibility::Collapsed); }
     }
     if (ScalarValueTextBox)
     {
         ScalarValueTextBox->SetVisibility(ESlateVisibility::Collapsed);
+        if (ScalarValueTextBoxSizeBox) { ScalarValueTextBoxSizeBox->SetVisibility(ESlateVisibility::Collapsed); }
     }
     if (ColorButton)
     {
@@ -452,6 +469,7 @@ void UInspectorMaterialParamRowWidget::RefreshRow()
         if (ScalarValueTextBox)
         {
             ScalarValueTextBox->SetVisibility(ESlateVisibility::Visible);
+            if (ScalarValueTextBoxSizeBox) { ScalarValueTextBoxSizeBox->SetVisibility(ESlateVisibility::SelfHitTestInvisible); }
             ScalarValueTextBox->SetText(FText::FromString(DisplayValue));
             ScalarValueTextBox->SetToolTipText(FText::FromString(DisplayValue));
         }
@@ -460,6 +478,7 @@ void UInspectorMaterialParamRowWidget::RefreshRow()
             ReadOnlyValueText->SetText(FText::FromString(DisplayValue));
             ReadOnlyValueText->SetToolTipText(FText::FromString(DisplayValue));
             ReadOnlyValueText->SetVisibility(ESlateVisibility::Visible);
+            if (ReadOnlyValueSizeBox) { ReadOnlyValueSizeBox->SetVisibility(ESlateVisibility::SelfHitTestInvisible); }
         }
     }
 }

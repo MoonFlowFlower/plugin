@@ -185,23 +185,23 @@ namespace RICompactUI
         {
             FRIThemePresetTokens Tokens;
             Tokens.Metrics = {
-                8, 7, 6, 5,
-                20.0f, 20.0f, 96.0f, 122.0f,
+                9, 8, 7, 6,
+                24.0f, 24.0f, 96.0f, 122.0f,
                 5.0f, 1.0f,
-                FMargin(5.f, 3.f),
+                FMargin(6.f, 4.f),
                 FMargin(0.f),
-                FMargin(6.f, 2.f)
+                FMargin(7.f, 3.f)
             };
-            Tokens.PageBackground = MakeTokenColor(TEXT("07111E"), 0.94f);
-            Tokens.FooterBackground = MakeTokenColor(TEXT("091220"), 0.96f);
-            Tokens.ContextStripBackground = MakeTokenColor(TEXT("0B1626"), 0.95f);
-            Tokens.ContextPrimaryCellBackground = MakeTokenColor(TEXT("18283D"), 0.98f);
-            Tokens.ContextSecondaryCellBackground = MakeTokenColor(TEXT("101B2B"), 0.96f);
-            Tokens.ContextStatusCellBackground = MakeTokenColor(TEXT("402C10"), 0.98f);
-            Tokens.SectionSurfaceBackground = MakeTokenColor(TEXT("142234"), 0.93f);
-            Tokens.RowSurfaceBackground = MakeTokenColor(TEXT("0F1B2B"), 0.92f);
-            Tokens.CellSurfaceBackground = MakeTokenColor(TEXT("132236"), 0.93f);
-            Tokens.SelectedRowSurfaceBackground = MakeTokenColor(TEXT("1A3652"), 0.95f);
+            Tokens.PageBackground = MakeTokenColor(TEXT("07111E"), 0.97f);
+            Tokens.FooterBackground = MakeTokenColor(TEXT("091220"), 0.98f);
+            Tokens.ContextStripBackground = MakeTokenColor(TEXT("0B1626"), 0.97f);
+            Tokens.ContextPrimaryCellBackground = MakeTokenColor(TEXT("18283D"), 0.99f);
+            Tokens.ContextSecondaryCellBackground = MakeTokenColor(TEXT("101B2B"), 0.98f);
+            Tokens.ContextStatusCellBackground = MakeTokenColor(TEXT("402C10"), 0.99f);
+            Tokens.SectionSurfaceBackground = MakeTokenColor(TEXT("142234"), 0.97f);
+            Tokens.RowSurfaceBackground = MakeTokenColor(TEXT("0F1B2B"), 0.96f);
+            Tokens.CellSurfaceBackground = MakeTokenColor(TEXT("132236"), 0.97f);
+            Tokens.SelectedRowSurfaceBackground = MakeTokenColor(TEXT("1A3652"), 0.98f);
             Tokens.StrongText = MakeTokenColor(TEXT("F2F6FA"));
             Tokens.SecondaryText = MakeTokenColor(TEXT("AAB6C5"));
             Tokens.MutedText = MakeTokenColor(TEXT("6E7B8C"));
@@ -210,8 +210,8 @@ namespace RICompactUI
             Tokens.ErrorText = FLinearColor(0.95f, 0.35f, 0.35f, 1.0f);
             Tokens.PrimaryButton = {
                 MakeTokenColor(TEXT("2F8CFF")),
-                MakeTokenColor(TEXT("46C8FF")),
-                MakeTokenColor(TEXT("1658B4")),
+                MakeTokenColor(TEXT("4FA0FF")),
+                MakeTokenColor(TEXT("1E63C4")),
                 MakeTokenColor(TEXT("17202B"), 0.65f),
                 FLinearColor(0.98f, 0.99f, 1.0f, 1.0f)
             };
@@ -313,18 +313,18 @@ namespace RICompactUI
             Tokens.SuccessText = FLinearColor(0.52f, 0.88f, 0.68f, 1.0f);
             Tokens.WarningText = FLinearColor(0.96f, 0.79f, 0.40f, 1.0f);
             Tokens.ErrorText = FLinearColor(0.95f, 0.49f, 0.49f, 1.0f);
-            Tokens.Metrics.SectionTitleFontSize = 8;
-            Tokens.Metrics.LabelFontSize = 7;
-            Tokens.Metrics.ValueFontSize = 6;
-            Tokens.Metrics.MutedFontSize = 5;
-            Tokens.Metrics.ButtonHeight = 22.0f;
-            Tokens.Metrics.InputHeight = 22.0f;
+            Tokens.Metrics.SectionTitleFontSize = 9;
+            Tokens.Metrics.LabelFontSize = 8;
+            Tokens.Metrics.ValueFontSize = 7;
+            Tokens.Metrics.MutedFontSize = 6;
+            Tokens.Metrics.ButtonHeight = 24.0f;
+            Tokens.Metrics.InputHeight = 24.0f;
             Tokens.Metrics.CompactListHeight = 94.0f;
             Tokens.Metrics.StandardListHeight = 120.0f;
             Tokens.Metrics.SectionPadding = FMargin(5.f, 3.f);
             Tokens.Metrics.InputPadding = FMargin(7.f, 4.f);
             Tokens.PrimaryButton.Normal = MakeTokenColor(TEXT("2F8CFF"));
-            Tokens.PrimaryButton.Hovered = MakeTokenColor(TEXT("46C8FF"));
+            Tokens.PrimaryButton.Hovered = MakeTokenColor(TEXT("4FA0FF"));
             Tokens.SecondaryButton.Normal = MakeTokenColor(TEXT("1B2B41"));
             Tokens.SecondaryButton.Hovered = MakeTokenColor(TEXT("223952"));
             Tokens.SecondaryButton.Pressed = MakeTokenColor(TEXT("142133"));

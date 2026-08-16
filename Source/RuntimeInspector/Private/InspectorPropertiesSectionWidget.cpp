@@ -406,7 +406,7 @@ UWidget* UInspectorPropertiesSectionWidget::CreatePropertyRow(UObject* ItemObjec
 {
     if (UInspectorGroupItem* GroupItem = Cast<UInspectorGroupItem>(ItemObject))
     {
-        return RICompactUI::MakeSectionTitle(WidgetTree, GroupItem->DisplayName, RICompactUI::ERISectionVisualStyle::Emphasis);
+        return RICompactUI::MakeSectionTitle(WidgetTree, GroupItem->DisplayName, RICompactUI::ERISectionVisualStyle::Standard);
     }
 
     if (UInspectorMaterialParamItem* MaterialItem = Cast<UInspectorMaterialParamItem>(ItemObject))
@@ -482,7 +482,7 @@ UWidget* UInspectorPropertiesSectionWidget::CreateActorTransformBlock(const TArr
     BlockBorder->SetContent(BlockBox);
 
     if (UVerticalBoxSlot* TitleSlot = BlockBox->AddChildToVerticalBox(
-        RICompactUI::MakeSectionTitle(WidgetTree, TEXT("Transform"), RICompactUI::ERISectionVisualStyle::Emphasis)))
+        RICompactUI::MakeSectionTitle(WidgetTree, TEXT("Transform"), RICompactUI::ERISectionVisualStyle::Standard)))
     {
         TitleSlot->SetPadding(FMargin(0.f, 0.f, 0.f, RICompactUI::GetInlineGap()));
     }
