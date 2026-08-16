@@ -18347,9 +18347,12 @@ bool UInspectorWorldSubsystem::RunThemePresetPreviewSelfTest(FString& OutReport)
         HandleThemePreviewRefreshTimerElapsed();
     }
 
-    UPanelWidget* HostPanel = FindSettingsHostPanel();
-    UInspectorSettingsPageWidget* Page = SettingsPageWidget.Get();
-    UWidgetSwitcher* Switcher = ContentSwitcher.Get();
+    UInspectorDockRootWidget* DockRoot = DockRootWidget.Get();
+    UInspectorSettingsPageWidget* Page = DockRoot ? DockRoot->GetHostedSettingsPage() : SettingsPageWidget.Get();
+    UPanelWidget* HostPanel = DockRoot
+        ? Cast<UPanelWidget>(Page ? Page->GetParent() : nullptr)
+        : FindSettingsHostPanel();
+    UWidgetSwitcher* Switcher = DockRoot ? nullptr : ContentSwitcher.Get();
 
     bool bHostContainsPage = false;
     int32 VisibleLegacySiblingCount = 0;
@@ -18377,7 +18380,15 @@ bool UInspectorWorldSubsystem::RunThemePresetPreviewSelfTest(FString& OutReport)
         Page->RefreshFromSubsystem();
     }
 
-    const bool bSettingsActive = Switcher && Switcher->GetActiveWidgetIndex() == SettingsPageIndex;
+    const int32 ActiveIndex = DockRoot
+        ? static_cast<int32>(DockRoot->GetActiveTab())
+        : (Switcher ? Switcher->GetActiveWidgetIndex() : INDEX_NONE);
+    const int32 ExpectedSettingsIndex = DockRoot
+        ? static_cast<int32>(ERIInspectorTab::Settings)
+        : SettingsPageIndex;
+    const bool bSettingsActive = DockRoot
+        ? DockRoot->GetActiveTab() == ERIInspectorTab::Settings
+        : Switcher && ActiveIndex == SettingsPageIndex;
     const bool bFooterOk = Page && Page->HasFooterControls();
     const bool bInteractionOk = Page && Page->HasInteractionSection();
     const bool bThemeChanged = GetThemePreset() == AlternatePreset
@@ -18406,8 +18417,8 @@ bool UInspectorWorldSubsystem::RunThemePresetPreviewSelfTest(FString& OutReport)
         bRefreshScheduled ? 1 : 0,
         bThemeChanged ? 1 : 0,
         bThemeRestored ? 1 : 0,
-        Switcher ? Switcher->GetActiveWidgetIndex() : INDEX_NONE,
-        SettingsPageIndex,
+        ActiveIndex,
+        ExpectedSettingsIndex,
         bHostContainsPage ? 1 : 0,
         VisibleLegacySiblingCount,
         bFooterOk ? 1 : 0,
