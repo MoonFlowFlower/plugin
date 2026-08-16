@@ -9,6 +9,8 @@ param(
     [string]$ValidationRoot = "",
     [string]$SourceContractReportPath = "",
     [string]$CompiledContractReportPath = "",
+    [ValidateRange(1, 64)]
+    [int]$MaxParallelActions = 4,
     [switch]$NoHostPlatform,
     [switch]$SkipProjectEditorBuild,
     [switch]$KeepValidationOutput,
@@ -311,14 +313,26 @@ if ($BundledDotNetExe -and (Test-Path -LiteralPath $AutomationToolDll -PathType 
     }
 }
 
-$UatProcess = Start-Process `
-    -FilePath $LaunchFilePath `
-    -ArgumentList $LaunchArguments `
-    -NoNewWindow `
-    -Wait `
-    -PassThru `
-    -RedirectStandardOutput $StdOutLogPath `
-    -RedirectStandardError $StdErrLogPath
+$MaxParallelEnvName = "UnrealBuildTool_BuildConfiguration__MaxParallelActions"
+$PreviousMaxParallelActions = [Environment]::GetEnvironmentVariable($MaxParallelEnvName, "Process")
+try {
+    # BuildPlugin does not expose arbitrary UBT arguments in UE 5.7. Use UBT's
+    # documented environment-to-XML bridge so only this UAT process and its
+    # children inherit the validation concurrency cap.
+    [Environment]::SetEnvironmentVariable($MaxParallelEnvName, $MaxParallelActions.ToString(), "Process")
+    Write-Host "BuildPlugin UBT MaxParallelActions: $MaxParallelActions"
+
+    $UatProcess = Start-Process `
+        -FilePath $LaunchFilePath `
+        -ArgumentList $LaunchArguments `
+        -NoNewWindow `
+        -Wait `
+        -PassThru `
+        -RedirectStandardOutput $StdOutLogPath `
+        -RedirectStandardError $StdErrLogPath
+} finally {
+    [Environment]::SetEnvironmentVariable($MaxParallelEnvName, $PreviousMaxParallelActions, "Process")
+}
 
 New-Item -ItemType File -Force -Path $LogPath | Out-Null
 if (Test-Path -LiteralPath $StdOutLogPath) {
