@@ -31,8 +31,11 @@ namespace
     static const FName RI_RemoteCompareMatrixId_Default(TEXT("mainline_remote_session_compare_matrix_default"));
     static constexpr int32 RI_RemoteExpectedExternalProtocolVersion = 1;
     static constexpr TCHAR RI_RemoteExternalHost[] = TEXT("127.0.0.1");
-    static constexpr int32 RI_RemoteExternalMinPort = 9897;
-    static constexpr int32 RI_RemoteExternalMaxPort = 9901;
+    // Keep this discovery range aligned with RunPackagedRuntimeValidation.ps1.
+    // The packaged runtime bridge deliberately uses a range separate from the
+    // editor bridge so both authorities can run at the same time.
+    static constexpr int32 RI_RemoteExternalMinPort = 12097;
+    static constexpr int32 RI_RemoteExternalMaxPort = 12101;
     static constexpr double RI_RemoteExternalProbeCacheSeconds = 15.0;
     static constexpr double RI_RemoteTargetQueryCacheSeconds = 5.0;
     static constexpr double RI_RemoteExternalDefaultTimeoutSeconds = 1.5;
