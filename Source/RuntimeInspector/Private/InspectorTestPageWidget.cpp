@@ -1774,23 +1774,28 @@ bool UInspectorTestPageWidget::RunSingleWorkflow(FName WorkflowId)
     const bool bRunOnExplicitSession = !SelectedRemoteSessionId.IsEmpty() && !RI_IsLocalRuntimeSessionId(SelectedRemoteSessionId);
 
     bool bPassed = false;
+    FRIWorkflowRunResult WorkflowRunResult;
     if (bRunOnExplicitSession)
     {
         FString Error;
-        bPassed = InspectorSubsystem->RunWorkflowOnRuntimeSession(SelectedRemoteSessionId, WorkflowId, ActorQuery, LastWorkflowRunResult, Error);
-        if (!bPassed && LastWorkflowRunResult.Summary.IsEmpty() && !Error.IsEmpty())
+        bPassed = InspectorSubsystem->RunWorkflowOnRuntimeSession(SelectedRemoteSessionId, WorkflowId, ActorQuery, WorkflowRunResult, Error);
+        if (!bPassed && WorkflowRunResult.Summary.IsEmpty() && !Error.IsEmpty())
         {
-            LastWorkflowRunResult.WorkflowId = WorkflowId;
-            LastWorkflowRunResult.DisplayName = WorkflowId.ToString();
-            LastWorkflowRunResult.Summary = Error;
-            LastWorkflowRunResult.FullReport = Error;
+            WorkflowRunResult.WorkflowId = WorkflowId;
+            WorkflowRunResult.DisplayName = WorkflowId.ToString();
+            WorkflowRunResult.Summary = Error;
+            WorkflowRunResult.FullReport = Error;
         }
     }
     else
     {
-        bPassed = InspectorSubsystem->RunWorkflowById(WorkflowId, LastWorkflowRunResult);
+        bPassed = InspectorSubsystem->RunWorkflowById(WorkflowId, WorkflowRunResult);
     }
 
+    // Workflow actions can reopen or refresh the Tools page while execution is
+    // still on the stack. Keep the in-flight result off the widget so a
+    // re-entrant RefreshFromSubsystem cannot reset the referenced payload.
+    LastWorkflowRunResult = MoveTemp(WorkflowRunResult);
     bRunning = false;
     AvailableWorkflows = InspectorSubsystem->GetAvailableWorkflows();
     AvailableTests = InspectorSubsystem->GetAvailableSelfTests();
