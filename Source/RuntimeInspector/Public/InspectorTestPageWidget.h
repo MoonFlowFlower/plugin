@@ -15,6 +15,34 @@ class UScrollBox;
 class UTextBlock;
 class UEditableTextBox;
 class UVerticalBox;
+class UInspectorTestPageWidget;
+
+enum class ERIInspectorTestPageButtonAction : uint8
+{
+    SelectWorkflow,
+    RunWorkflow,
+    SelectSelfTest,
+    RunSelfTest,
+    ViewSelfTestResult
+};
+
+/** Retains the configured id for a dynamically generated Tools-row button. */
+UCLASS(Transient)
+class RUNTIMEINSPECTOR_API UInspectorTestPageButtonBinding : public UObject
+{
+    GENERATED_BODY()
+
+public:
+    void Initialize(UInspectorTestPageWidget* InOwner, FName InItemId, ERIInspectorTestPageButtonAction InAction);
+
+    UFUNCTION()
+    void HandleClicked();
+
+private:
+    TWeakObjectPtr<UInspectorTestPageWidget> Owner;
+    FName ItemId = NAME_None;
+    ERIInspectorTestPageButtonAction Action = ERIInspectorTestPageButtonAction::SelectWorkflow;
+};
 
 namespace RICompactUI
 {
@@ -33,6 +61,9 @@ public:
     int32 GetRenderedWorkflowRowCount() const;
     bool HasWorkflowSelectionRow() const;
     bool HasRenderedWorkflowRow(FName WorkflowId) const;
+    int32 GetConfiguredActionBindingCountForAutomation() const { return ConfiguredActionBindings.Num(); }
+    int32 GetExpectedActionBindingCountForAutomation() const { return (AvailableWorkflows.Num() * 2) + (AvailableTests.Num() * 2) + Results.Num(); }
+    bool HasCompleteActionBindingsForAutomation() const;
     FString GetSelectedWorkflowLabel() const { return SelectedWorkflowValueText ? SelectedWorkflowValueText->GetText().ToString() : FString(); }
     FString GetSelectedRemoteSessionLabel() const { return SelectedRemoteSessionValueText ? SelectedRemoteSessionValueText->GetText().ToString() : FString(); }
     FString GetRemoteSessionWorkflowValue() const { return RemoteSessionWorkflowBox ? RemoteSessionWorkflowBox->GetText().ToString() : FString(); }
@@ -469,6 +500,9 @@ private:
 
     UPROPERTY(Transient, meta = (BindWidgetOptional))
     UButton* ActivityLogClearButton = nullptr;
+
+    UPROPERTY(Transient)
+    TArray<TObjectPtr<UInspectorTestPageButtonBinding>> ConfiguredActionBindings;
 
     bool bTestsSectionExpanded = false;
     bool bRemoteSectionExpanded = false;

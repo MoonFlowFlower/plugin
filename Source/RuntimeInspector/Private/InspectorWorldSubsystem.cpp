@@ -21351,6 +21351,9 @@ bool UInspectorWorldSubsystem::RunTestPageLayoutSelfTest(FString& OutReport)
     const bool bDiagnosticsSectionOk = Page && Page->HasDiagnosticsSection();
     const bool bActivityLogSectionOk = Page && Page->HasActivityLogSection();
     const bool bRemoteOverrideOk = Page && Page->HasRemoteOverrideSection();
+    const int32 ConfiguredActionBindingCount = Page ? Page->GetConfiguredActionBindingCountForAutomation() : 0;
+    const int32 ExpectedActionBindingCount = Page ? Page->GetExpectedActionBindingCountForAutomation() : 0;
+    const bool bConfiguredActionBindingsOk = Page && Page->HasCompleteActionBindingsForAutomation();
     const bool bTestsCollapsedOk = Page && !Page->IsTestsSectionExpanded();
     const bool bRemoteCollapsedOk = Page && !Page->IsRemoteSessionSectionExpanded();
     const bool bDiagnosticsCollapsedOk = Page && !Page->IsDiagnosticsSectionExpanded();
@@ -21366,10 +21369,11 @@ bool UInspectorWorldSubsystem::RunTestPageLayoutSelfTest(FString& OutReport)
         && VisibleLegacySiblingCount == 0
         && bPageScrollOk && bTouchScrollOk && bRemoteSectionOk && bWorkflowSectionOk && bTestsSectionOk && bReportSectionOk
         && bDiagnosticsSectionOk && bActivityLogSectionOk && bRemoteOverrideOk
+        && bConfiguredActionBindingsOk
         && bTestsCollapsedOk && bRemoteCollapsedOk && bDiagnosticsCollapsedOk && bActivityLogCollapsedOk && bOverrideCollapsedOk;
 
     OutReport = FString::Printf(
-        TEXT("TestPageLayoutSelfTest=%s | ActiveIndex=%d Host=%s HostHasPage=%d VisibleLegacy=%d Scroll=%d Touch=%d Remote=%d Diagnostics=%d Activity=%d Override=%d Workflows=%d Tests=%d Report=%d Collapsed=%d/%d/%d/%d/%d LegacyNames=%s"),
+        TEXT("TestPageLayoutSelfTest=%s | ActiveIndex=%d Host=%s HostHasPage=%d VisibleLegacy=%d Scroll=%d Touch=%d Remote=%d Diagnostics=%d Activity=%d Override=%d Workflows=%d Tests=%d Report=%d ActionBindings=%d/%d BindingsOk=%d Collapsed=%d/%d/%d/%d/%d LegacyNames=%s"),
         bPassed ? TEXT("PASS") : TEXT("FAIL"),
         ActiveIndex,
         HostPanel ? *HostPanel->GetName() : TEXT("None"),
@@ -21384,6 +21388,9 @@ bool UInspectorWorldSubsystem::RunTestPageLayoutSelfTest(FString& OutReport)
         bWorkflowSectionOk ? 1 : 0,
         bTestsSectionOk ? 1 : 0,
         bReportSectionOk ? 1 : 0,
+        ConfiguredActionBindingCount,
+        ExpectedActionBindingCount,
+        bConfiguredActionBindingsOk ? 1 : 0,
         bTestsCollapsedOk ? 1 : 0,
         bRemoteCollapsedOk ? 1 : 0,
         bDiagnosticsCollapsedOk ? 1 : 0,

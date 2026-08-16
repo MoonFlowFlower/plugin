@@ -112,10 +112,63 @@ namespace
     }
 }
 
+void UInspectorTestPageButtonBinding::Initialize(
+    UInspectorTestPageWidget* InOwner,
+    FName InItemId,
+    ERIInspectorTestPageButtonAction InAction)
+{
+    Owner = InOwner;
+    ItemId = InItemId;
+    Action = InAction;
+}
+
+void UInspectorTestPageButtonBinding::HandleClicked()
+{
+    UInspectorTestPageWidget* Page = Owner.Get();
+    if (!Page || ItemId == NAME_None)
+    {
+        return;
+    }
+
+    switch (Action)
+    {
+    case ERIInspectorTestPageButtonAction::SelectWorkflow:
+        Page->HandleWorkflowSelected(ItemId);
+        break;
+    case ERIInspectorTestPageButtonAction::RunWorkflow:
+        Page->HandleWorkflowRunRequested(ItemId);
+        break;
+    case ERIInspectorTestPageButtonAction::SelectSelfTest:
+        Page->HandleSelfTestSelected(ItemId);
+        break;
+    case ERIInspectorTestPageButtonAction::RunSelfTest:
+        Page->HandleSelfTestRunRequested(ItemId);
+        break;
+    case ERIInspectorTestPageButtonAction::ViewSelfTestResult:
+        Page->HandleSelfTestResultSelected(ItemId);
+        break;
+    default:
+        break;
+    }
+}
+
 UInspectorTestPageWidget::UInspectorTestPageWidget(const FObjectInitializer& ObjectInitializer)
     : Super(ObjectInitializer)
 {
     SetIsFocusable(false);
+}
+
+bool UInspectorTestPageWidget::HasCompleteActionBindingsForAutomation() const
+{
+    if (ConfiguredActionBindings.Num() != GetExpectedActionBindingCountForAutomation())
+    {
+        return false;
+    }
+
+    return !ConfiguredActionBindings.ContainsByPredicate([](const UInspectorTestPageButtonBinding* Binding)
+    {
+        return !IsValid(Binding);
+    });
 }
 
 bool UInspectorTestPageWidget::HasTouchScrollSupportForAutomation() const
@@ -1521,6 +1574,10 @@ void UInspectorTestPageWidget::UpdateUIFromState()
         SelectedResultReportText->SetColorAndOpacity(FSlateColor(RI_TestMutedTextColor()));
     }
 
+    // The dynamic row widgets are replaced as one synchronous batch below.
+    // Drop the previous payload proxies first, then retain exactly one proxy
+    // for every configured Select/Run/View button created by the new rows.
+    ConfiguredActionBindings.Reset();
     RebuildAvailableWorkflows();
     RebuildAvailableTests();
     RebuildResults();
@@ -1750,95 +1807,10 @@ void UInspectorTestPageWidget::BindSelectWorkflowButton(UButton* Button, FName W
         return;
     }
 
-    Button->OnClicked.RemoveAll(this);
-    if (WorkflowId == RI_WorkflowIdSafePatch)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleSelectSafePatchWorkflowClicked);
-    }
-    else if (WorkflowId == RI_WorkflowIdPromote)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleSelectPromoteWorkflowClicked);
-    }
-    else if (WorkflowId == RI_WorkflowIdActorPatch)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleSelectActorPatchWorkflowClicked);
-    }
-    else if (WorkflowId == RI_WorkflowIdActorPromote)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleSelectActorPromoteWorkflowClicked);
-    }
-    else if (WorkflowId == RI_WorkflowIdActorApply)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleSelectActorApplyWorkflowClicked);
-    }
-    else if (WorkflowId == RI_WorkflowIdActorEndToEnd)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleSelectActorEndToEndWorkflowClicked);
-    }
-    else if (WorkflowId == RI_WorkflowIdFullClosure)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleSelectFullClosureWorkflowClicked);
-    }
-    else if (WorkflowId == RI_WorkflowIdRemotePackagedFoundation)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleSelectRemotePackagedFoundationWorkflowClicked);
-    }
-    else if (WorkflowId == RI_WorkflowIdRemotePackagedPatchPull)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleSelectRemotePackagedPatchPullWorkflowClicked);
-    }
-    else if (WorkflowId == RI_WorkflowIdRemotePackagedToSourceClosure)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleSelectRemotePackagedToSourceClosureWorkflowClicked);
-    }
-    else if (WorkflowId == RI_WorkflowIdRemotePackagedMatrix)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleSelectRemotePackagedMatrixWorkflowClicked);
-    }
-    else if (WorkflowId == RI_WorkflowIdRemoteActorEndToEnd)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleSelectRemoteActorEndToEndWorkflowClicked);
-    }
-    else if (WorkflowId == RI_WorkflowIdRoleCompareFoundation)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleSelectRoleCompareFoundationWorkflowClicked);
-    }
-    else if (WorkflowId == RI_WorkflowIdRemoteRuntimeFoundation)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleSelectRemoteRuntimeFoundationWorkflowClicked);
-    }
-    else if (WorkflowId == RI_WorkflowIdRemoteSessionCompareFoundation)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleSelectRemoteSessionCompareWorkflowClicked);
-    }
-    else if (WorkflowId == RI_WorkflowIdRemoteSessionTargetSetCompareFoundation)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleSelectRemoteSessionTargetSetCompareWorkflowClicked);
-    }
-    else if (WorkflowId == RI_WorkflowIdRemoteSessionCompareUIFoundation)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleSelectRemoteSessionCompareUIWorkflowClicked);
-    }
-    else if (WorkflowId == RI_WorkflowIdRemoteSessionCompareScopedUIFoundation)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleSelectRemoteSessionCompareScopedUIWorkflowClicked);
-    }
-    else if (WorkflowId == RI_WorkflowIdRemoteSessionCompareMatrixFoundation)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleSelectRemoteSessionCompareMatrixWorkflowClicked);
-    }
-    else if (WorkflowId == RI_WorkflowIdRemoteSessionContextUIFoundation)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleSelectRemoteSessionContextUIWorkflowClicked);
-    }
-    else if (WorkflowId == RI_WorkflowIdRemoteWorkflowMatrixFoundation)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleSelectRemoteWorkflowMatrixWorkflowClicked);
-    }
-    else
-    {
-        Button->SetIsEnabled(false);
-    }
+    UInspectorTestPageButtonBinding* Binding = NewObject<UInspectorTestPageButtonBinding>(this);
+    Binding->Initialize(this, WorkflowId, ERIInspectorTestPageButtonAction::SelectWorkflow);
+    Button->OnClicked.AddDynamic(Binding, &UInspectorTestPageButtonBinding::HandleClicked);
+    ConfiguredActionBindings.Add(Binding);
 }
 
 void UInspectorTestPageWidget::BindRunWorkflowButton(UButton* Button, FName WorkflowId)
@@ -1848,95 +1820,10 @@ void UInspectorTestPageWidget::BindRunWorkflowButton(UButton* Button, FName Work
         return;
     }
 
-    Button->OnClicked.RemoveAll(this);
-    if (WorkflowId == RI_WorkflowIdSafePatch)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleRunSafePatchWorkflowClicked);
-    }
-    else if (WorkflowId == RI_WorkflowIdPromote)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleRunPromoteWorkflowClicked);
-    }
-    else if (WorkflowId == RI_WorkflowIdActorPatch)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleRunActorPatchWorkflowClicked);
-    }
-    else if (WorkflowId == RI_WorkflowIdActorPromote)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleRunActorPromoteWorkflowClicked);
-    }
-    else if (WorkflowId == RI_WorkflowIdActorApply)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleRunActorApplyWorkflowClicked);
-    }
-    else if (WorkflowId == RI_WorkflowIdActorEndToEnd)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleRunActorEndToEndWorkflowClicked);
-    }
-    else if (WorkflowId == RI_WorkflowIdFullClosure)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleRunFullClosureWorkflowClicked);
-    }
-    else if (WorkflowId == RI_WorkflowIdRemotePackagedFoundation)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleRunRemotePackagedFoundationWorkflowClicked);
-    }
-    else if (WorkflowId == RI_WorkflowIdRemotePackagedPatchPull)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleRunRemotePackagedPatchPullWorkflowClicked);
-    }
-    else if (WorkflowId == RI_WorkflowIdRemotePackagedToSourceClosure)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleRunRemotePackagedToSourceClosureWorkflowClicked);
-    }
-    else if (WorkflowId == RI_WorkflowIdRemotePackagedMatrix)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleRunRemotePackagedMatrixWorkflowClicked);
-    }
-    else if (WorkflowId == RI_WorkflowIdRemoteActorEndToEnd)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleRunRemoteActorEndToEndWorkflowClicked);
-    }
-    else if (WorkflowId == RI_WorkflowIdRoleCompareFoundation)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleRunRoleCompareFoundationWorkflowClicked);
-    }
-    else if (WorkflowId == RI_WorkflowIdRemoteRuntimeFoundation)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleRunRemoteRuntimeFoundationWorkflowClicked);
-    }
-    else if (WorkflowId == RI_WorkflowIdRemoteSessionCompareFoundation)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleRunRemoteSessionCompareWorkflowClicked);
-    }
-    else if (WorkflowId == RI_WorkflowIdRemoteSessionTargetSetCompareFoundation)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleRunRemoteSessionTargetSetCompareWorkflowClicked);
-    }
-    else if (WorkflowId == RI_WorkflowIdRemoteSessionCompareUIFoundation)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleRunRemoteSessionCompareUIWorkflowClicked);
-    }
-    else if (WorkflowId == RI_WorkflowIdRemoteSessionCompareScopedUIFoundation)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleRunRemoteSessionCompareScopedUIWorkflowClicked);
-    }
-    else if (WorkflowId == RI_WorkflowIdRemoteSessionCompareMatrixFoundation)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleRunRemoteSessionCompareMatrixWorkflowClicked);
-    }
-    else if (WorkflowId == RI_WorkflowIdRemoteSessionContextUIFoundation)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleRunRemoteSessionContextUIWorkflowClicked);
-    }
-    else if (WorkflowId == RI_WorkflowIdRemoteWorkflowMatrixFoundation)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleRunRemoteWorkflowMatrixWorkflowClicked);
-    }
-    else
-    {
-        Button->SetIsEnabled(false);
-    }
+    UInspectorTestPageButtonBinding* Binding = NewObject<UInspectorTestPageButtonBinding>(this);
+    Binding->Initialize(this, WorkflowId, ERIInspectorTestPageButtonAction::RunWorkflow);
+    Button->OnClicked.AddDynamic(Binding, &UInspectorTestPageButtonBinding::HandleClicked);
+    ConfiguredActionBindings.Add(Binding);
 }
 
 void UInspectorTestPageWidget::BindSelectTestButton(UButton* Button, FName TestId)
@@ -1946,23 +1833,10 @@ void UInspectorTestPageWidget::BindSelectTestButton(UButton* Button, FName TestI
         return;
     }
 
-    Button->OnClicked.RemoveAll(this);
-    if (TestId == RI_TestIdConfirmDialog)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleSelectConfirmDialogClicked);
-    }
-    else if (TestId == RI_TestIdSettingsPreview)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleSelectSettingsPreviewClicked);
-    }
-    else if (TestId == RI_TestIdSettingsHotkey)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleSelectSettingsHotkeyClicked);
-    }
-    else
-    {
-        Button->SetIsEnabled(false);
-    }
+    UInspectorTestPageButtonBinding* Binding = NewObject<UInspectorTestPageButtonBinding>(this);
+    Binding->Initialize(this, TestId, ERIInspectorTestPageButtonAction::SelectSelfTest);
+    Button->OnClicked.AddDynamic(Binding, &UInspectorTestPageButtonBinding::HandleClicked);
+    ConfiguredActionBindings.Add(Binding);
 }
 
 void UInspectorTestPageWidget::BindRunTestButton(UButton* Button, FName TestId)
@@ -1972,23 +1846,10 @@ void UInspectorTestPageWidget::BindRunTestButton(UButton* Button, FName TestId)
         return;
     }
 
-    Button->OnClicked.RemoveAll(this);
-    if (TestId == RI_TestIdConfirmDialog)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleRunConfirmDialogClicked);
-    }
-    else if (TestId == RI_TestIdSettingsPreview)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleRunSettingsPreviewClicked);
-    }
-    else if (TestId == RI_TestIdSettingsHotkey)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleRunSettingsHotkeyClicked);
-    }
-    else
-    {
-        Button->SetIsEnabled(false);
-    }
+    UInspectorTestPageButtonBinding* Binding = NewObject<UInspectorTestPageButtonBinding>(this);
+    Binding->Initialize(this, TestId, ERIInspectorTestPageButtonAction::RunSelfTest);
+    Button->OnClicked.AddDynamic(Binding, &UInspectorTestPageButtonBinding::HandleClicked);
+    ConfiguredActionBindings.Add(Binding);
 }
 
 void UInspectorTestPageWidget::BindResultViewButton(UButton* Button, FName TestId)
@@ -1998,23 +1859,10 @@ void UInspectorTestPageWidget::BindResultViewButton(UButton* Button, FName TestI
         return;
     }
 
-    Button->OnClicked.RemoveAll(this);
-    if (TestId == RI_TestIdConfirmDialog)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleViewConfirmDialogResultClicked);
-    }
-    else if (TestId == RI_TestIdSettingsPreview)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleViewSettingsPreviewResultClicked);
-    }
-    else if (TestId == RI_TestIdSettingsHotkey)
-    {
-        Button->OnClicked.AddDynamic(this, &UInspectorTestPageWidget::HandleViewSettingsHotkeyResultClicked);
-    }
-    else
-    {
-        Button->SetIsEnabled(false);
-    }
+    UInspectorTestPageButtonBinding* Binding = NewObject<UInspectorTestPageButtonBinding>(this);
+    Binding->Initialize(this, TestId, ERIInspectorTestPageButtonAction::ViewSelfTestResult);
+    Button->OnClicked.AddDynamic(Binding, &UInspectorTestPageButtonBinding::HandleClicked);
+    ConfiguredActionBindings.Add(Binding);
 }
 
 FText UInspectorTestPageWidget::GetSelectedWorkflowDisplayText() const
