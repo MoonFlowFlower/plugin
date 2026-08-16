@@ -972,14 +972,27 @@ static void RI_WriteEditableSettingsToConfigFile(const FRIEditableSettings& InSe
     GConfig->SetFloat(*Section, TEXT("UIScale"), InSettings.UIScale, Filename);
 }
 
-static void RI_LoadSettingsFromConfigAuthority(URuntimeInspectorSettings* Settings)
+static void RI_LoadSettingsFromConfigAuthority(
+    URuntimeInspectorSettings* Settings,
+    const TArray<FString>* AuthorityFilesOverride = nullptr,
+    bool bLoadClassConfig = true)
 {
     if (!Settings)
     {
         return;
     }
 
-    const TArray<FString> AuthorityFiles = RI_CollectSettingsAuthorityFiles(Settings);
+    const TArray<FString> AuthorityFiles = AuthorityFilesOverride
+        ? *AuthorityFilesOverride
+        : RI_CollectSettingsAuthorityFiles(Settings);
+
+    // LoadConfig only overwrites keys that exist. Reset the settings that can be
+    // preview-mutated at runtime first, otherwise a project with no RuntimeInspector
+    // config section inherits the last preview/self-test values from the mutable CDO.
+    const FRIEditableSettings BuiltInDefaults;
+    RI_ApplyEditableSettingsToRuntimeInspectorSettings(Settings, BuiltInDefaults);
+    Settings->ThemePreset = ERuntimeInspectorThemePreset::StudioSlate;
+
     if (GConfig)
     {
         for (const FString& AuthorityFile : AuthorityFiles)
@@ -991,7 +1004,10 @@ static void RI_LoadSettingsFromConfigAuthority(URuntimeInspectorSettings* Settin
         }
     }
 
-    Settings->LoadConfig();
+    if (bLoadClassConfig)
+    {
+        Settings->LoadConfig();
+    }
 
     FRIEditableSettings EditableSettings = RI_MakeEditableSettings(Settings);
     for (const FString& AuthorityFile : AuthorityFiles)
@@ -18078,12 +18094,14 @@ bool UInspectorWorldSubsystem::RunSettingsHotkeyRebindSelfTest(FString& OutRepor
     }
 
     ReloadSettingsFromConfig();
+    const FRIEditableSettings RestoredSettings = GetEditableSettings();
+    const bool bRestoredValues = RI_AreEditableSettingsEqual(RestoredSettings, OriginalSettings);
     bool bRestoredOriginal = false;
     if (InspectorInputComponent)
     {
         for (const FInputKeyBinding& Binding : InspectorInputComponent->KeyBindings)
         {
-            if (Binding.Chord.Key == LastSavedSettingsSnapshot.ToggleKey)
+            if (Binding.Chord.Key == OriginalToggle)
             {
                 bRestoredOriginal = true;
                 break;
@@ -18091,15 +18109,42 @@ bool UInspectorWorldSubsystem::RunSettingsHotkeyRebindSelfTest(FString& OutRepor
         }
     }
 
-    const bool bPassed = bHasNewBinding && !bHasOldBinding && bRestoredOriginal;
+    bool bMissingConfigFallback = false;
+    FKey MissingConfigReloadedToggle = EKeys::Invalid;
+    FString MissingConfigError;
+    if (PreviewApplySettings(PreviewSettings, MissingConfigError))
+    {
+        const TArray<FString> NoAuthorityFiles;
+        if (URuntimeInspectorSettings* Settings = GetMutableDefault<URuntimeInspectorSettings>())
+        {
+            RI_LoadSettingsFromConfigAuthority(Settings, &NoAuthorityFiles, false);
+            const FRIEditableSettings MissingConfigReloadedSettings = GetEditableSettings();
+            const FRIEditableSettings BuiltInDefaults;
+            MissingConfigReloadedToggle = MissingConfigReloadedSettings.ToggleKey;
+            bMissingConfigFallback = RI_AreEditableSettingsEqual(MissingConfigReloadedSettings, BuiltInDefaults);
+        }
+
+        ReloadSettingsFromConfig();
+    }
+
+    const bool bPassed = bHasNewBinding
+        && !bHasOldBinding
+        && bRestoredValues
+        && bRestoredOriginal
+        && bMissingConfigFallback;
     OutReport = FString::Printf(
-        TEXT("SettingsHotkeySelfTest=%s | Old=%s New=%s NewBinding=%s OldBinding=%s Restored=%s"),
+        TEXT("SettingsHotkeySelfTest=%s | Old=%s New=%s Reloaded=%s MissingConfigReloaded=%s NewBinding=%s OldBinding=%s RestoredValues=%s RestoredBinding=%s MissingConfigFallback=%s MissingConfigError=%s"),
         bPassed ? TEXT("PASS") : TEXT("FAIL"),
         *OriginalToggle.GetDisplayName().ToString(),
         *CandidateToggle.GetDisplayName().ToString(),
+        *RestoredSettings.ToggleKey.GetDisplayName().ToString(),
+        *MissingConfigReloadedToggle.GetDisplayName().ToString(),
         bHasNewBinding ? TEXT("yes") : TEXT("no"),
         bHasOldBinding ? TEXT("yes") : TEXT("no"),
-        bRestoredOriginal ? TEXT("yes") : TEXT("no"));
+        bRestoredValues ? TEXT("yes") : TEXT("no"),
+        bRestoredOriginal ? TEXT("yes") : TEXT("no"),
+        bMissingConfigFallback ? TEXT("yes") : TEXT("no"),
+        MissingConfigError.IsEmpty() ? TEXT("none") : *MissingConfigError);
     return bPassed;
 #endif
 }
