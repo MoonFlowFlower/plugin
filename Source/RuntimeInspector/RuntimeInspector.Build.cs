@@ -48,6 +48,7 @@ public class RuntimeInspector : ModuleRules
                 "ApplicationCore",
                 "ImageCore",
                 "Networking",
+                "Projects",
                 "RenderCore",
                 "Sockets"
             }

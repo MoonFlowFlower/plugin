@@ -85,6 +85,7 @@
 #include "GenericPlatform/GenericWindow.h"
 #include "ImageUtils.h"
 #include "Input/Events.h"
+#include "Interfaces/IPluginManager.h"
 #include "JsonObjectConverter.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -12948,9 +12949,20 @@ void UInspectorWorldSubsystem::HandleConfirmDialogHexCommitted(const FText& InTe
 
 namespace
 {
-    static FString RI_GetToolsConfigFilePath(const TCHAR* FileName)
+    static bool RI_TryGetToolsConfigFilePath(const TCHAR* FileName, FString& OutFilePath, FString& OutError)
     {
-        return FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectPluginsDir(), TEXT("RuntimeInspector"), TEXT("Config"), FileName));
+        OutFilePath.Reset();
+        OutError.Reset();
+
+        const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("RuntimeInspector"));
+        if (!Plugin.IsValid())
+        {
+            OutError = TEXT("Unable to locate the RuntimeInspector plugin through IPluginManager; tools definitions cannot be resolved.");
+            return false;
+        }
+
+        OutFilePath = FPaths::ConvertRelativePathToFull(FPaths::Combine(Plugin->GetBaseDir(), TEXT("Config"), FileName));
+        return true;
     }
 
     static FString RI_MakeToolExecutionKey(const TCHAR* Prefix, FName Id)
@@ -13046,8 +13058,10 @@ TArray<FRISelfTestTableRow> UInspectorWorldSubsystem::LoadConfiguredSelfTestRows
 
     TArray<FRISelfTestTableRow> JsonRows;
     {
+        FString ConfigPath;
         FString Error;
-        if (!RI_LoadRowsFromJsonFile(RI_GetToolsConfigFilePath(TEXT("ToolsSelfTestsDefault.json")), JsonRows, Error))
+        if (!RI_TryGetToolsConfigFilePath(TEXT("ToolsSelfTestsDefault.json"), ConfigPath, Error)
+            || !RI_LoadRowsFromJsonFile(ConfigPath, JsonRows, Error))
         {
             LogToolsDefinitionIssue(Error);
         }
@@ -13117,8 +13131,10 @@ TArray<FRIWorkflowTableRow> UInspectorWorldSubsystem::LoadConfiguredWorkflowRows
 
     TArray<FRIWorkflowTableRow> JsonRows;
     {
+        FString ConfigPath;
         FString Error;
-        if (!RI_LoadRowsFromJsonFile(RI_GetToolsConfigFilePath(TEXT("ToolsWorkflowsDefault.json")), JsonRows, Error))
+        if (!RI_TryGetToolsConfigFilePath(TEXT("ToolsWorkflowsDefault.json"), ConfigPath, Error)
+            || !RI_LoadRowsFromJsonFile(ConfigPath, JsonRows, Error))
         {
             LogToolsDefinitionIssue(Error);
         }
