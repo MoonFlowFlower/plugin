@@ -95,12 +95,12 @@ namespace RICompactUI
 
     struct FRIThemeMetrics
     {
-        int32 SectionTitleFontSize = 8;
-        int32 LabelFontSize = 7;
-        int32 ValueFontSize = 7;
-        int32 MutedFontSize = 6;
-        float ButtonHeight = 22.0f;
-        float InputHeight = 26.0f;
+        int32 SectionTitleFontSize = 12;
+        int32 LabelFontSize = 11;
+        int32 ValueFontSize = 11;
+        int32 MutedFontSize = 10;
+        float ButtonHeight = 28.0f;
+        float InputHeight = 28.0f;
         float CompactListHeight = 96.0f;
         float StandardListHeight = 120.0f;
         float CornerRadius = 4.0f;
@@ -185,8 +185,8 @@ namespace RICompactUI
         {
             FRIThemePresetTokens Tokens;
             Tokens.Metrics = {
-                9, 8, 7, 6,
-                24.0f, 24.0f, 96.0f, 122.0f,
+                12, 11, 11, 10,
+                28.0f, 28.0f, 96.0f, 122.0f,
                 5.0f, 1.0f,
                 FMargin(6.f, 4.f),
                 FMargin(0.f),
@@ -313,12 +313,12 @@ namespace RICompactUI
             Tokens.SuccessText = FLinearColor(0.52f, 0.88f, 0.68f, 1.0f);
             Tokens.WarningText = FLinearColor(0.96f, 0.79f, 0.40f, 1.0f);
             Tokens.ErrorText = FLinearColor(0.95f, 0.49f, 0.49f, 1.0f);
-            Tokens.Metrics.SectionTitleFontSize = 9;
-            Tokens.Metrics.LabelFontSize = 8;
-            Tokens.Metrics.ValueFontSize = 7;
-            Tokens.Metrics.MutedFontSize = 6;
-            Tokens.Metrics.ButtonHeight = 24.0f;
-            Tokens.Metrics.InputHeight = 24.0f;
+            Tokens.Metrics.SectionTitleFontSize = 12;
+            Tokens.Metrics.LabelFontSize = 11;
+            Tokens.Metrics.ValueFontSize = 11;
+            Tokens.Metrics.MutedFontSize = 10;
+            Tokens.Metrics.ButtonHeight = 28.0f;
+            Tokens.Metrics.InputHeight = 28.0f;
             Tokens.Metrics.CompactListHeight = 94.0f;
             Tokens.Metrics.StandardListHeight = 120.0f;
             Tokens.Metrics.SectionPadding = FMargin(5.f, 3.f);
@@ -374,7 +374,7 @@ namespace RICompactUI
 
     inline void SetReadableScaleOverride(float InScale)
     {
-        ReadableScaleOverride() = FMath::Clamp(InScale, 1.0f, 1.25f);
+        ReadableScaleOverride() = FMath::Clamp(InScale, 0.8f, 1.5f);
     }
 
     inline float GetReadableScaleOverride()
@@ -384,7 +384,7 @@ namespace RICompactUI
 
     inline int32 ScaleReadableFontSize(int32 BaseSize)
     {
-        return FMath::Max(BaseSize, FMath::RoundToInt(static_cast<float>(BaseSize) * GetReadableScaleOverride()));
+        return FMath::Max(1, FMath::RoundToInt(static_cast<float>(BaseSize) * GetReadableScaleOverride()));
     }
 
     inline int32 GetSectionTitleFontSize()
@@ -1700,7 +1700,6 @@ namespace RICompactUI
         float HeightOverride = 0.f,
         int32 FontSize = 0)
     {
-        const FRIThemeMetrics& Metrics = GetThemeMetrics();
         const int32 EffectiveFontSize = FontSize > 0 ? FontSize : GetLabelFontSize();
         UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), Name);
         USizeBox* SizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
@@ -1712,7 +1711,7 @@ namespace RICompactUI
         {
             SizeBox->SetMinDesiredWidth(72.f);
         }
-        SizeBox->SetHeightOverride(HeightOverride > 0.f ? HeightOverride : Metrics.ButtonHeight);
+        SizeBox->SetHeightOverride(HeightOverride > 0.f ? HeightOverride : GetButtonHeight());
         UTextBlock* LabelText = MakeText(WidgetTree, Label, EffectiveFontSize, true, GetButtonTextColor(Style));
         LabelText->SetJustification(ETextJustify::Center);
         SizeBox->SetContent(LabelText);
@@ -1783,7 +1782,7 @@ namespace RICompactUI
         UBorder* Border = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), Name);
         Border->SetPadding(Metrics.SectionPadding);
         Border->SetBrushColor(Palette.Background);
-        Border->SetContent(MakeText(WidgetTree, Label, GetSectionTitleFontSize(), true, Palette.Text));
+        Border->SetContent(MakeEllipsisText(WidgetTree, Label, GetSectionTitleFontSize(), true, Palette.Text));
         return Border;
     }
 

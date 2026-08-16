@@ -423,6 +423,7 @@ static const FName RI_SelfTestId_AuditReport(TEXT("audit_report"));
 static const FName RI_SelfTestId_FilePage(TEXT("file_page_injection"));
 static const FName RI_SelfTestId_ContextStrip(TEXT("context_strip"));
 static const FName RI_SelfTestId_DockLayout(TEXT("dock_layout"));
+static const FName RI_SelfTestId_UIReadability(TEXT("ui_readability"));
 static const FName RI_SelfTestId_RightInspectorTabs(TEXT("right_inspector_tabs"));
 static const FName RI_SelfTestId_ActorContextPanel(TEXT("actor_context_panel"));
 static const FName RI_SelfTestId_ActorAttributesSection(TEXT("actor_attributes_section"));
@@ -8221,7 +8222,7 @@ namespace
             Cell->SetContent(Box);
 
             if (UVerticalBoxSlot* LabelSlot = Box->AddChildToVerticalBox(
-                RICompactUI::MakeText(WidgetTree, Label, 4, true, RICompactUI::GetMutedTextColor())))
+                RICompactUI::MakeText(WidgetTree, Label, RICompactUI::GetMutedFontSize(), true, RICompactUI::GetMutedTextColor())))
             {
                 LabelSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 0.f));
             }
@@ -8247,7 +8248,7 @@ namespace
             Result.ActorText,
             0,
             0,
-            6,
+            RICompactUI::GetValueFontSize(),
             true,
             RICompactUI::GetContextPrimaryCellBackgroundColor());
         UWidget* UnusedCellWidget = nullptr;
@@ -8259,7 +8260,7 @@ namespace
             Result.ClassText,
             0,
             1,
-            5,
+            RICompactUI::GetValueFontSize(),
             false,
             RICompactUI::GetContextSecondaryCellBackgroundColor());
         AddCell(
@@ -8270,7 +8271,7 @@ namespace
             Result.SourceText,
             1,
             0,
-            5,
+            RICompactUI::GetValueFontSize(),
             false,
             RICompactUI::GetContextSecondaryCellBackgroundColor());
         AddCell(
@@ -8281,7 +8282,7 @@ namespace
             Result.StagedText,
             1,
             1,
-            6,
+            RICompactUI::GetValueFontSize(),
             true,
             RICompactUI::GetContextStatusCellBackgroundColor());
 
@@ -11592,10 +11593,16 @@ bool UInspectorWorldSubsystem::PreviewApplySettings(const FRIEditableSettings& I
         return false;
     }
 
+    const float PreviousUIScale = Settings->UIScale;
     RI_ApplyEditableSettingsToRuntimeInspectorSettings(Settings, InSettings);
 
     RebindInspectorKeys();
     RefreshOutlineRuntimeSettings();
+
+    if (!FMath::IsNearlyEqual(PreviousUIScale, Settings->UIScale, KINDA_SMALL_NUMBER))
+    {
+        ScheduleThemePreviewRefresh(GetVisiblePage());
+    }
 
     UpdateSettingsDirtyFlag();
     OutError.Reset();
@@ -11700,6 +11707,7 @@ void UInspectorWorldSubsystem::ReloadSettingsFromConfig()
     if (URuntimeInspectorSettings* Settings = GetMutableDefault<URuntimeInspectorSettings>())
     {
         const ERuntimeInspectorThemePreset PreviousThemePreset = Settings->ThemePreset;
+        const float PreviousUIScale = Settings->UIScale;
         RI_LoadSettingsFromConfigAuthority(Settings);
         RebindInspectorKeys();
         RefreshOutlineRuntimeSettings();
@@ -11707,7 +11715,8 @@ void UInspectorWorldSubsystem::ReloadSettingsFromConfig()
         LastSavedThemePresetSnapshot = GetThemePreset();
         UpdateSettingsDirtyFlag();
         LastAppliedThemePresetFingerprint = static_cast<int32>(RICompactUI::GetActiveThemePreset());
-        if (PreviousThemePreset != Settings->ThemePreset)
+        if (PreviousThemePreset != Settings->ThemePreset
+            || !FMath::IsNearlyEqual(PreviousUIScale, Settings->UIScale, KINDA_SMALL_NUMBER))
         {
             ScheduleThemePreviewRefresh(GetVisiblePage());
         }
@@ -13852,23 +13861,26 @@ bool UInspectorWorldSubsystem::ExecuteLegacyToolNativeBridgeAction(FName BridgeI
         float SideWidthPhysical = 0.0f;
         float SideWidthLogical = 0.0f;
         float CompactLeftPhysical = 0.0f;
+        float CompactLeftLogical = 0.0f;
         float ViewportScale = 0.0f;
         float ReadableScale = 0.0f;
         const bool bScaleMetricsPresent =
             ExtractSummaryFloat(TEXT("SideWidthPhysical="), SideWidthPhysical)
             && ExtractSummaryFloat(TEXT("SideWidthLogical="), SideWidthLogical)
             && ExtractSummaryFloat(TEXT("CompactLeftPhysical="), CompactLeftPhysical)
+            && ExtractSummaryFloat(TEXT("CompactLeftLogical="), CompactLeftLogical)
             && ExtractSummaryFloat(TEXT("ViewportScale="), ViewportScale)
             && ExtractSummaryFloat(TEXT("ReadableScale="), ReadableScale);
         const bool bReadableDockScaleOk = bScaleMetricsPresent
             && SideWidthPhysical >= 319.0f
-            && SideWidthPhysical <= 361.0f
-            && SideWidthLogical > 0.0f
+            && SideWidthLogical >= 215.0f
+            && FMath::Abs(SideWidthPhysical - (SideWidthLogical * ViewportScale)) <= 4.0f
             && CompactLeftPhysical >= 63.0f
-            && CompactLeftPhysical <= 65.0f
+            && CompactLeftLogical >= 40.0f
+            && FMath::Abs(CompactLeftPhysical - (CompactLeftLogical * ViewportScale)) <= 4.0f
             && ViewportScale > 0.0f
-            && ReadableScale >= 1.0f
-            && ReadableScale <= 1.25f;
+            && ReadableScale >= 0.8f
+            && ReadableScale <= 1.5f;
         bOutPassed = Summary.Contains(TEXT("DockRoot=1"))
             && Summary.Contains(TEXT("RightPanel=1"))
             && bReadableDockScaleOk
@@ -13889,6 +13901,223 @@ bool UInspectorWorldSubsystem::ExecuteLegacyToolNativeBridgeAction(FName BridgeI
             && Summary.Contains(TEXT("FunctionsFrame=1"))
             && Summary.Contains(TEXT("ActionBar=1"));
         OutReport = FString::Printf(TEXT("dock_layout=%s | %s"), bOutPassed ? TEXT("PASS") : TEXT("FAIL"), *Summary);
+        return true;
+    }
+
+    if (BridgeId == RI_SelfTestId_UIReadability)
+    {
+        if (!bOpen)
+        {
+            Open();
+        }
+
+        const ERIVisiblePage PreviousPage = GetVisiblePage();
+        const float PreviousReadableScale = RICompactUI::GetReadableScaleOverride();
+
+        RICompactUI::SetReadableScaleOverride(1.0f);
+        const int32 SectionTitleFont = RICompactUI::GetSectionTitleFontSize();
+        const int32 LabelFont = RICompactUI::GetLabelFontSize();
+        const int32 ValueFont = RICompactUI::GetValueFontSize();
+        const int32 MutedFont = RICompactUI::GetMutedFontSize();
+        const int32 TabFont = MutedFont + 1;
+        const float ButtonHeight = RICompactUI::GetButtonHeight();
+        const float InputHeight = RICompactUI::GetInputHeight();
+
+        RICompactUI::SetReadableScaleOverride(0.8f);
+        const bool bLowerScaleSupported = FMath::IsNearlyEqual(RICompactUI::GetReadableScaleOverride(), 0.8f, KINDA_SMALL_NUMBER);
+        RICompactUI::SetReadableScaleOverride(1.5f);
+        const bool bUpperScaleSupported = FMath::IsNearlyEqual(RICompactUI::GetReadableScaleOverride(), 1.5f, KINDA_SMALL_NUMBER);
+        RICompactUI::SetReadableScaleOverride(1.0f);
+
+        struct FReadabilityPageCheck
+        {
+            const TCHAR* Label;
+            ERIVisiblePage Page;
+        };
+
+        const FReadabilityPageCheck PageChecks[] = {
+            { TEXT("Actor"), ERIVisiblePage::Actor },
+            { TEXT("Changes"), ERIVisiblePage::Changes },
+            { TEXT("Settings"), ERIVisiblePage::Settings },
+            { TEXT("Tools"), ERIVisiblePage::Tools }
+        };
+
+        TArray<FString> PageReports;
+        bool bAllPagesReadable = true;
+        for (const FReadabilityPageCheck& PageCheck : PageChecks)
+        {
+            FString PageError;
+            const bool bPageSelected = SetVisiblePageByName(PageCheck.Label, PageError);
+            RefreshDockRootWidget();
+
+            int32 TextCount = 0;
+            int32 MinimumFont = MAX_int32;
+            int32 ScrollCount = 0;
+            int32 LayoutSampleCount = 0;
+            int32 SevereOverlapCount = 0;
+            TArray<FBox2D> TextBounds;
+            TSet<const UWidget*> VisitedWidgets;
+
+            TFunction<void(UWidget*, bool)> CollectVisibleWidget;
+            CollectVisibleWidget = [&](UWidget* Widget, bool bAncestorVisible)
+            {
+                if (!Widget || VisitedWidgets.Contains(Widget))
+                {
+                    return;
+                }
+                VisitedWidgets.Add(Widget);
+
+                const ESlateVisibility Visibility = Widget->GetVisibility();
+                const bool bWidgetVisible = bAncestorVisible
+                    && Visibility != ESlateVisibility::Collapsed
+                    && Visibility != ESlateVisibility::Hidden;
+                if (!bWidgetVisible)
+                {
+                    return;
+                }
+
+                if (UTextBlock* TextBlock = Cast<UTextBlock>(Widget))
+                {
+                    if (!TextBlock->GetText().IsEmpty())
+                    {
+                        ++TextCount;
+                        MinimumFont = FMath::Min(MinimumFont, TextBlock->GetFont().Size);
+
+                        const FGeometry Geometry = TextBlock->GetCachedGeometry();
+                        const FVector2D LocalSize = Geometry.GetLocalSize();
+                        // Page selection is synchronous while Slate arrangement is not. Do
+                        // not compare stale cached bounds from a page that has not painted
+                        // in the current frame; those produced transient false overlaps at
+                        // QHD. Structural font/scroll checks still cover every active page,
+                        // and the screenshot matrix covers painted page geometry.
+                        if (TextBlock->IsRendered() && LocalSize.X > 1.0f && LocalSize.Y > 1.0f)
+                        {
+                            const FVector2D AbsoluteMin = Geometry.LocalToAbsolute(FVector2D::ZeroVector);
+                            const FVector2D AbsoluteMax = Geometry.LocalToAbsolute(LocalSize);
+                            TextBounds.Emplace(AbsoluteMin, AbsoluteMax);
+                            ++LayoutSampleCount;
+                        }
+                    }
+                }
+                else if (Cast<UScrollBox>(Widget))
+                {
+                    ++ScrollCount;
+                }
+
+                if (UUserWidget* NestedUserWidget = Cast<UUserWidget>(Widget))
+                {
+                    if (NestedUserWidget->WidgetTree)
+                    {
+                        CollectVisibleWidget(NestedUserWidget->WidgetTree->RootWidget, bWidgetVisible);
+                    }
+                    return;
+                }
+
+                if (UWidgetSwitcher* Switcher = Cast<UWidgetSwitcher>(Widget))
+                {
+                    CollectVisibleWidget(Switcher->GetActiveWidget(), bWidgetVisible);
+                    return;
+                }
+
+                if (UPanelWidget* Panel = Cast<UPanelWidget>(Widget))
+                {
+                    for (int32 ChildIndex = 0; ChildIndex < Panel->GetChildrenCount(); ++ChildIndex)
+                    {
+                        CollectVisibleWidget(Panel->GetChildAt(ChildIndex), bWidgetVisible);
+                    }
+                }
+            };
+
+            if (UInspectorDockRootWidget* RootWidget = DockRootWidget.Get())
+            {
+                RootWidget->ForceLayoutPrepass();
+                CollectVisibleWidget(RootWidget, true);
+            }
+
+            for (int32 LeftIndex = 0; LeftIndex < TextBounds.Num(); ++LeftIndex)
+            {
+                const FBox2D& LeftBounds = TextBounds[LeftIndex];
+                const float LeftArea = LeftBounds.GetArea();
+                if (LeftArea <= 1.0f)
+                {
+                    continue;
+                }
+
+                for (int32 RightIndex = LeftIndex + 1; RightIndex < TextBounds.Num(); ++RightIndex)
+                {
+                    const FBox2D& RightBounds = TextBounds[RightIndex];
+                    const float RightArea = RightBounds.GetArea();
+                    if (RightArea <= 1.0f || !LeftBounds.Intersect(RightBounds))
+                    {
+                        continue;
+                    }
+
+                    const FVector2D IntersectionMin(
+                        FMath::Max(LeftBounds.Min.X, RightBounds.Min.X),
+                        FMath::Max(LeftBounds.Min.Y, RightBounds.Min.Y));
+                    const FVector2D IntersectionMax(
+                        FMath::Min(LeftBounds.Max.X, RightBounds.Max.X),
+                        FMath::Min(LeftBounds.Max.Y, RightBounds.Max.Y));
+                    const FVector2D IntersectionSize = IntersectionMax - IntersectionMin;
+                    const float IntersectionArea = FMath::Max(0.0f, IntersectionSize.X) * FMath::Max(0.0f, IntersectionSize.Y);
+                    const float SmallerArea = FMath::Min(LeftArea, RightArea);
+                    if (SmallerArea > 1.0f && IntersectionArea / SmallerArea >= 0.90f)
+                    {
+                        ++SevereOverlapCount;
+                    }
+                }
+            }
+
+            const bool bPageReadable = bPageSelected
+                && PageError.IsEmpty()
+                && TextCount > 0
+                && MinimumFont >= 10
+                && ScrollCount > 0
+                && SevereOverlapCount == 0;
+            bAllPagesReadable = bAllPagesReadable && bPageReadable;
+            PageReports.Add(FString::Printf(
+                TEXT("%s=%d Text=%d MinFont=%d Scroll=%d Geometry=%d SevereOverlap=%d%s"),
+                PageCheck.Label,
+                bPageReadable ? 1 : 0,
+                TextCount,
+                MinimumFont == MAX_int32 ? 0 : MinimumFont,
+                ScrollCount,
+                LayoutSampleCount,
+                SevereOverlapCount,
+                PageError.IsEmpty() ? TEXT("") : *FString::Printf(TEXT(" Error=%s"), *PageError)));
+        }
+
+        const bool bDefaultTokensReadable = SectionTitleFont >= 12
+            && LabelFont >= 11
+            && ValueFont >= 11
+            && MutedFont >= 10
+            && TabFont >= 10
+            && ButtonHeight >= 28.0f
+            && InputHeight >= 28.0f;
+        const bool bScaleRangeSupported = bLowerScaleSupported && bUpperScaleSupported;
+        bOutPassed = bDefaultTokensReadable && bScaleRangeSupported && bAllPagesReadable;
+        OutReport = FString::Printf(
+            TEXT("ui_readability=%s | Section=%d Label=%d Value=%d Muted=%d Tab=%d Button=%.1f Input=%.1f Scale08=%d Scale15=%d | %s"),
+            bOutPassed ? TEXT("PASS") : TEXT("FAIL"),
+            SectionTitleFont,
+            LabelFont,
+            ValueFont,
+            MutedFont,
+            TabFont,
+            ButtonHeight,
+            InputHeight,
+            bLowerScaleSupported ? 1 : 0,
+            bUpperScaleSupported ? 1 : 0,
+            *FString::Join(PageReports, TEXT(" | ")));
+
+        FString RestoreError;
+        SetVisiblePageByName(
+            PreviousPage == ERIVisiblePage::Actor ? TEXT("Actor") :
+            PreviousPage == ERIVisiblePage::Changes ? TEXT("Changes") :
+            PreviousPage == ERIVisiblePage::Settings ? TEXT("Settings") : TEXT("Tools"),
+            RestoreError);
+        RICompactUI::SetReadableScaleOverride(PreviousReadableScale);
+        RefreshDockRootWidget();
         return true;
     }
 
@@ -17902,9 +18131,12 @@ bool UInspectorWorldSubsystem::RunSettingsPageLayoutSelfTest(FString& OutReport)
     Close();
     OpenToPage(ERIVisiblePage::Settings);
 
-    UPanelWidget* HostPanel = FindSettingsHostPanel();
-    UInspectorSettingsPageWidget* Page = SettingsPageWidget.Get();
-    UWidgetSwitcher* Switcher = ContentSwitcher.Get();
+    UInspectorDockRootWidget* DockRoot = DockRootWidget.Get();
+    UInspectorSettingsPageWidget* Page = DockRoot ? DockRoot->GetHostedSettingsPage() : SettingsPageWidget.Get();
+    UPanelWidget* HostPanel = DockRoot
+        ? Cast<UPanelWidget>(Page ? Page->GetParent() : nullptr)
+        : FindSettingsHostPanel();
+    UWidgetSwitcher* Switcher = DockRoot ? nullptr : ContentSwitcher.Get();
 
     bool bHostContainsPage = false;
     int32 VisibleLegacySiblingCount = 0;
@@ -17946,13 +18178,18 @@ bool UInspectorWorldSubsystem::RunSettingsPageLayoutSelfTest(FString& OutReport)
     const bool bInteractionOk = Page && Page->HasInteractionSection();
     const FString SessionText = Page ? Page->GetSessionValueText() : FString();
     const FString ActorText = Page ? Page->GetSelectedActorValueText() : FString();
-    const int32 ActiveIndex = Switcher ? Switcher->GetActiveWidgetIndex() : INDEX_NONE;
+    const int32 ActiveIndex = DockRoot
+        ? static_cast<int32>(DockRoot->GetActiveTab())
+        : (Switcher ? Switcher->GetActiveWidgetIndex() : INDEX_NONE);
+    const bool bPageRouteOk = DockRoot
+        ? DockRoot->GetActiveTab() == ERIInspectorTab::Settings
+        : Switcher && ActiveIndex == SettingsPageIndex;
     const FRIEditableSettings AfterPageSettings = GetEditableSettings();
     const ERuntimeInspectorThemePreset AfterPageThemePreset = GetThemePreset();
     const bool bSettingsUnchanged = RI_AreEditableSettingsEqual(OriginalSettings, AfterPageSettings);
     const bool bThemeUnchanged = OriginalThemePreset == AfterPageThemePreset;
     const bool bDirtyClear = !HasUnsavedSettingsChanges();
-    const bool bPassed = HostPanel && Page && bHostContainsPage && Switcher && ActiveIndex == SettingsPageIndex
+    const bool bPassed = HostPanel && Page && bHostContainsPage && bPageRouteOk
         && VisibleLegacySiblingCount == 0
         && bScrollOk && bTouchScrollOk && bFooterOk && bStatusOk && bInteractionOk
         && bSettingsUnchanged && bThemeUnchanged && bDirtyClear;
@@ -20307,6 +20544,96 @@ bool UInspectorWorldSubsystem::RunContextStripSelfTest(FString& OutReport)
 
     Close();
     OpenToPage(ERIVisiblePage::Changes);
+
+    if (UInspectorDockRootWidget* DockRoot = DockRootWidget.Get())
+    {
+        const auto FindDockText = [DockRoot](const FName WidgetName)
+        {
+            return DockRoot->WidgetTree
+                ? Cast<UTextBlock>(DockRoot->WidgetTree->FindWidget(WidgetName))
+                : nullptr;
+        };
+
+        UTextBlock* DockActorText = FindDockText(TEXT("RI_SelectedActorName"));
+        UTextBlock* DockClassText = FindDockText(TEXT("RI_SelectedActorClass"));
+        UTextBlock* DockStagedText = FindDockText(TEXT("RI_StagedStateText"));
+        const bool bDockWidgetsOk = DockActorText && DockClassText && DockStagedText;
+        const bool bDockRouteOk = DockRoot->GetActiveTab() == ERIInspectorTab::Changes;
+        const bool bDockFontsOk = DockActorText && DockClassText && DockStagedText
+            && DockActorText->GetFont().Size >= RICompactUI::GetSectionTitleFontSize()
+            && DockClassText->GetFont().Size >= RICompactUI::GetLabelFontSize()
+            && DockStagedText->GetFont().Size >= RICompactUI::GetLabelFontSize();
+
+        SetSelectedActor(nullptr);
+        StagedPatchBundle = FRIPatchBundle();
+        bHasStagedPatch = false;
+        RefreshDockRootWidget();
+        const FString EmptyActorText = DockActorText ? DockActorText->GetText().ToString() : FString();
+        const FString EmptyStagedText = DockStagedText ? DockStagedText->GetText().ToString() : FString();
+        const bool bDockEmptyOk = !EmptyActorText.IsEmpty()
+            && EmptyActorText.Contains(TEXT("No Actor"), ESearchCase::IgnoreCase)
+            && EmptyStagedText.Equals(TEXT("No staged patch"), ESearchCase::CaseSensitive);
+
+        AActor* TestActor = PreviousSelectedActor;
+        if (!TestActor)
+        {
+            if (UWorld* World = GetWorld())
+            {
+                for (TActorIterator<AActor> It(World); It; ++It)
+                {
+                    if (*It)
+                    {
+                        TestActor = *It;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (!TestActor)
+        {
+            RestoreState();
+            RefreshDockRootWidget();
+            OutReport = TEXT("ContextStripSelfTest=BLOCKED | NativeDock=1 No actor available");
+            return false;
+        }
+
+        SetSelectedActor(TestActor);
+        FRIPatchBundle SyntheticBundle;
+        SyntheticBundle.BundleId = TEXT("SelfTest_ContextStrip");
+        SyntheticBundle.DisplayName = TEXT("SelfTest Context Strip");
+        SyntheticBundle.Operations.AddDefaulted(1);
+        StagedPatchBundle = SyntheticBundle;
+        bHasStagedPatch = true;
+        RefreshDockRootWidget();
+
+        const FString SelectedActorText = DockActorText ? DockActorText->GetText().ToString() : FString();
+        const FString SelectedClassText = DockClassText ? DockClassText->GetText().ToString() : FString();
+        const FString SelectedStagedText = DockStagedText ? DockStagedText->GetText().ToString() : FString();
+        const FString ExpectedActorText = RI_GetActorDisplayLabel(TestActor);
+        const FString ExpectedClassText = TestActor->GetClass() ? TestActor->GetClass()->GetName() : FString();
+        const bool bDockSelectedOk = SelectedActorText.Equals(ExpectedActorText, ESearchCase::CaseSensitive)
+            && SelectedClassText.Equals(ExpectedClassText, ESearchCase::CaseSensitive)
+            && SelectedStagedText.Contains(TEXT("1 staged"), ESearchCase::IgnoreCase);
+        const bool bPassed = bDockWidgetsOk && bDockRouteOk && bDockFontsOk && bDockEmptyOk && bDockSelectedOk;
+
+        OutReport = FString::Printf(
+            TEXT("ContextStripSelfTest=%s | NativeDock=1 Widgets=%d Route=%d Fonts=%d Empty=%d Selected=%d Actor=%s Class=%s Staged=%s"),
+            bPassed ? TEXT("PASS") : TEXT("FAIL"),
+            bDockWidgetsOk ? 1 : 0,
+            bDockRouteOk ? 1 : 0,
+            bDockFontsOk ? 1 : 0,
+            bDockEmptyOk ? 1 : 0,
+            bDockSelectedOk ? 1 : 0,
+            *SelectedActorText,
+            *SelectedClassText,
+            *SelectedStagedText);
+
+        RestoreState();
+        RefreshDockRootWidget();
+        return bPassed;
+    }
+
     EnsureSharedContextStripInjected();
 
     UUserWidget* Widget = PanelWidget.Get();
@@ -20490,6 +20817,8 @@ bool UInspectorWorldSubsystem::RunFilePageInjectionSelfTest(FString& OutReport)
 
     Close();
     Open();
+    UInspectorDockRootWidget* DockRoot = DockRootWidget.Get();
+    const bool bDefaultDockActorPage = DockRoot && DockRoot->GetActiveTab() == ERIInspectorTab::Actor;
     UWidgetSwitcher* Switcher = ContentSwitcher.Get();
     const int32 DefaultActiveIndex = Switcher ? Switcher->GetActiveWidgetIndex() : INDEX_NONE;
     ShowFilePage();
@@ -20528,8 +20857,10 @@ bool UInspectorWorldSubsystem::RunFilePageInjectionSelfTest(FString& OutReport)
         ExistingFilePage->RefreshFromSubsystem();
     }
 
-    UPanelWidget* HostPanel = FindFileHostPanel();
-    UInspectorFilePageWidget* Page = FilePageWidget.Get();
+    UInspectorFilePageWidget* Page = DockRoot ? DockRoot->GetHostedFilePage() : FilePageWidget.Get();
+    UPanelWidget* HostPanel = DockRoot
+        ? Cast<UPanelWidget>(Page ? Page->GetParent() : nullptr)
+        : FindFileHostPanel();
 
     bool bHostContainsPage = false;
     int32 VisibleLegacySiblingCount = 0;
@@ -20573,9 +20904,18 @@ bool UInspectorWorldSubsystem::RunFilePageInjectionSelfTest(FString& OutReport)
     const bool bRemoteSectionHidden = Page && !Page->HasRemoteSessionSection();
     const bool bDiagnosticsSectionHidden = Page && !Page->HasDiagnosticsSection();
     const bool bEmbeddedSettingsHidden = Page && !Page->HasEmbeddedSettingsSection();
-    const int32 ActiveIndex = Switcher ? Switcher->GetActiveWidgetIndex() : INDEX_NONE;
-    const bool bFileSwitcherFillOk = RI_IsVerticalSlotRule(Switcher, ESlateSizeRule::Fill);
-    const bool bDefaultActorPageOk = DefaultActiveIndex == 0;
+    const int32 ActiveIndex = DockRoot
+        ? static_cast<int32>(DockRoot->GetActiveTab())
+        : (Switcher ? Switcher->GetActiveWidgetIndex() : INDEX_NONE);
+    const bool bFilePageRouteOk = DockRoot
+        ? DockRoot->GetActiveTab() == ERIInspectorTab::Changes
+        : Switcher && ActiveIndex == 1;
+    const bool bFileSwitcherFillOk = DockRoot
+        ? HostPanel && bHostContainsPage
+        : RI_IsVerticalSlotRule(Switcher, ESlateSizeRule::Fill);
+    const bool bDefaultActorPageOk = DockRoot
+        ? bDefaultDockActorPage
+        : DefaultActiveIndex == 0;
 
     const auto CheckButtonState = [](UButton* Button, bool bExpectedEnabled, const TCHAR* ExpectedEnabledTooltip, const TCHAR* ExpectedDisabledReason)
     {
@@ -20621,7 +20961,9 @@ bool UInspectorWorldSubsystem::RunFilePageInjectionSelfTest(FString& OutReport)
     };
 
     HandleActorTabClicked();
-    const int32 ActorActiveIndex = Switcher ? Switcher->GetActiveWidgetIndex() : INDEX_NONE;
+    const int32 ActorActiveIndex = DockRoot
+        ? static_cast<int32>(DockRoot->GetActiveTab())
+        : (Switcher ? Switcher->GetActiveWidgetIndex() : INDEX_NONE);
     UUserWidget* Widget = PanelWidget.Get();
     UBorder* StripBorder = Widget && Widget->WidgetTree
         ? Cast<UBorder>(Widget->WidgetTree->FindWidget(TEXT("RI_ActorTopContextStrip")))
@@ -20630,16 +20972,28 @@ bool UInspectorWorldSubsystem::RunFilePageInjectionSelfTest(FString& OutReport)
     UWidget* SearchDirectChild = RI_FindDirectChildInPanel(
         StripHost,
         Widget && Widget->WidgetTree ? Widget->WidgetTree->FindWidget(TEXT("ETB_Search")) : nullptr);
-    const bool bActorHostOk = StripHost != nullptr;
-    const bool bActorStripNotOverlay = StripBorder && StripBorder->GetParent() == StripHost && !StripHost->IsA<UOverlay>();
+    const bool bActorHostOk = DockRoot
+        ? DockRoot->GetHostedActorAttributes() && DockRoot->GetHostedActorFunctions()
+        : StripHost != nullptr;
+    const bool bActorStripNotOverlay = DockRoot
+        ? true
+        : StripBorder && StripBorder->GetParent() == StripHost && !StripHost->IsA<UOverlay>();
     const int32 StripIndex = RI_GetPanelChildIndex(StripHost, StripBorder);
     const int32 SearchIndex = (StripHost && SearchDirectChild)
         ? RI_GetPanelChildIndex(StripHost, SearchDirectChild)
         : INDEX_NONE;
-    const bool bActorOrderOk = StripIndex == 0 && SearchIndex != INDEX_NONE && StripIndex < SearchIndex;
-    const bool bActorStripAutomaticOk = RI_IsVerticalSlotRule(StripBorder, ESlateSizeRule::Automatic);
-    const bool bActorBodyFillOk = ActorWorkbenchBodyHost.IsValid() && RI_IsVerticalSlotRule(ActorWorkbenchBodyHost.Get(), ESlateSizeRule::Fill);
-    const bool bActorLayoutOk = ActorActiveIndex == 0 && bActorHostOk && bActorStripNotOverlay && bActorOrderOk && bActorStripAutomaticOk && bActorBodyFillOk;
+    const bool bActorOrderOk = DockRoot
+        ? true
+        : StripIndex == 0 && SearchIndex != INDEX_NONE && StripIndex < SearchIndex;
+    const bool bActorStripAutomaticOk = DockRoot
+        ? true
+        : RI_IsVerticalSlotRule(StripBorder, ESlateSizeRule::Automatic);
+    const bool bActorBodyFillOk = DockRoot
+        ? true
+        : ActorWorkbenchBodyHost.IsValid() && RI_IsVerticalSlotRule(ActorWorkbenchBodyHost.Get(), ESlateSizeRule::Fill);
+    const bool bActorLayoutOk = DockRoot
+        ? ActorActiveIndex == static_cast<int32>(ERIInspectorTab::Actor) && bActorHostOk
+        : ActorActiveIndex == 0 && bActorHostOk && bActorStripNotOverlay && bActorOrderOk && bActorStripAutomaticOk && bActorBodyFillOk;
 
     const bool bInitialStageButtonsOk = CheckButtonState(Page ? Page->GetNamedButton(TEXT("BTN_FileStagePatch")) : nullptr, bHasSelectedActor, TEXT("Stage the current runtime edits as a patch."), TEXT("Select an actor first."))
         && CheckButtonState(Page ? Page->GetNamedButton(TEXT("BTN_FilePreviewPromote")) : nullptr, Summary.bHasStagedPatch, TEXT("Preview the staged patch on the source side."), TEXT("Stage runtime changes first."))
@@ -20677,8 +21031,9 @@ bool UInspectorWorldSubsystem::RunFilePageInjectionSelfTest(FString& OutReport)
         && CheckOptionalButtonState(Page ? Page->GetNamedButton(TEXT("BTN_FileBuildRoleCompare")) : nullptr, FinalSummary.bHasStagedPatch, TEXT("Build a runtime role compare report."), TEXT("Stage runtime changes first."))
         && CheckOptionalButtonState(Page ? Page->GetNamedButton(TEXT("BTN_FileBuildRemoteSessionCompare")) : nullptr, true, TEXT("Build a remote session compare report."), TEXT(""));
 
-    const bool bPassed = HostPanel && Page && bHostContainsPage && VisibleLegacySiblingCount == 0
-        && bScrollRootOk && bTouchScrollOk && Switcher && ActiveIndex == 1 && bSummaryOk
+    const bool bHostSiblingsOk = DockRoot || VisibleLegacySiblingCount == 0;
+    const bool bPassed = HostPanel && Page && bHostContainsPage && bHostSiblingsOk
+        && bScrollRootOk && bTouchScrollOk && bFilePageRouteOk && bSummaryOk
         && bSelectedActorOk && bSelectedClassOk && bSelectedSourceOk
         && bNextStepOk && bActionGuideOk
         && bRemoteSectionHidden
@@ -20769,9 +21124,12 @@ bool UInspectorWorldSubsystem::RunWorkflowPageViewSelfTest(FString& OutReport)
     Close();
     OpenToPage(ERIVisiblePage::Tools);
 
-    UPanelWidget* HostPanel = FindTestHostPanel();
-    UInspectorTestPageWidget* Page = TestPageWidget.Get();
-    UWidgetSwitcher* Switcher = ContentSwitcher.Get();
+    UInspectorDockRootWidget* DockRoot = DockRootWidget.Get();
+    UInspectorTestPageWidget* Page = DockRoot ? DockRoot->GetHostedTestPage() : TestPageWidget.Get();
+    UPanelWidget* HostPanel = DockRoot
+        ? Cast<UPanelWidget>(Page ? Page->GetParent() : nullptr)
+        : FindTestHostPanel();
+    UWidgetSwitcher* Switcher = DockRoot ? nullptr : ContentSwitcher.Get();
 
     bool bHostContainsPage = false;
     int32 VisibleLegacySiblingCount = 0;
@@ -20820,8 +21178,13 @@ bool UInspectorWorldSubsystem::RunWorkflowPageViewSelfTest(FString& OutReport)
     const bool bNestedWorkflowRowOk = Page && Page->HasRenderedWorkflowRow(RI_WorkflowId_MainlineActorEndToEndClosure);
     const bool bRenderedCountOk = ExpectedCount > 0 && RenderedCount == ExpectedCount;
     const bool bSelectedWorkflowOk = !SelectedWorkflowLabel.IsEmpty() && !SelectedWorkflowLabel.Equals(TEXT("None"), ESearchCase::CaseSensitive);
-    const int32 ActiveIndex = Switcher ? Switcher->GetActiveWidgetIndex() : INDEX_NONE;
-    const bool bPassed = HostPanel && Page && bHostContainsPage && Switcher && ActiveIndex == TestPageIndex
+    const int32 ActiveIndex = DockRoot
+        ? static_cast<int32>(DockRoot->GetActiveTab())
+        : (Switcher ? Switcher->GetActiveWidgetIndex() : INDEX_NONE);
+    const bool bPageRouteOk = DockRoot
+        ? DockRoot->GetActiveTab() == ERIInspectorTab::Tools
+        : Switcher && ActiveIndex == TestPageIndex;
+    const bool bPassed = HostPanel && Page && bHostContainsPage && bPageRouteOk
         && VisibleLegacySiblingCount == 0
         && bPageScrollOk && bTouchScrollOk && bSelectionRowOk && bRemoteSectionOk && bWorkflowSectionOk
         && bTestsSectionOk && bReportSectionOk && bDiagnosticsSectionOk && bActivityLogSectionOk
@@ -20885,9 +21248,12 @@ bool UInspectorWorldSubsystem::RunTestPageLayoutSelfTest(FString& OutReport)
     Close();
     OpenToPage(ERIVisiblePage::Tools);
 
-    UPanelWidget* HostPanel = FindTestHostPanel();
-    UInspectorTestPageWidget* Page = TestPageWidget.Get();
-    UWidgetSwitcher* Switcher = ContentSwitcher.Get();
+    UInspectorDockRootWidget* DockRoot = DockRootWidget.Get();
+    UInspectorTestPageWidget* Page = DockRoot ? DockRoot->GetHostedTestPage() : TestPageWidget.Get();
+    UPanelWidget* HostPanel = DockRoot
+        ? Cast<UPanelWidget>(Page ? Page->GetParent() : nullptr)
+        : FindTestHostPanel();
+    UWidgetSwitcher* Switcher = DockRoot ? nullptr : ContentSwitcher.Get();
 
     bool bHostContainsPage = false;
     int32 VisibleLegacySiblingCount = 0;
@@ -20930,8 +21296,13 @@ bool UInspectorWorldSubsystem::RunTestPageLayoutSelfTest(FString& OutReport)
     const bool bDiagnosticsCollapsedOk = Page && !Page->IsDiagnosticsSectionExpanded();
     const bool bActivityLogCollapsedOk = Page && !Page->IsActivityLogSectionExpanded();
     const bool bOverrideCollapsedOk = Page && !Page->IsRemoteOverrideSectionExpanded();
-    const int32 ActiveIndex = Switcher ? Switcher->GetActiveWidgetIndex() : INDEX_NONE;
-    const bool bPassed = HostPanel && Page && bHostContainsPage && Switcher && ActiveIndex == TestPageIndex
+    const int32 ActiveIndex = DockRoot
+        ? static_cast<int32>(DockRoot->GetActiveTab())
+        : (Switcher ? Switcher->GetActiveWidgetIndex() : INDEX_NONE);
+    const bool bPageRouteOk = DockRoot
+        ? DockRoot->GetActiveTab() == ERIInspectorTab::Tools
+        : Switcher && ActiveIndex == TestPageIndex;
+    const bool bPassed = HostPanel && Page && bHostContainsPage && bPageRouteOk
         && VisibleLegacySiblingCount == 0
         && bPageScrollOk && bTouchScrollOk && bRemoteSectionOk && bWorkflowSectionOk && bTestsSectionOk && bReportSectionOk
         && bDiagnosticsSectionOk && bActivityLogSectionOk && bRemoteOverrideOk

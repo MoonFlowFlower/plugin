@@ -773,7 +773,7 @@ void UInspectorFilePageWidget::BuildWidgetTree()
     UVerticalBox* FooterBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_FileFooterBox"));
     FooterBorder->SetContent(FooterBox);
 
-    StatusText = RI_MakeText(WidgetTree, TEXT("Changes ready"), 6, false, RI_FileMutedColor(), true);
+    StatusText = RI_MakeText(WidgetTree, TEXT("Changes ready"), RICompactUI::GetMutedFontSize(), false, RI_FileMutedColor(), true);
     if (UVerticalBoxSlot* VBoxSlot = FooterBox->AddChildToVerticalBox(StatusText))
     {
         VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
@@ -995,7 +995,7 @@ UWidget* UInspectorFilePageWidget::CreateMainActionsSection()
             VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
         }
 
-        OutButton = RICompactUI::MakeLabeledButton(WidgetTree, ButtonName, Title, ButtonStyle, 112.f);
+        OutButton = RICompactUI::MakeLabeledButton(WidgetTree, ButtonName, Title, ButtonStyle, 0.f);
         if (OutButton)
         {
             Bind.ExecuteIfBound();
@@ -1087,8 +1087,8 @@ UWidget* UInspectorFilePageWidget::CreateCountCell(const FString& Label, TObject
     UVerticalBox* Box = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
     Cell->SetContent(Box);
 
-    Box->AddChildToVerticalBox(RI_MakeText(WidgetTree, Label, 6, false, RI_FileMutedColor()));
-    OutValueText = RI_MakeText(WidgetTree, TEXT("0"), 7, true, RI_FileTextColor());
+    Box->AddChildToVerticalBox(RI_MakeText(WidgetTree, Label, RICompactUI::GetMutedFontSize(), false, RI_FileMutedColor()));
+    OutValueText = RI_MakeText(WidgetTree, TEXT("0"), RICompactUI::GetValueFontSize(), true, RI_FileTextColor());
     Box->AddChildToVerticalBox(OutValueText);
     return Cell;
 }
@@ -1195,19 +1195,19 @@ UWidget* UInspectorFilePageWidget::CreateAuditsSection()
         }
     };
 
-    BuildBaselineAuditButton = CreateActionButton(TEXT("Compare Baseline"), TEXT("BTN_FileBuildBaselineAudit"), 90.f);
+    BuildBaselineAuditButton = CreateActionButton(TEXT("Compare Baseline"), TEXT("BTN_FileBuildBaselineAudit"), 0.f);
     BuildBaselineAuditButton->OnClicked.AddDynamic(this, &UInspectorFilePageWidget::HandleBuildBaselineAuditClicked);
     AddActionButton(BuildBaselineAuditButton);
 
-    BuildAuditButton = CreateActionButton(TEXT("Compare Patch"), TEXT("BTN_FileBuildAudit"), 84.f);
+    BuildAuditButton = CreateActionButton(TEXT("Compare Patch"), TEXT("BTN_FileBuildAudit"), 0.f);
     BuildAuditButton->OnClicked.AddDynamic(this, &UInspectorFilePageWidget::HandleBuildAuditClicked);
     AddActionButton(BuildAuditButton);
 
-    BuildPatchVsSourceAuditButton = CreateActionButton(TEXT("Preview Source Audit"), TEXT("BTN_FileBuildPatchVsSource"), 104.f);
+    BuildPatchVsSourceAuditButton = CreateActionButton(TEXT("Preview Source Audit"), TEXT("BTN_FileBuildPatchVsSource"), 0.f);
     BuildPatchVsSourceAuditButton->OnClicked.AddDynamic(this, &UInspectorFilePageWidget::HandleBuildPatchVsSourceAuditClicked);
     AddActionButton(BuildPatchVsSourceAuditButton);
 
-    BuildAppliedAuditButton = CreateActionButton(TEXT("Verify Applied Source"), TEXT("BTN_FileBuildAppliedAudit"), 110.f);
+    BuildAppliedAuditButton = CreateActionButton(TEXT("Verify Applied Source"), TEXT("BTN_FileBuildAppliedAudit"), 0.f);
     BuildAppliedAuditButton->OnClicked.AddDynamic(this, &UInspectorFilePageWidget::HandleBuildAppliedAuditClicked);
     AddActionButton(BuildAppliedAuditButton);
 
@@ -1283,7 +1283,7 @@ UWidget* UInspectorFilePageWidget::CreateAuditsSection()
     UBorder* PreviewBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
     PreviewBorder->SetPadding(FMargin(5.f, 4.f));
     PreviewBorder->SetBrushColor(RI_FileRowColor());
-    AuditPreviewText = RI_MakeText(WidgetTree, TEXT("No audit preview"), 6, false, RI_FileTextColor(), true);
+    AuditPreviewText = RI_MakeText(WidgetTree, TEXT("No audit preview"), RICompactUI::GetMutedFontSize(), false, RI_FileTextColor(), true);
     PreviewBorder->SetContent(AuditPreviewText);
     if (UVerticalBoxSlot* VBoxSlot = AuditsSectionBody->AddChildToVerticalBox(PreviewBorder))
     {
@@ -1520,13 +1520,13 @@ UWidget* UInspectorFilePageWidget::CreateAuditLineCard(const FRIAuditLine& InLin
     Border->SetContent(Box);
 
     const FString Header = FString::Printf(TEXT("%s :: %s"), *InLine.GroupLabel, *InLine.Field.FieldPath);
-    if (UVerticalBoxSlot* VBoxSlot = Box->AddChildToVerticalBox(RI_MakeText(WidgetTree, Header, 6, true, RI_FileTextColor(), true)))
+    if (UVerticalBoxSlot* VBoxSlot = Box->AddChildToVerticalBox(RI_MakeText(WidgetTree, Header, RICompactUI::GetLabelFontSize(), true, RI_FileTextColor(), true)))
     {
         VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 1.f));
     }
 
     const FString Left = FString::Printf(TEXT("%s: %s"), *InLine.LeftTag, *RI_TruncateAuditValue(InLine.LeftValue));
-    if (UVerticalBoxSlot* VBoxSlot = Box->AddChildToVerticalBox(RI_MakeText(WidgetTree, Left, 6, false, RI_FileMutedColor(), true)))
+    if (UVerticalBoxSlot* VBoxSlot = Box->AddChildToVerticalBox(RI_MakeText(WidgetTree, Left, RICompactUI::GetMutedFontSize(), false, RI_FileMutedColor(), true)))
     {
         VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 1.f));
     }
@@ -1535,7 +1535,7 @@ UWidget* UInspectorFilePageWidget::CreateAuditLineCard(const FRIAuditLine& InLin
     if (UVerticalBoxSlot* VBoxSlot = Box->AddChildToVerticalBox(RI_MakeText(
         WidgetTree,
         Right,
-        6,
+        RICompactUI::GetMutedFontSize(),
         false,
         InLine.bDifferent ? RICompactUI::GetSuccessTextColor() : RI_FileMutedColor(),
         true)))
@@ -1545,7 +1545,7 @@ UWidget* UInspectorFilePageWidget::CreateAuditLineCard(const FRIAuditLine& InLin
 
     if (!InLine.Message.IsEmpty())
     {
-        Box->AddChildToVerticalBox(RI_MakeText(WidgetTree, InLine.Message, 5, false, RI_FileMutedColor(), true));
+        Box->AddChildToVerticalBox(RI_MakeText(WidgetTree, InLine.Message, RICompactUI::GetMutedFontSize(), false, RI_FileMutedColor(), true));
     }
 
     return Border;
@@ -1561,7 +1561,7 @@ UWidget* UInspectorFilePageWidget::CreateRoleCompareLineCard(const FRIRuntimeRol
     Border->SetContent(Box);
 
     const FString Header = FString::Printf(TEXT("%s"), *InLine.Field.FieldPath);
-    if (UVerticalBoxSlot* VBoxSlot = Box->AddChildToVerticalBox(RI_MakeText(WidgetTree, Header, 6, true, RI_FileTextColor(), true)))
+    if (UVerticalBoxSlot* VBoxSlot = Box->AddChildToVerticalBox(RI_MakeText(WidgetTree, Header, RICompactUI::GetLabelFontSize(), true, RI_FileTextColor(), true)))
     {
         VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 1.f));
     }
@@ -1575,7 +1575,7 @@ UWidget* UInspectorFilePageWidget::CreateRoleCompareLineCard(const FRIRuntimeRol
         if (UVerticalBoxSlot* VBoxSlot = Box->AddChildToVerticalBox(RI_MakeText(
             WidgetTree,
             StateText,
-            6,
+            RICompactUI::GetMutedFontSize(),
             false,
             State.bRoleAvailable
                 ? (State.bHasValue ? RICompactUI::GetSuccessTextColor() : RI_FileErrorColor())
@@ -1588,7 +1588,7 @@ UWidget* UInspectorFilePageWidget::CreateRoleCompareLineCard(const FRIRuntimeRol
 
     if (!InLine.Summary.IsEmpty())
     {
-        Box->AddChildToVerticalBox(RI_MakeText(WidgetTree, InLine.Summary, 5, false, RI_FileMutedColor(), true));
+        Box->AddChildToVerticalBox(RI_MakeText(WidgetTree, InLine.Summary, RICompactUI::GetMutedFontSize(), false, RI_FileMutedColor(), true));
     }
 
     return Border;
@@ -1604,7 +1604,7 @@ UWidget* UInspectorFilePageWidget::CreateRemoteSessionCompareLineCard(const FRIR
     Border->SetContent(Box);
 
     const FString Header = FString::Printf(TEXT("%s (%s)"), *InLine.DisplayLabel, *InLine.ActorClass);
-    if (UVerticalBoxSlot* VBoxSlot = Box->AddChildToVerticalBox(RI_MakeText(WidgetTree, Header, 6, true, RI_FileTextColor(), true)))
+    if (UVerticalBoxSlot* VBoxSlot = Box->AddChildToVerticalBox(RI_MakeText(WidgetTree, Header, RICompactUI::GetLabelFontSize(), true, RI_FileTextColor(), true)))
     {
         VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 1.f));
     }
@@ -1614,7 +1614,7 @@ UWidget* UInspectorFilePageWidget::CreateRemoteSessionCompareLineCard(const FRIR
         InLine.bPresentInLeft ? TEXT("present") : TEXT("missing"),
         InLine.LeftCount,
         *RI_TruncateAuditValue(InLine.LeftPrimaryPath.IsEmpty() ? TEXT("-") : InLine.LeftPrimaryPath));
-    if (UVerticalBoxSlot* VBoxSlot = Box->AddChildToVerticalBox(RI_MakeText(WidgetTree, LeftText, 6, false, InLine.bPresentInLeft ? RI_FileMutedColor() : RI_FileErrorColor(), true)))
+    if (UVerticalBoxSlot* VBoxSlot = Box->AddChildToVerticalBox(RI_MakeText(WidgetTree, LeftText, RICompactUI::GetMutedFontSize(), false, InLine.bPresentInLeft ? RI_FileMutedColor() : RI_FileErrorColor(), true)))
     {
         VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 1.f));
     }
@@ -1627,7 +1627,7 @@ UWidget* UInspectorFilePageWidget::CreateRemoteSessionCompareLineCard(const FRIR
     if (UVerticalBoxSlot* VBoxSlot = Box->AddChildToVerticalBox(RI_MakeText(
         WidgetTree,
         RightText,
-        6,
+        RICompactUI::GetMutedFontSize(),
         false,
         InLine.bPresentInRight ? (InLine.bHasMismatch ? RICompactUI::GetSuccessTextColor() : RI_FileMutedColor()) : RI_FileErrorColor(),
         true)))
@@ -1637,7 +1637,7 @@ UWidget* UInspectorFilePageWidget::CreateRemoteSessionCompareLineCard(const FRIR
 
     if (!InLine.Message.IsEmpty())
     {
-        Box->AddChildToVerticalBox(RI_MakeText(WidgetTree, InLine.Message, 5, false, RI_FileMutedColor(), true));
+        Box->AddChildToVerticalBox(RI_MakeText(WidgetTree, InLine.Message, RICompactUI::GetMutedFontSize(), false, RI_FileMutedColor(), true));
     }
 
     return Border;
@@ -1658,7 +1658,7 @@ void UInspectorFilePageWidget::RebuildAuditLineCards(const FRIAuditReport& InRep
 
     if (InReport.Lines.Num() <= 0)
     {
-        AuditLinesBox->AddChildToVerticalBox(RI_MakeText(WidgetTree, TEXT("No audit lines"), 6, false, RI_FileMutedColor()));
+        AuditLinesBox->AddChildToVerticalBox(RI_MakeText(WidgetTree, TEXT("No audit lines"), RICompactUI::GetMutedFontSize(), false, RI_FileMutedColor()));
         return;
     }
 
@@ -1716,7 +1716,7 @@ void UInspectorFilePageWidget::RebuildRoleCompareLineCards(const FRIRuntimeRoleC
 
     if (InReport.Lines.Num() <= 0)
     {
-        RoleCompareLinesBox->AddChildToVerticalBox(RI_MakeText(WidgetTree, TEXT("No runtime role compare lines"), 6, false, RI_FileMutedColor()));
+        RoleCompareLinesBox->AddChildToVerticalBox(RI_MakeText(WidgetTree, TEXT("No runtime role compare lines"), RICompactUI::GetMutedFontSize(), false, RI_FileMutedColor()));
         return;
     }
 
@@ -1747,7 +1747,7 @@ void UInspectorFilePageWidget::RebuildRemoteSessionCompareLineCards(const FRIRun
 
     if (InReport.Lines.Num() <= 0)
     {
-        RemoteSessionCompareLinesBox->AddChildToVerticalBox(RI_MakeText(WidgetTree, TEXT("No remote session compare lines"), 6, false, RI_FileMutedColor()));
+        RemoteSessionCompareLinesBox->AddChildToVerticalBox(RI_MakeText(WidgetTree, TEXT("No remote session compare lines"), RICompactUI::GetMutedFontSize(), false, RI_FileMutedColor()));
         return;
     }
 

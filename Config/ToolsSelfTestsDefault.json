@@ -190,6 +190,16 @@
     "LegacyNativeBridgeId": "dock_layout"
   },
   {
+    "Id": "ui_readability",
+    "DisplayName": "UI Readability",
+    "Category": "UI",
+    "Description": "Validates default font and control-size tokens, visible text floors, and scroll-backed reachability across all four dock pages.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": false,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "ui_readability"
+  },
+  {
     "Id": "right_inspector_tabs",
     "DisplayName": "Right Inspector Tabs",
     "Category": "UI",

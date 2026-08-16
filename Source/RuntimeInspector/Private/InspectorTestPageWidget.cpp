@@ -258,7 +258,7 @@ void UInspectorTestPageWidget::BuildWidgetTree()
             Name,
             Label,
             FCString::Strcmp(Label, TEXT("Run Workflow")) == 0 ? RICompactUI::ERIButtonVisualStyle::Primary : RICompactUI::ERIButtonVisualStyle::Secondary,
-            74.f);
+            0.f);
         return OutButton;
     };
 
@@ -289,7 +289,7 @@ void UInspectorTestPageWidget::BuildWidgetTree()
         VBoxSlot->SetHorizontalAlignment(HAlign_Fill);
     }
 
-    StatusMessageText = RI_MakeText(WidgetTree, TEXT(""), 7, false, RI_TestMutedTextColor(), true);
+    StatusMessageText = RI_MakeText(WidgetTree, TEXT(""), RICompactUI::GetMutedFontSize(), false, RI_TestMutedTextColor(), true);
     if (UVerticalBoxSlot* VBoxSlot = ControlsBox->AddChildToVerticalBox(StatusMessageText))
     {
         VBoxSlot->SetPadding(FMargin(0.f, 6.f, 0.f, 0.f));
@@ -421,7 +421,7 @@ void UInspectorTestPageWidget::BuildWidgetTree()
     UVerticalBox* ReportBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_TestReportBox"));
     ReportBorder->SetContent(ReportBox);
 
-    SelectedResultStateText = RI_MakeText(WidgetTree, TEXT("No result selected"), 8, true, RI_TestMutedTextColor());
+    SelectedResultStateText = RI_MakeText(WidgetTree, TEXT("No result selected"), RICompactUI::GetLabelFontSize(), true, RI_TestMutedTextColor());
     if (UVerticalBoxSlot* VBoxSlot = ReportBox->AddChildToVerticalBox(SelectedResultStateText))
     {
         VBoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
@@ -429,7 +429,7 @@ void UInspectorTestPageWidget::BuildWidgetTree()
 
     UInspectorTouchScrollBox* ReportScroll = WidgetTree->ConstructWidget<UInspectorTouchScrollBox>(UInspectorTouchScrollBox::StaticClass(), TEXT("RI_TestReportScroll"));
     RIInspectorTouchScroll::Configure(ReportScroll);
-    SelectedResultReportText = RI_MakeText(WidgetTree, TEXT("Run a test to see the detailed report."), 7, false, RI_TestMutedTextColor(), true);
+    SelectedResultReportText = RI_MakeText(WidgetTree, TEXT("Run a test to see the detailed report."), RICompactUI::GetMutedFontSize(), false, RI_TestMutedTextColor(), true);
     ReportScroll->AddChild(SelectedResultReportText);
     ReportBox->AddChildToVerticalBox(ReportScroll);
 
@@ -657,7 +657,7 @@ UWidget* UInspectorTestPageWidget::CreateRemoteSessionSection()
     UTextBlock* HelpText = RI_MakeText(
         WidgetTree,
         TEXT("Selected session is used when running workflows. Packaged workflows appear automatically if provided by the subsystem."),
-        6,
+        RICompactUI::GetMutedFontSize(),
         false,
         RI_TestMutedTextColor(),
         true);
@@ -688,7 +688,7 @@ UWidget* UInspectorTestPageWidget::CreateDiagnosticsSection()
     UTextBlock* HelpText = RI_MakeText(
         WidgetTree,
         TEXT("Advanced compare tools stay available here, but they are collapsed by default so daily users can focus on inspect, edit, and stage."),
-        6,
+        RICompactUI::GetMutedFontSize(),
         false,
         RI_TestMutedTextColor(),
         true);
@@ -740,7 +740,7 @@ UWidget* UInspectorTestPageWidget::CreateDiagnosticsSection()
     UBorder* RolePreviewBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("RI_ToolsRoleComparePreviewBorder"));
     RolePreviewBorder->SetPadding(FMargin(5.f, 4.f));
     RolePreviewBorder->SetBrushColor(RI_TestRowColor());
-    DiagnosticsRoleComparePreviewText = RI_MakeText(WidgetTree, TEXT("No runtime role compare preview."), 6, false, RI_TestMutedTextColor(), true);
+    DiagnosticsRoleComparePreviewText = RI_MakeText(WidgetTree, TEXT("No runtime role compare preview."), RICompactUI::GetMutedFontSize(), false, RI_TestMutedTextColor(), true);
     RolePreviewBorder->SetContent(DiagnosticsRoleComparePreviewText);
     if (UVerticalBoxSlot* VBoxSlot = Box->AddChildToVerticalBox(RolePreviewBorder))
     {
@@ -768,7 +768,7 @@ UWidget* UInspectorTestPageWidget::CreateDiagnosticsSection()
     UBorder* SessionPreviewBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("RI_ToolsSessionComparePreviewBorder"));
     SessionPreviewBorder->SetPadding(FMargin(5.f, 4.f));
     SessionPreviewBorder->SetBrushColor(RI_TestRowColor());
-    DiagnosticsSessionComparePreviewText = RI_MakeText(WidgetTree, TEXT("No session compare preview."), 6, false, RI_TestMutedTextColor(), true);
+    DiagnosticsSessionComparePreviewText = RI_MakeText(WidgetTree, TEXT("No session compare preview."), RICompactUI::GetMutedFontSize(), false, RI_TestMutedTextColor(), true);
     SessionPreviewBorder->SetContent(DiagnosticsSessionComparePreviewText);
     Box->AddChildToVerticalBox(SessionPreviewBorder);
 
@@ -787,7 +787,7 @@ UWidget* UInspectorTestPageWidget::CreateActivityLogSection()
     UTextBlock* HelpText = RI_MakeText(
         WidgetTree,
         TEXT("Recent RuntimeInspector actions and results. Routine page refreshes are intentionally excluded."),
-        6,
+        RICompactUI::GetMutedFontSize(),
         false,
         RI_TestMutedTextColor(),
         true);
@@ -840,7 +840,7 @@ UWidget* UInspectorTestPageWidget::CreateAvailableWorkflowRow(const FRIWorkflowD
     const FString Title = Definition.Category.IsEmpty()
         ? Definition.DisplayName
         : FString::Printf(TEXT("%s [%s]"), *Definition.DisplayName, *Definition.Category);
-    TextBox->AddChildToVerticalBox(RI_MakeText(WidgetTree, Title, 7, true, RI_TestTextColor()));
+    TextBox->AddChildToVerticalBox(RI_MakeText(WidgetTree, Title, RICompactUI::GetLabelFontSize(), true, RI_TestTextColor()));
 
     FString MetaLine = Definition.bRequiresPIE ? TEXT("PIE Required") : TEXT("No PIE requirement");
     if (Definition.bRequiresSelectedActor)
@@ -864,14 +864,14 @@ UWidget* UInspectorTestPageWidget::CreateAvailableWorkflowRow(const FRIWorkflowD
     {
         MetaLine += FString::Printf(TEXT(" • Tags=%s"), *FString::Join(Definition.Tags, TEXT(",")));
     }
-    if (UVerticalBoxSlot* VBoxSlot = TextBox->AddChildToVerticalBox(RI_MakeText(WidgetTree, MetaLine, 6, false, RI_TestMutedTextColor(), true)))
+    if (UVerticalBoxSlot* VBoxSlot = TextBox->AddChildToVerticalBox(RI_MakeText(WidgetTree, MetaLine, RICompactUI::GetMutedFontSize(), false, RI_TestMutedTextColor(), true)))
     {
         VBoxSlot->SetPadding(FMargin(0.f, 2.f, 0.f, 0.f));
     }
 
     if (!Definition.Description.IsEmpty())
     {
-        if (UVerticalBoxSlot* VBoxSlot = TextBox->AddChildToVerticalBox(RI_MakeText(WidgetTree, Definition.Description, 6, false, RI_TestMutedTextColor(), true)))
+        if (UVerticalBoxSlot* VBoxSlot = TextBox->AddChildToVerticalBox(RI_MakeText(WidgetTree, Definition.Description, RICompactUI::GetMutedFontSize(), false, RI_TestMutedTextColor(), true)))
         {
             VBoxSlot->SetPadding(FMargin(0.f, 2.f, 0.f, 0.f));
         }
@@ -880,7 +880,7 @@ UWidget* UInspectorTestPageWidget::CreateAvailableWorkflowRow(const FRIWorkflowD
     UHorizontalBox* ButtonsBox = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
     Row->AddChildToHorizontalBox(ButtonsBox);
 
-    UButton* SelectButton = RICompactUI::MakeLabeledButton(WidgetTree, NAME_None, TEXT("Select"), RICompactUI::ERIButtonVisualStyle::Subtle, 48.f, 16.f, 6);
+    UButton* SelectButton = RICompactUI::MakeLabeledButton(WidgetTree, NAME_None, TEXT("Select"), RICompactUI::ERIButtonVisualStyle::Subtle, 64.f, RICompactUI::GetButtonHeight(), RICompactUI::GetLabelFontSize());
     BindSelectWorkflowButton(SelectButton, Definition.WorkflowId);
     RICompactUI::SetWidgetEnabledState(SelectButton, !bRunning, DisabledReason, TEXT("Select this workflow."));
     if (UHorizontalBoxSlot* HBoxSlot = ButtonsBox->AddChildToHorizontalBox(SelectButton))
@@ -889,7 +889,7 @@ UWidget* UInspectorTestPageWidget::CreateAvailableWorkflowRow(const FRIWorkflowD
         HBoxSlot->SetVerticalAlignment(VAlign_Center);
     }
 
-    UButton* RunButton = RICompactUI::MakeLabeledButton(WidgetTree, NAME_None, TEXT("Run"), RICompactUI::ERIButtonVisualStyle::Primary, 48.f, 16.f, 6);
+    UButton* RunButton = RICompactUI::MakeLabeledButton(WidgetTree, NAME_None, TEXT("Run"), RICompactUI::ERIButtonVisualStyle::Primary, 64.f, RICompactUI::GetButtonHeight(), RICompactUI::GetLabelFontSize());
     BindRunWorkflowButton(RunButton, Definition.WorkflowId);
     RICompactUI::SetWidgetEnabledState(RunButton, !bRunning, DisabledReason, TEXT("Run this workflow."));
     if (UHorizontalBoxSlot* HBoxSlot = ButtonsBox->AddChildToHorizontalBox(RunButton))
@@ -939,7 +939,7 @@ UWidget* UInspectorTestPageWidget::CreateAvailableTestRow(const FRISelfTestDefin
     {
         TitleLine += FString::Printf(TEXT(" [%s]"), *Definition.Category);
     }
-    TextBox->AddChildToVerticalBox(RI_MakeText(WidgetTree, TitleLine, 7, true, RI_TestTextColor()));
+    TextBox->AddChildToVerticalBox(RI_MakeText(WidgetTree, TitleLine, RICompactUI::GetLabelFontSize(), true, RI_TestTextColor()));
 
     FString MetaLine;
     if (Definition.bRequiresPIE)
@@ -955,14 +955,14 @@ UWidget* UInspectorTestPageWidget::CreateAvailableTestRow(const FRISelfTestDefin
         MetaLine += TEXT(" • Mutates runtime");
     }
 
-    if (UVerticalBoxSlot* VBoxSlot = TextBox->AddChildToVerticalBox(RI_MakeText(WidgetTree, MetaLine, 6, false, Definition.bEnabled ? RI_TestMutedTextColor() : RI_TestWarningColor(), true)))
+    if (UVerticalBoxSlot* VBoxSlot = TextBox->AddChildToVerticalBox(RI_MakeText(WidgetTree, MetaLine, RICompactUI::GetMutedFontSize(), false, Definition.bEnabled ? RI_TestMutedTextColor() : RI_TestWarningColor(), true)))
     {
         VBoxSlot->SetPadding(FMargin(0.f, 2.f, 0.f, 0.f));
     }
 
     if (!Definition.Description.IsEmpty())
     {
-        if (UVerticalBoxSlot* VBoxSlot = TextBox->AddChildToVerticalBox(RI_MakeText(WidgetTree, Definition.Description, 6, false, RI_TestMutedTextColor(), true)))
+        if (UVerticalBoxSlot* VBoxSlot = TextBox->AddChildToVerticalBox(RI_MakeText(WidgetTree, Definition.Description, RICompactUI::GetMutedFontSize(), false, RI_TestMutedTextColor(), true)))
         {
             VBoxSlot->SetPadding(FMargin(0.f, 2.f, 0.f, 0.f));
         }
@@ -971,7 +971,7 @@ UWidget* UInspectorTestPageWidget::CreateAvailableTestRow(const FRISelfTestDefin
     UHorizontalBox* ButtonsBox = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
     Row->AddChildToHorizontalBox(ButtonsBox);
 
-    UButton* SelectButton = RICompactUI::MakeLabeledButton(WidgetTree, NAME_None, TEXT("Select"), RICompactUI::ERIButtonVisualStyle::Subtle, 48.f, 16.f, 6);
+    UButton* SelectButton = RICompactUI::MakeLabeledButton(WidgetTree, NAME_None, TEXT("Select"), RICompactUI::ERIButtonVisualStyle::Subtle, 64.f, RICompactUI::GetButtonHeight(), RICompactUI::GetLabelFontSize());
     BindSelectTestButton(SelectButton, Definition.Id);
     RICompactUI::SetWidgetEnabledState(SelectButton, !bRunning, DisabledReason, TEXT("Select this self-test."));
     if (UHorizontalBoxSlot* HBoxSlot = ButtonsBox->AddChildToHorizontalBox(SelectButton))
@@ -980,7 +980,7 @@ UWidget* UInspectorTestPageWidget::CreateAvailableTestRow(const FRISelfTestDefin
         HBoxSlot->SetVerticalAlignment(VAlign_Center);
     }
 
-    UButton* RunButton = RICompactUI::MakeLabeledButton(WidgetTree, NAME_None, TEXT("Run"), RICompactUI::ERIButtonVisualStyle::Primary, 48.f, 16.f, 6);
+    UButton* RunButton = RICompactUI::MakeLabeledButton(WidgetTree, NAME_None, TEXT("Run"), RICompactUI::ERIButtonVisualStyle::Primary, 64.f, RICompactUI::GetButtonHeight(), RICompactUI::GetLabelFontSize());
     BindRunTestButton(RunButton, Definition.Id);
     RICompactUI::SetWidgetEnabledState(RunButton, !bRunning && Definition.bEnabled, DisabledReason, TEXT("Run this self-test."));
     if (UHorizontalBoxSlot* HBoxSlot = ButtonsBox->AddChildToHorizontalBox(RunButton))
@@ -1011,13 +1011,13 @@ UWidget* UInspectorTestPageWidget::CreateResultRow(const FRISelfTestResult& Resu
         HBoxSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
     }
 
-    TextBox->AddChildToVerticalBox(RI_MakeText(WidgetTree, FString::Printf(TEXT("%s • %s"), *State, *Result.DisplayName), 7, true, StateColor));
-    if (UVerticalBoxSlot* VBoxSlot = TextBox->AddChildToVerticalBox(RI_MakeText(WidgetTree, Result.Summary, 6, false, RI_TestMutedTextColor(), true)))
+    TextBox->AddChildToVerticalBox(RI_MakeText(WidgetTree, FString::Printf(TEXT("%s • %s"), *State, *Result.DisplayName), RICompactUI::GetLabelFontSize(), true, StateColor));
+    if (UVerticalBoxSlot* VBoxSlot = TextBox->AddChildToVerticalBox(RI_MakeText(WidgetTree, Result.Summary, RICompactUI::GetMutedFontSize(), false, RI_TestMutedTextColor(), true)))
     {
         VBoxSlot->SetPadding(FMargin(0.f, 2.f, 0.f, 0.f));
     }
 
-    UButton* ViewButton = RICompactUI::MakeLabeledButton(WidgetTree, NAME_None, TEXT("View"), RICompactUI::ERIButtonVisualStyle::Secondary, 48.f, 16.f, 6);
+    UButton* ViewButton = RICompactUI::MakeLabeledButton(WidgetTree, NAME_None, TEXT("View"), RICompactUI::ERIButtonVisualStyle::Secondary, 64.f, RICompactUI::GetButtonHeight(), RICompactUI::GetLabelFontSize());
     BindResultViewButton(ViewButton, Result.Id);
     RICompactUI::SetWidgetEnabledState(ViewButton, !bRunning, DisabledReason, TEXT("View this report."));
     if (UHorizontalBoxSlot* HBoxSlot = Row->AddChildToHorizontalBox(ViewButton))
@@ -1107,7 +1107,7 @@ void UInspectorTestPageWidget::RebuildActivityLog()
     const TArray<FRIActivityLogEntry>& Entries = InspectorSubsystem ? InspectorSubsystem->GetActivityLogEntries() : TArray<FRIActivityLogEntry>();
     if (Entries.Num() <= 0)
     {
-        UTextBlock* EmptyText = RI_MakeText(WidgetTree, TEXT("No recent RuntimeInspector actions."), 6, false, RI_TestMutedTextColor(), true);
+        UTextBlock* EmptyText = RI_MakeText(WidgetTree, TEXT("No recent RuntimeInspector actions."), RICompactUI::GetMutedFontSize(), false, RI_TestMutedTextColor(), true);
         ActivityLogEntriesBox->AddChildToVerticalBox(EmptyText);
         return;
     }
@@ -1127,7 +1127,7 @@ void UInspectorTestPageWidget::RebuildActivityLog()
         UTextBlock* MetaText = RI_MakeText(
             WidgetTree,
             FString::Printf(TEXT("%s  %s"), *TimeText, *CategoryText),
-            6,
+            RICompactUI::GetMutedFontSize(),
             true,
             RI_TestMutedTextColor(),
             false);
@@ -1138,7 +1138,7 @@ void UInspectorTestPageWidget::RebuildActivityLog()
             (Entry.Severity == ERIToastType::Warning ? RI_TestWarningColor() :
             (Entry.Severity == ERIToastType::Success ? RI_TestSuccessColor() : RI_TestTextColor()));
 
-        UTextBlock* MessageText = RI_MakeText(WidgetTree, Entry.Message, 6, false, MessageColor, true);
+        UTextBlock* MessageText = RI_MakeText(WidgetTree, Entry.Message, RICompactUI::GetMutedFontSize(), false, MessageColor, true);
         if (UVerticalBoxSlot* VBoxSlot = RowBox->AddChildToVerticalBox(MessageText))
         {
             VBoxSlot->SetPadding(FMargin(0.f, 2.f, 0.f, 0.f));
