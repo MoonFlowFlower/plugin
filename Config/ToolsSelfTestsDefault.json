@@ -1,5 +1,15 @@
 [
   {
+    "Id": "dock_layout",
+    "DisplayName": "Dock Layout",
+    "Category": "UI",
+    "Description": "Validates the native dock overlay shell and center viewport pass-through contract.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": false,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "dock_layout"
+  },
+  {
     "Id": "confirm_dialog_color_input",
     "DisplayName": "Native Color Picker Input",
     "Category": "UI",
@@ -178,16 +188,6 @@
     "bMutatesRuntime": false,
     "bEnabled": true,
     "LegacyNativeBridgeId": "context_strip"
-  },
-  {
-    "Id": "dock_layout",
-    "DisplayName": "Dock Layout",
-    "Category": "UI",
-    "Description": "Validates the native dock overlay shell and center viewport pass-through contract.",
-    "bRequiresPIE": true,
-    "bMutatesRuntime": false,
-    "bEnabled": true,
-    "LegacyNativeBridgeId": "dock_layout"
   },
   {
     "Id": "ui_readability",

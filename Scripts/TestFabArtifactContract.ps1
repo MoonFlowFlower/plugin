@@ -87,6 +87,16 @@ if ($RootExists) {
     Add-ContractCheck -Name "self-test:dock_layout" -Passed $HasDockLayout -Detail "Required Id=dock_layout"
     Add-ContractCheck -Name "workflow:mainline_full_closure" -Passed $HasMainlineClosure -Detail "Required WorkflowId=mainline_full_closure"
 
+    $EnabledSelfTests = @($SelfTests | Where-Object {
+        -not ($_.PSObject.Properties.Name -contains "bEnabled") -or $_.bEnabled
+    })
+    $DefaultSelfTestId = if ($EnabledSelfTests.Count -gt 0 -and $EnabledSelfTests[0].PSObject.Properties.Name -contains "Id") {
+        [string]$EnabledSelfTests[0].Id
+    } else {
+        ""
+    }
+    Add-ContractCheck -Name "self-test:blank-host-default" -Passed ($DefaultSelfTestId -eq "dock_layout") -Detail "First enabled Id=$DefaultSelfTestId; required blank-host-safe default=dock_layout"
+
     $ForbiddenDirectories = @(".git", ".agents", "Saved", "DerivedDataCache")
     foreach ($Directory in $ForbiddenDirectories) {
         $ForbiddenPath = Join-Path $ResolvedPluginRoot $Directory
