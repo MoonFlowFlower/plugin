@@ -1,52 +1,28 @@
 # Runtime Inspector Fab Asset Checklist
 
-This file is a Fab asset checklist, not the RuntimeInspector agent development authority.
+This is a Fab media checklist, not the RuntimeInspector development authority. Use `docs/AGENT_DEVELOPMENT.md` for implementation rules.
 
-For implementation rules and development workflow authority, use `docs/AGENT_DEVELOPMENT.md`.
+Capture only shipped Unreal Engine 5.7 functionality. Do not show internal-only diagnostics, temporary logs, or features outside the release scope.
 
-Capture only shipped UE 5.5 functionality. Avoid internal-only test views, debug logs, or obviously experimental setups.
+## Required Listing Media
 
-## Cover Image
+- `FabMedia/cover.png`: Runtime Inspector visible in a clean PIE scene with readable product text and controls.
+- `FabMedia/screenshot_01_actor_panel.png`: a real picked actor, component list, and supported runtime values.
+- `FabMedia/screenshot_02_changes_workflow.png`: the Changes workspace and staged/review path.
+- `FabMedia/screenshot_03_settings.png`: hotkey and interaction settings without clipped labels.
+- `FabMedia/screenshot_04_tools.png`: non-empty Tests/Workflows configuration and run controls.
+- `FabMedia/demo.mp4`: a real live capture, not a slideshow; open the panel, visit Actor/Changes/Settings/Tools, and run a configured workflow. Use H.264, `1920x1080`, `30 fps`, and 30-45 seconds.
 
-- Product name visible: `Runtime Inspector`
-- Clear Unreal Editor context
-- Show the inspector panel with readable actor/property content
-- Prefer a clean scene with one selected actor
+## Compliance Rules
 
-## Screenshot Shot List
+- Use Unreal Engine 5.7 and the current shipped UI.
+- Final still images must be at least `1920x1080` and below `3145728` bytes each.
+- Use the same product name, release scope, documentation URL, and support URL as `RuntimeInspector.uplugin`, `README.md`, and `FAB_LISTING.md`.
+- The public support URL must return HTTP 200 before the release is called Fab-ready.
+- Keep final files under `FabMedia/`; provenance and hashes belong in `FabMedia/fab_media_manifest.json`.
 
-1. Main actor/property inspection view
-   Show the live property panel with a selected actor and readable values.
+## Capture Boundary
 
-2. File workflow view
-   Show staged patch or compare output with a concise, understandable diff summary.
-
-3. Source workflow view
-   Show promote/audit related UI that communicates runtime-to-source workflow.
-
-4. Remote session workflow
-   Show remote session selection or packaged-runtime workflow entry point.
-
-5. Test/workflow page
-   Show the curated workflow list, not internal raw diagnostics.
-
-## Demo Video / GIF
-
-- Start from enabling or opening the tool
-- Select an actor
-- Change a runtime value
-- Show staged patch / compare
-- Show editor-side workflow or verification result
-- Keep it short, around 20-45 seconds
-
-## Consistency Rules
-
-- Use UE 5.5
-- Use the same plugin name, wording, and support URLs as `RuntimeInspector.uplugin` and `FAB_LISTING.md`
-- Do not show unreleased features
-- Do not show broken test assets, compile logs, or temporary internal notes
-
-## Staging Folder
-
-- Final deliverables should be placed under `FabMedia/`
-- Recommended filenames are documented in `FabMedia/README.md`
+- Listing media may be captured in the main PluginMaker project because it contains the curated visual fixture.
+- Install/load and input-path signoff must still be repeated in the exact ZIP-derived blank host; listing media is not evidence of clean-install behavior.
+- Media compliance proves dimensions, encoding, and the recorded flow only. It does not prove Fab acceptance, hardware-wide DPI behavior, or asset-rights ownership.

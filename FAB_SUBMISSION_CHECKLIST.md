@@ -1,81 +1,90 @@
 # Runtime Inspector Fab Submission Checklist
 
-This file is a Fab submission checklist, not the RuntimeInspector agent development authority.
+This checklist separates the repo-local technical RC from Fab backend and legal/account work. Development authority remains `docs/AGENT_DEVELOPMENT.md`.
 
-For implementation rules and development workflow authority, use `docs/AGENT_DEVELOPMENT.md`.
+## Technical RC Baseline
 
-## Current RC Status
+- Branch: `codex/runtimeinspector-fab-rc`
+- Implementation baseline: `ad6ddd9e8eebf1552f3aa18c76e795f37a10b47a`
+- Engine: Unreal Engine 5.7 / Win64
+- The final shipping commit is recorded by `Saved/FabRelease/Submission/RuntimeInspector-Fab-Submission.manifest.json`; do not infer it from an older hard-coded SHA in this file.
+- The upload artifact is the committed-HEAD source ZIP. The compiled package and blank host must be derived from that exact ZIP.
 
-- Current RC branch: `codex/runtimeinspector-fab-rc`
-- Product RC commit: `88dacaae56b5aa834ec435c2c5d0d5ba91f73762`
-- Product RC summary: `Fix RuntimeInspector blank host dock scaling`
-- Superseded RC: `0a26995c1f057972bb175afa483326cb1c2df886`
-  - reason: blank validation host revealed a DPI scaling bug in the dock UI.
-- Repo-local package, automated blank-load validation, DPI-aware dock validation, final screenshots, media manifest, and demo video are prepared.
-- Do not claim Fab-ready until full blank-host manual tab smoke is signed.
-- Remaining external follow-up: replace `MarketplaceURL` after the Fab listing exists.
+## Product And Packaging
 
-## Package
+- [x] Native dock tab pointer input no longer enters legacy drag/resize handling.
+- [x] `TryGetTabButtonScreenCenterForAutomation` exists as a native automation-only interface; no user Blueprint API was added.
+- [x] Tools definitions resolve from `IPluginManager::FindPlugin("RuntimeInspector")->GetBaseDir()`.
+- [x] `Config/FilterPlugin.ini` explicitly packages both Tools JSON files.
+- [x] `ui_readability` is included in `runtime_ui_contract_v1`.
+- [x] Default typography uses title `12`, label/value `11`, muted `10`, and control height `28`.
+- [x] Declared UI scale range is `0.8-1.5`; Fab default validation uses `UIScale=1.0`.
+- [x] `Scripts/TestFabArtifactContract.ps1` validates SourceSubmission and CompiledSmoke boundaries.
+- [x] `Scripts/MakeFabSubmissionZip.ps1` builds the source ZIP from committed `HEAD` and rejects dirty shipping paths.
+- [x] `Scripts/PackageFabRelease.ps1` compiles from the exact source ZIP.
+- [x] `Scripts/ValidateFabBlankProject.ps1` creates `RIFabBlank`, reads UE 5.7 from `Build.version`, and treats plugin-consequential warnings as failures.
+- [x] All release paths use `UE57`, not `UE55`.
 
-- [x] `RuntimeInspector.uplugin` has release metadata for UE 5.5.
-- [x] `README.md` explains installation, activation, scope, and support.
-- [x] `Config/FilterPlugin.ini` is present for release packaging.
-- [x] `Scripts/PackageFabRelease.ps1` builds and stages a clean release package.
-- [x] Clean package output exists:
-  - `Saved/FabRelease/Package/RuntimeInspector_UE55/RuntimeInspector`
-- [x] Final package excludes `.git`, `Docs`, `Saved`, internal logs, and other repo-only residue.
-- [x] Final package retains precompiled `Binaries` for direct install into a blank UE 5.5 Blueprint project.
-- [x] Final package retains validated `Intermediate` precompile data emitted by `BuildPlugin -NoHostPlatform`.
+## Directed And Closure Evidence
 
-## Listing Copy
+- [x] Directed dock tests: `panel_interaction`, `right_inspector_tabs`, `dock_layout`.
+- [x] UI contract: `ui_readability` and `runtime_ui_contract_v1`.
+- [x] Main project closure: `mainline_full_closure=PASS`, 24/24 checks.
+- [x] Tools action binding contract: all configured actions bound (`223/223` in the final main-project layout run).
+- [x] Packaged loopback validation used a separately owned packaged-runtime listener on port `12098`.
+- [x] Packaged-runtime stop scripts kill and verify the complete wrapper/child process tree.
+- [x] Listing media regenerated from the current UE 5.7 UI.
+- [x] Demo video is a live 43.833-second H.264 interaction capture, not a screenshot sequence.
+- [ ] Final exact-HEAD source contract, BuildPlugin contract, and blank-host install/load report exist and pass after the final docs/media commit.
+- [ ] Exact ZIP-derived blank host has a recorded real-mouse Actor/Changes/Settings/Tools click-through in normal and narrow/tall windows.
+- [ ] Public DocsURL and SupportURL return HTTP 200.
 
-- [x] Title, short description, long description, and feature bullets are prepared in `FAB_LISTING.md`.
-- [x] Support and documentation links are defined in `RuntimeInspector.uplugin`.
-- [ ] Replace `MarketplaceURL` in `RuntimeInspector.uplugin` after Fab listing is created.
+Authoritative generated evidence paths:
 
-## Media
+- Source ZIP: `Saved/FabRelease/Submission/RuntimeInspector-Fab-Submission.zip`
+- Source manifest: `Saved/FabRelease/Submission/RuntimeInspector-Fab-Submission.manifest.json`
+- Source contract: `Saved/FabRelease/Submission/RuntimeInspector-Fab-Submission.source-contract.json`
+- Compiled package: `../../Saved/FabRelease/Package/RuntimeInspector_UE57/RuntimeInspector`
+- Contracts: `../../Saved/FabRelease/Contracts/RuntimeInspector_UE57/`
+- Blank host: `../../Saved/FabRelease/BlankHostLoadSmoke/RIFabBlank_UE57/RIFabBlank/RIFabBlank.uproject`
+- Blank-host log: `../../Saved/FabRelease/fab_blank_host_install_load_smoke_UE57.log`
+- Main-project closure: `Saved/RuntimeInspector/Task5/mainline-full-closure-after-commits.json`
+- Packaged ownership: `Saved/RuntimeInspector/Task5/packaged-port-ownership-green.json`
+- Packaged lifecycle: `Saved/RuntimeInspector/Task5/packaged-run-stop-lifecycle-green.json`
 
-- [x] Capture cover image:
-  - `FabMedia/cover.png`
-- [x] Capture product screenshots:
-  - `FabMedia/screenshot_01_actor_panel.png`
-  - `FabMedia/screenshot_02_changes_workflow.png`
-  - `FabMedia/screenshot_03_settings.png`
-  - `FabMedia/screenshot_04_tools.png`
-- [x] Normalize all final 2D images to `1920x1080`, PNG/JPEG, under `3145728` bytes:
-  - `FabMedia/fab_media_manifest.json`
-- [x] Record demo video:
-  - `FabMedia/demo.mp4`
-  - ffprobe: H.264, `1920x1080`, `30 fps`, `35.000000s`, `810418` bytes
-- [x] Confirm screenshots match the current shipped UE 5.5 UI surface.
-- [x] Automated capture path is available and now guards against minimized/foreground-window capture:
-  - `Scripts/CaptureFabMedia.ps1`
-- [x] Media normalization tool is available:
-  - `Scripts/NormalizeFabMedia.py`
+## Listing And Media
 
-## Validation
+- [x] Listing copy is prepared in `FAB_LISTING.md`.
+- [x] README and Chinese user guide consistently state UE 5.7.
+- [x] Five final stills are `1920x1080`, PNG, and below 3 MiB.
+- [x] `FabMedia/demo.mp4` is H.264, `1920x1080`, `30 fps`, `43.833333s`, and `3509988` bytes.
+- [x] Image/video hashes and capture provenance are recorded in `FabMedia/fab_media_manifest.json`.
+- [ ] `RuntimeInspector.uplugin` SupportURL is publicly reachable. Current repository and Issues URLs returned HTTP 404 in an unauthenticated check on 2026-08-16; do not silently substitute an unrelated page.
+- [ ] Replace `MarketplaceURL` only after the Fab listing exists.
 
-- [x] Real PIE `SceneComponent transform -> Stage -> Apply To Source -> next PIE persists` validation passes on the local baseline.
-  - `Saved/RuntimeInspector/Validation/TransformSourcePersistence/BC8B047E-400B-566E-1347-2DA5AA231920/prepare_report.json`
-  - `Saved/RuntimeInspector/Validation/TransformSourcePersistence/BC8B047E-400B-566E-1347-2DA5AA231920/verify_restore_report.json`
-- [x] UE 5.5 `BuildPlugin` validation passed through the release script.
-- [x] Fresh local package regeneration passed.
-- [x] Blank-project automated load validation passed:
-  - `Saved/fab_blank_project_validation.log`
-- [x] Preserved blank validation host exists:
-  - `Saved/FabRelease/BlankProjectValidation/RuntimeInspectorBlank_UE55/RuntimeInspectorBlank/RuntimeInspectorBlank.uproject`
-- [x] Blank-host packaged PIE/open/readability smoke passed for the scaling fix:
-  - `Saved/FabRelease/blank_host_dpi_fix_printwindow.png`
-  - `Saved/FabRelease/blank_host_pid_48944.png`
-- [ ] Full blank-host manual tab smoke is signed.
-  - `Actor / Changes` have blank-host visual evidence.
-  - `Settings / Tools` need a human/operator click-through in the blank host because OS coordinate automation was not reliable enough to sign them.
-- [x] Capture Fab screenshots from the main `PluginMaker` editor state, not the blank validation host.
-  - `Saved/RuntimeInspector/FabMediaCapture/capture_fab_media.log`
-  - `Saved/RuntimeInspector/FabMediaCapture/capture_manifest.txt`
+## Final Release Gate
 
-## Submission Boundary
+Run `Scripts/RunFab57Validation.cmd` only with Unreal Editor closed. It must execute, in order:
 
-- [ ] Fab backend account/tax/payout/listing metadata completed outside the repo.
-- [ ] Fab listing review completed by Epic.
-- [ ] `MarketplaceURL` updated after the listing exists.
+1. committed source ZIP plus SourceSubmission contract;
+2. BuildPlugin from that ZIP plus CompiledSmoke contract;
+3. `RIFabBlank` install/load smoke.
+
+Do not call the result Fab-ready if any of these remain true:
+
+- a tab can only be reached through console/automation rather than a real click;
+- Tools JSON is missing, empty, or produces `[RI][ToolsConfig]` warnings;
+- default visible body text falls below the readability contract;
+- shipping paths are dirty when the ZIP is created;
+- `mainline_full_closure` regresses;
+- any public release surface still claims UE 5.5;
+- DocsURL or SupportURL is not publicly reachable.
+
+## External Submission Boundary
+
+- [ ] Fab account, tax, payout, and backend listing metadata completed by the publisher.
+- [ ] MarketplaceURL filled after the listing exists.
+- [ ] Epic/Fab review completed.
+- [ ] Asset-rights and licensing review completed by the rights holder.
+
+Passing this checklist cannot guarantee Fab approval or every hardware/DPI configuration.

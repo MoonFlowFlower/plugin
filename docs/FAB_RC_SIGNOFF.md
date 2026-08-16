@@ -1,134 +1,68 @@
-# Runtime Inspector RC Signoff
+# Runtime Inspector Fab Technical RC Signoff
 
-This file is the release-candidate signoff guide for the current Fab submission pass.
+This document defines the technical release-candidate gate. It is not the development authority; use `docs/AGENT_DEVELOPMENT.md` for implementation rules.
 
-It is not the development authority. For implementation rules, use `docs/AGENT_DEVELOPMENT.md`.
-
-## RC Baseline
+## Baseline
 
 - Branch: `codex/runtimeinspector-fab-rc`
-- Product RC commit: `88dacaae56b5aa834ec435c2c5d0d5ba91f73762`
-- Product RC summary: `Fix RuntimeInspector blank host dock scaling`
-- Superseded RC:
-  - `0a26995c1f057972bb175afa483326cb1c2df886`
-  - reason: blank validation host revealed a DPI scaling bug in the dock UI.
-- Package root:
-  - `Saved/FabRelease/Package/RuntimeInspector_UE55/RuntimeInspector`
-- Package log:
-  - `Saved/build_runtimeinspector_fab_release.log`
-- Blank validation host:
-  - `Saved/FabRelease/BlankProjectValidation/RuntimeInspectorBlank_UE55/RuntimeInspectorBlank/RuntimeInspectorBlank.uproject`
-- Automated blank-load log:
-  - `Saved/fab_blank_project_validation.log`
+- Implementation baseline: `ad6ddd9e8eebf1552f3aa18c76e795f37a10b47a`
+- Target: Unreal Engine 5.7, Win64
+- Source of upload bytes: committed-HEAD `RuntimeInspector-Fab-Submission.zip`
+- Source of compiled smoke bytes: that exact ZIP, not the working tree
+- Final commit and ZIP SHA-256 authority: `Saved/FabRelease/Submission/RuntimeInspector-Fab-Submission.manifest.json`
 
-## Automated Evidence
+## Verified Before Final Artifact Freeze
 
-- Static/build:
-  - `python -m json.tool Config/ToolsSelfTestsDefault.json`
-  - `python -m json.tool Config/ToolsWorkflowsDefault.json`
-  - `git diff --check`
-  - `PluginMakerEditor Win64 Development` clean build passed with `-NoHotReloadFromIDE -NoUBTMakefiles`
-- Runtime/UI regression:
-  - `dock_layout`
-  - `runtime_ui_contract_v1`
-  - `favorite_icon_visual_contract`
-  - `dock_material_tree_route`
-  - `dock_material_edit_route`
-  - `row_text_overflow_contract`
-  - `function_run_button_visual_contract`
-  - `color_picker_preview_perf`
-- DPI layout contract evidence:
-  - `SideWidthPhysical=340`
-  - `CompactLeftPhysical=64`
-  - `ViewportScale=1.58`
-  - `ReadableScale=1.00`
-  - center viewport pass-through remained enabled
-- Package:
-  - `Scripts/PackageFabRelease.ps1`
-- Blank host automated load:
-  - `Scripts/ValidateFabBlankProject.ps1 -KeepValidationProject`
-- Blank host packaged PIE/open/readability:
-  - `Saved/FabRelease/blank_host_dpi_fix_printwindow.png`
-  - `Saved/FabRelease/blank_host_pid_48944.png`
-- Media:
-  - `Scripts/OpenFabScreenshotState.ps1`
-  - `Scripts/CaptureFabMedia.ps1`
-  - `python Scripts/NormalizeFabMedia.py --input Saved/RuntimeInspector/FabMediaCapture --output FabMedia --width 1920 --height 1080 --max-bytes 3145728`
+- Native dock tab pointer handlers yield to Slate/UMG buttons while legacy fallback drag/resize behavior remains tested.
+- Real mouse input opened RuntimeInspector and switched Actor, Changes, Settings, and Tools in the main project.
+- A runtime Transform edit was staged and rendered as an old/new Changes row.
+- Tools displayed non-empty Tests/Workflows, ran a configured workflow, and returned to the Actor flow.
+- `mainline_full_closure` passed 24/24 after the final implementation commits.
+- Packaged loopback validation used a process-owned listener on `127.0.0.1:12098`; editor and packaged listeners were not conflated.
+- The packaged-runtime cleanup scripts removed both wrapper and child processes and verified no dedicated-package process remained.
+- Five UE 5.7 screenshots and one live 43.833-second demo were visually inspected and normalized.
+
+## Final Exact-Artifact Gate
+
+The technical RC is closed only when all of the following generated evidence is present and passing for the final committed HEAD:
+
+1. `Scripts/RunFab57Validation.cmd` passes all three stages.
+2. Source manifest reports clean shipping paths, one `RuntimeInspector/` top-level directory, UE 5.7, entry count, commit, and ZIP SHA-256.
+3. SourceSubmission and CompiledSmoke contract reports pass.
+4. Development and Shipping BuildPlugin passes without new RuntimeInspector warnings.
+5. `RIFabBlank` install/load smoke passes without ToolsConfig, missing-config, module-load, or plugin-consequential warnings.
+6. In the exact ZIP-derived blank host, real mouse input opens the panel and reaches Actor/Changes/Settings/Tools in both normal and narrow/tall layouts.
+7. A blank-host Tools self-test and one workflow run successfully.
+8. Public documentation and support URLs return HTTP 200.
+
+Expected evidence roots:
+
+- Plugin-local submission: `Saved/FabRelease/Submission/`
+- Project-level package/contracts/blank host: `../../Saved/FabRelease/`
+- Main-project runtime reports: `Saved/RuntimeInspector/Task5/`
+- Final media: `FabMedia/`
 
 ## Media Signoff
 
-- Final image manifest:
-  - `FabMedia/fab_media_manifest.json`
-- Final image status:
-  - all five images passed `1920x1080`, PNG, `<3145728` bytes
-- Final images:
-  - `FabMedia/cover.png`
-  - `FabMedia/screenshot_01_actor_panel.png`
-  - `FabMedia/screenshot_02_changes_workflow.png`
-  - `FabMedia/screenshot_03_settings.png`
-  - `FabMedia/screenshot_04_tools.png`
-- Actor screenshot note:
-  - generated through real input-equivalent actor pick
-  - selected actor: `BP_ThirdPersonCharacter_C_0`
-- Demo:
-  - `FabMedia/demo.mp4`
-  - ffprobe: H.264, `1920x1080`, `30 fps`, `35.000000s`, `810418` bytes
-  - note: deterministic screenshot-sequence video, not a live operation recording
-- Capture robustness note:
-  - `CaptureFabMedia.ps1` now selects the largest valid target window and temporarily foregrounds it before Win32 capture.
-  - This prevents stale minimized windows or the Codex/browser foreground from contaminating listing media.
+- `FabMedia/cover.png`
+- `FabMedia/screenshot_01_actor_panel.png`
+- `FabMedia/screenshot_02_changes_workflow.png`
+- `FabMedia/screenshot_03_settings.png`
+- `FabMedia/screenshot_04_tools.png`
+- `FabMedia/demo.mp4`
+- `FabMedia/fab_media_manifest.json`
 
-## Blank-Host Manual Smoke
+All five images are `1920x1080` PNG files below 3 MiB. The demo is a live interaction capture, H.264, `1920x1080`, `30 fps`, `43.833333s`, `3509988` bytes. It is not a screenshot-sequence substitute.
 
-Use the preserved blank-install host project. Do not use the main `PluginMaker` project for this signoff.
+## Current Stop Condition
 
-Important boundary:
+An unauthenticated HTTP check on 2026-08-16 returned `404` for both:
 
-- the preserved blank host contains the packaged `RuntimeInspector` plugin only
-- it does not include `UE_MCP_Bridge` or `control_runtime_inspector` automation hooks
-- this final tab smoke remains human/manual
+- `https://github.com/pen364692088/plugin`
+- `https://github.com/pen364692088/plugin/issues`
 
-### Minimum Path
+Therefore the descriptor/listing links cannot yet be signed as public. Do not make the repository public, create a replacement site, or point support to an unrelated page without publisher authorization. This blocks the `Fab-ready` claim and the final fast-forward of `main`, but it does not invalidate local technical evidence.
 
-1. Open:
-   - `Saved/FabRelease/BlankProjectValidation/RuntimeInspectorBlank_UE55/RuntimeInspectorBlank/RuntimeInspectorBlank.uproject`
-2. Wait for shader compilation to finish.
-3. Open Runtime Inspector.
-4. Select a test actor in the level.
-5. Verify `Actor` page opens and shows selection plus component/property content.
-6. Switch to `Changes` and confirm the page opens without embedded settings content.
-7. Switch to `Settings` and confirm it is the only highlighted settings-style tab.
-8. Switch to `Tools` and confirm it is the only highlighted tools-style tab.
-9. Return to `Actor` and confirm basic interaction still works.
+## Claim Boundary
 
-### Pass Criteria
-
-- Panel opens successfully.
-- Actor selection appears.
-- `Actor / Changes / Settings / Tools` all open.
-- No page is blank, blocked, or misrouted.
-- No double-highlighted tabs.
-- No blocking modal/input leak after normal use.
-- Side panels remain readable in the blank host and are not physically tiny.
-
-### Current Record
-
-- Date: 2026-06-04
-- Operator: Codex product/package/media validation, partial blank-host interaction
-- Result: `PENDING_FULL_HUMAN_TAB_SMOKE`
-- Notes:
-  - Automated blank-load validation passed.
-  - Packaged blank host entered PIE and RuntimeInspector opened.
-  - The DPI scaling bug is fixed in the blank host readability evidence.
-  - `Actor / Changes` have blank-host visual evidence.
-  - `Settings / Tools` still require a human/operator click-through in the blank host; OS coordinate automation was not reliable enough to sign those pages.
-  - Evidence:
-    - `Saved/FabRelease/blank_host_dpi_fix_printwindow.png`
-    - `Saved/FabRelease/blank_host_pid_48944.png`
-
-## Remaining Non-Repo Steps
-
-- Complete full blank-host manual tab smoke.
-- Create/submit Fab listing in the backend.
-- Fill `MarketplaceURL` after the Fab listing exists.
-- Wait for Epic review result.
+This signoff cannot prove Fab acceptance, all GPUs/DPIs, third-party rights ownership, or future UE-version compatibility. MarketplaceURL, publisher account/tax/payout setup, and Epic review remain external.

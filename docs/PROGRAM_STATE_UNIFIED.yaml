@@ -1,18 +1,17 @@
 schema_version: 1
 project:
   name: RuntimeInspector
-  repo_root: /mnt/d/Project/Game/UE/PluginMaker/Plugins/RuntimeInspector
-  plugin_descriptor: /mnt/d/Project/Game/UE/PluginMaker/Plugins/RuntimeInspector/RuntimeInspector.uplugin
-  host_project: /mnt/d/Project/Game/UE/PluginMaker/PluginMaker.uproject
+  repo_root: D:/Project/Game/UE/PluginMaker/Plugins/RuntimeInspector
+  plugin_descriptor: D:/Project/Game/UE/PluginMaker/Plugins/RuntimeInspector/RuntimeInspector.uplugin
+  host_project: D:/Project/Game/UE/PluginMaker/PluginMaker.uproject
 
 doc_authority:
   directory: docs
   default_session_entrypoints:
     - docs/PROGRAM_STATE_UNIFIED.yaml
     - docs/STATUS.md
-    - docs/codex/tasks/TASK_LANE_INDEX.md
+    - docs/FAB_RC_SIGNOFF.md
     - docs/AGENT_DEVELOPMENT.md
-    - docs/TROUBLESHOOTING.md
   development_authority: docs/AGENT_DEVELOPMENT.md
   troubleshooting_reference: docs/TROUBLESHOOTING.md
   ui_appendix: docs/UI_GUARDRAILS.md
@@ -20,56 +19,47 @@ doc_authority:
 
 current_baseline:
   branch: codex/runtimeinspector-fab-rc
-  product_rc_commit: 88dacaae56b5aa834ec435c2c5d0d5ba91f73762
-  product_rc_summary: Fix RuntimeInspector blank host dock scaling
-  superseded_product_rc_commit: 0a26995c1f057972bb175afa483326cb1c2df886
-  superseded_reason: blank_host_editor_pie_dpi_scaling_bug
-  worktree_state: dirty_with_signoff_artifacts
-  stability_status: rc_product_patched_artifacts_ready_pending_full_blank_tab_smoke
+  implementation_commit: ad6ddd9e8eebf1552f3aa18c76e795f37a10b47a
+  implementation_summary: RuntimeInspector Fab technical RC fixes complete
+  engine: 5.7
+  platform: Win64
+  stability_status: technical_rc_pending_final_exact_artifact_and_public_url
+  final_commit_authority: Saved/FabRelease/Submission/RuntimeInspector-Fab-Submission.manifest.json
 
 current_focus:
   program_goal: >
-    Keep RuntimeInspector usable as a real runtime inspection, change review,
-    validation, and controlled promote workbench inside Editor + PIE.
+    Deliver an auditable RuntimeInspector Fab technical RC whose upload ZIP,
+    compiled smoke package, blank-host behavior, documentation, and media are
+    consistent and descend from one committed source state.
   current_stage_goal: >
-    Finish the full human blank-host tab smoke on the preserved validation host,
-    then use the prepared package, screenshots, demo, and checklist for Fab
-    submission unless the smoke reveals a product issue.
+    Freeze docs/media, regenerate exact-HEAD UE 5.7 artifacts, complete real-input
+    blank-host signoff, publish the RC branch, then resolve the public URL gate
+    before any fast-forward of remote main.
   stage_success_criteria:
-    - Product RC commit is frozen and pushed on codex/runtimeinspector-fab-rc.
-    - Package generation passes from the product RC.
-    - Blank-host automated load validation passes.
-    - Blank-host packaged PIE/open/readability smoke shows side panels are no longer physically tiny.
-    - Final listing screenshots are normalized to 1920x1080 and under 3MB each.
-    - Demo media exists, is 30-45 seconds, 1080p, and H.264.
-    - Full blank-host manual interaction smoke is signed.
-    - Signoff docs distinguish repo-local evidence from Fab backend/manual-only follow-ups.
-  next_decision_gate: >
-    After full blank-host manual tab smoke is signed, decide whether the remaining
-    work is only Fab backend metadata/MarketplaceURL or whether a product/package
-    patch is needed.
+    - Source ZIP is generated from committed HEAD with clean shipping paths.
+    - SourceSubmission and CompiledSmoke contracts pass.
+    - UE 5.7 Development and Shipping BuildPlugin pass.
+    - RIFabBlank install/load smoke passes without plugin-consequential warnings.
+    - Real mouse input reaches Actor, Changes, Settings, and Tools in the exact ZIP-derived blank host.
+    - Blank-host Tools can run one self-test and one workflow.
+    - Normal and narrow/tall blank-host screenshots are preserved.
+    - mainline_full_closure remains 24 of 24 passing.
+    - Public documentation and support URLs return HTTP 200.
+    - Remote main is updated only by an ordinary fast-forward and never by force.
 
 active_risks:
-  - id: blank_host_manual_smoke
+  - id: final_exact_artifact
     status: active
-    summary: >
-      Automated blank-host load validation passed, and packaged PIE/open/readability
-      evidence shows the scaling bug is fixed. Full human tab smoke across
-      Actor/Changes/Settings/Tools is still not signed. Do not call the RC
-      Fab-ready until this manual step is completed.
-  - id: media_submission
-    status: mitigated
-    summary: >
-      Final FabMedia images are normalized to 1920x1080 PNG and under 3MB. The
-      demo is 35 seconds, H.264, 1920x1080, and under 25MB. The demo is a
-      deterministic screenshot-sequence video, not a live operation recording.
-      CaptureFabMedia now skips minimized windows and temporarily foregrounds
-      the largest valid PluginMaker Preview window before capture.
+    summary: Final contracts must be regenerated after the docs/media commit so the manifest records the final committed HEAD.
+  - id: blank_host_real_input
+    status: active
+    summary: Final exact ZIP-derived RIFabBlank still needs preserved real-mouse normal and narrow/tall evidence.
+  - id: public_release_urls
+    status: blocked_external_authority
+    summary: The configured GitHub repository and Issues URLs returned HTTP 404 unauthenticated on 2026-08-16; publisher authorization is required for a public destination.
   - id: marketplace_url
     status: external_pending
-    summary: >
-      RuntimeInspector.uplugin MarketplaceURL can only be finalized after the Fab
-      listing exists.
+    summary: MarketplaceURL can only be finalized after the Fab listing exists.
 
 validation_authority:
   build: PluginMakerEditor Win64 Development
@@ -77,42 +67,31 @@ validation_authority:
   required_evidence:
     - successful_editor_build
     - affected_self_tests_pass
-    - real_user_flow_validation_for_behavior_changes
-  preferred_runtime_validation:
-    - ue_mcp_or_bridge
-    - real_window_screenshot
-    - self_test_or_workflow_summary
+    - mainline_full_closure_pass
+    - exact_artifact_contracts_pass
+    - real_mouse_blank_host_pass
   closure_rule: >
-    Do not claim closed completion without real main-flow evidence; use
-    pending-validation or local-only when only compile/self-test evidence exists.
+    Do not claim Fab-ready without exact committed artifact evidence, real input
+    evidence, and public release URLs.
 
 release_evidence:
-  product_rc_commit: 88dacaae56b5aa834ec435c2c5d0d5ba91f73762
-  package_root: Saved/FabRelease/Package/RuntimeInspector_UE55/RuntimeInspector
-  package_log: Saved/build_runtimeinspector_fab_release.log
-  blank_validation_host: Saved/FabRelease/BlankProjectValidation/RuntimeInspectorBlank_UE55/RuntimeInspectorBlank/RuntimeInspectorBlank.uproject
-  blank_automated_load_log: Saved/fab_blank_project_validation.log
-  blank_packaged_pie_readability_evidence:
-    - Saved/FabRelease/blank_host_dpi_fix_printwindow.png
-    - Saved/FabRelease/blank_host_pid_48944.png
-  blank_manual_smoke_status: pending_full_tab_human_signoff
+  source_zip: Saved/FabRelease/Submission/RuntimeInspector-Fab-Submission.zip
+  source_manifest: Saved/FabRelease/Submission/RuntimeInspector-Fab-Submission.manifest.json
+  source_contract: Saved/FabRelease/Submission/RuntimeInspector-Fab-Submission.source-contract.json
+  package_root: ../../Saved/FabRelease/Package/RuntimeInspector_UE57/RuntimeInspector
+  contracts_root: ../../Saved/FabRelease/Contracts/RuntimeInspector_UE57
+  blank_validation_host: ../../Saved/FabRelease/BlankHostLoadSmoke/RIFabBlank_UE57/RIFabBlank/RIFabBlank.uproject
+  blank_install_load_log: ../../Saved/FabRelease/fab_blank_host_install_load_smoke_UE57.log
+  mainline_closure: Saved/RuntimeInspector/Task5/mainline-full-closure-after-commits.json
+  packaged_port_ownership: Saved/RuntimeInspector/Task5/packaged-port-ownership-green.json
+  packaged_lifecycle: Saved/RuntimeInspector/Task5/packaged-run-stop-lifecycle-green.json
   media_manifest: FabMedia/fab_media_manifest.json
   demo_path: FabMedia/demo.mp4
 
-task_system:
-  lane_index: docs/codex/tasks/TASK_LANE_INDEX.md
-  task_file_pattern: docs/codex/tasks/<lane>/<task-id>.md
-  status_tags:
-    - proposed
-    - in_progress
-    - blocked
-    - pending_validation
-    - done
-
-session_handoff_policy:
-  write_handoff_when:
-    - conversation_must_stop_with_unresolved_high_value_state
-    - current_state_cannot_be_recovered_quickly_from_program_state_and_status
-  do_not_use_handoff_as:
-    - default_new_session_entry
-    - long_term_project_state_authority
+claim_boundary:
+  not_proven:
+    - Fab approval
+    - all hardware and DPI combinations
+    - asset rights ownership
+    - future Unreal Engine compatibility
+    - MarketplaceURL before listing creation

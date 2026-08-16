@@ -2,79 +2,49 @@
 
 ## Current Conclusion
 
-The current Fab product RC baseline has moved past the superseded package-build RC:
+RuntimeInspector is at a UE 5.7 Fab technical-RC candidate on `codex/runtimeinspector-fab-rc`.
 
-- Branch: `codex/runtimeinspector-fab-rc`
-- Product RC commit: `88dacaae56b5aa834ec435c2c5d0d5ba91f73762`
-- Summary: `Fix RuntimeInspector blank host dock scaling`
-- Superseded RC: `0a26995c1f057972bb175afa483326cb1c2df886`
-  - reason: blank validation host revealed the dock UI could render too small under editor PIE DPI scaling.
-
-Repo-local package generation, automated blank-load validation, DPI-aware dock layout validation, final listing screenshots, and a 35s H.264 demo have been regenerated from the new RC state. Do not claim final Fab submission readiness yet: full human blank-host multi-tab smoke is still not signed, and `MarketplaceURL` remains a post-listing backend item.
-
-## Current Stage Goal
-
-Finish the remaining human blank-host tab smoke, then submit the prepared package/media/checklist evidence to Fab without changing the product RC unless that smoke finds a product issue.
+- Implementation baseline: `ad6ddd9e8eebf1552f3aa18c76e795f37a10b47a`
+- Tasks 0-4 are implemented and independently committed.
+- Task 5 main-project runtime closure and live media capture pass.
+- Final exact-HEAD BuildPlugin/blank-host evidence must be regenerated after the docs/media freeze.
+- Fab-ready must not be claimed while the public documentation/support URLs return HTTP 404.
 
 ## Confirmed Facts
 
-- Unique authority document directory is `docs/`.
-- Current branch is `codex/runtimeinspector-fab-rc`.
-- Product RC code was patched for blank-host DPI scaling and committed.
-- Package generation passed from the new product RC:
-  - `Saved/FabRelease/Package/RuntimeInspector_UE55/RuntimeInspector`
-  - log: `Saved/build_runtimeinspector_fab_release.log`
-- Blank-project automated load validation passed and preserved the validation host:
-  - host: `Saved/FabRelease/BlankProjectValidation/RuntimeInspectorBlank_UE55/RuntimeInspectorBlank/RuntimeInspectorBlank.uproject`
-  - log: `Saved/fab_blank_project_validation.log`
-- Blank-host packaged PIE/open/readability smoke has direct screenshot evidence:
-  - `Saved/FabRelease/blank_host_dpi_fix_printwindow.png`
-  - `Saved/FabRelease/blank_host_pid_48944.png`
-  - scope: packaged blank host entered PIE, RuntimeInspector opened, selected actor context rendered, dock side panels were readable instead of physically tiny.
-- Full blank-host manual tab smoke remains pending:
-  - `Actor / Changes` have blank-host visual evidence.
-  - `Settings / Tools` still need a human/operator click-through in the blank host; OS coordinate automation was not reliable enough to sign this.
-- Final listing images are in `FabMedia/`:
-  - `cover.png`
-  - `screenshot_01_actor_panel.png`
-  - `screenshot_02_changes_workflow.png`
-  - `screenshot_03_settings.png`
-  - `screenshot_04_tools.png`
-  - manifest: `FabMedia/fab_media_manifest.json`
-- Media compliance passed locally:
-  - all five final images are `1920x1080`, PNG, and under `3145728` bytes
-- Demo media exists:
-  - `FabMedia/demo.mp4`
-  - ffprobe: H.264, `1920x1080`, `30 fps`, `35.000000s`, `810418` bytes
-- Actor screenshot uses a real input-equivalent pick path:
-  - `position_mouse_on_player_character`
-  - `right_mouse_pick_input`
-  - selected actor in the media run: `BP_ThirdPersonCharacter_C_0`
-- `Scripts/CaptureFabMedia.ps1` now guards against foreground-window pollution by selecting the largest valid target window and temporarily placing it topmost before Win32 capture.
+- Native dock tabs accept real pointer clicks; legacy fallback drag/resize remains isolated.
+- Tools definitions are plugin-relative, packaged, parseable, non-empty, and action-bound.
+- Default typography/readability and UI scale are covered by `ui_readability` and `runtime_ui_contract_v1`.
+- `mainline_full_closure` passed 24/24 after the implementation commits.
+- Packaged loopback validation distinguished editor port `12097` from packaged-runtime port `12098` and verified process ownership.
+- Packaged wrapper/child cleanup is enforced and verified.
+- Fab media now contains five current UE 5.7 stills and a real 43.833-second operation video.
+- Upload/source bytes, compiled smoke bytes, and blank-host bytes are designed to descend from one committed source ZIP.
 
-## Remaining Blockers
+## Active Blockers
 
-- Full blank-host manual tab smoke still needs a human/operator PASS record.
-- `MarketplaceURL` must be filled after the Fab listing exists.
-- Fab backend account, tax, payout, listing metadata, and review result are outside repo-local scope.
-
-## Pending-Validation / Unknown
-
-- `unknown`: whether full blank-host manual tab smoke will reveal a packaged-install usability issue outside the already fixed scaling problem.
-- `unknown`: whether Fab backend review will request media, metadata, or packaging changes.
+1. Regenerate and pass the final exact-HEAD source, compiled, and blank-host contracts with Unreal Editor closed.
+2. Record real-mouse Actor/Changes/Settings/Tools plus Tools run evidence in the exact ZIP-derived `RIFabBlank`, including normal and narrow/tall layouts.
+3. Provide a public documentation/support location. On 2026-08-16 the current GitHub repository and Issues URLs returned HTTP 404 without authentication.
 
 ## Next Smallest Closure Loop
 
-1. Open the preserved blank validation host.
-2. Enter PIE if it is not already playing.
-3. Open RuntimeInspector and click through `Actor / Changes / Settings / Tools`.
-4. If it passes, update only the manual smoke record; do not change product code.
-5. Fill `MarketplaceURL` after the Fab listing exists.
+1. Freeze and commit only the intended docs/media changes.
+2. Run `Scripts/RunFab57Validation.cmd` from that commit.
+3. Perform the blank-host real-input click-through and save screenshots/logs under `Saved/RuntimeInspector/Task5/`.
+4. Push the RC branch.
+5. Resolve the public URL blocker.
+6. Only then fast-forward remote `main`; stop on any non-fast-forward or protection rejection and never force push.
 
-## Authority Docs
+## Authority And Evidence
 
 - State authority: `docs/PROGRAM_STATE_UNIFIED.yaml`
-- Task lanes: `docs/codex/tasks/TASK_LANE_INDEX.md`
-- Development authority: `docs/AGENT_DEVELOPMENT.md`
-- Troubleshooting reference: `docs/TROUBLESHOOTING.md`
-- UI appendix: `docs/UI_GUARDRAILS.md`
+- Technical signoff: `docs/FAB_RC_SIGNOFF.md`
+- Submission checklist: `FAB_SUBMISSION_CHECKLIST.md`
+- Submission manifest: `Saved/FabRelease/Submission/RuntimeInspector-Fab-Submission.manifest.json`
+- Main closure: `Saved/RuntimeInspector/Task5/mainline-full-closure-after-commits.json`
+- Media manifest: `FabMedia/fab_media_manifest.json`
+
+## Claim Boundary
+
+Local technical evidence cannot guarantee Fab approval, all hardware/DPI combinations, asset-rights ownership, or future engine compatibility. MarketplaceURL and Fab account/tax/payout/review work remain external.

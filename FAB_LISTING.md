@@ -52,19 +52,16 @@ For advanced setups, the plugin can discover supported loopback packaged-runtime
 ## Listing Media Shot List
 
 1. Main inspector panel open on a selected actor in PIE
-2. File page showing staged patch summary and compare rows
+2. Changes page showing a staged patch summary and review path
 3. Settings page showing hotkey/outline/apply controls
-4. Test page showing workflows or self-tests passing
-5. Promote preview or applied audit result
-6. Packaged-runtime session pullback flow on the File page
+4. Tools page showing configured workflows and self-tests
 
 ## Demo Video Outline
 
-1. Start PIE and open the inspector
-2. Pick an actor and edit one supported property
-3. Stage the change and build a compare/audit report
-4. Preview promote and apply from the editor
-5. Show a packaged-runtime patch pull returning into the editor workflow
+1. Open the inspector in PIE and show the selected actor
+2. Visit Actor and Changes, including a staged old/new value
+3. Visit Settings and Tools
+4. Run a configured workflow and return to the Actor flow
 
 ## Links
 
