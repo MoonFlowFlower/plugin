@@ -1041,6 +1041,33 @@ namespace
         return true;
     }
 
+    static void RI_RemoteSetActorQueryFields(const TSharedPtr<FJsonObject>& Params, const FString& ActorQuery)
+    {
+        if (!Params.IsValid())
+        {
+            return;
+        }
+
+        const FString NormalizedActorQuery = ActorQuery.TrimStartAndEnd();
+        if (NormalizedActorQuery.IsEmpty())
+        {
+            return;
+        }
+
+        // actorQuery is the RuntimeInspector protocol field. actorPath/actorLabel
+        // keep the request compatible with the packaged bridge's shared actor
+        // resolver, which is also used by direct property-apply requests.
+        Params->SetStringField(TEXT("actorQuery"), NormalizedActorQuery);
+        if (NormalizedActorQuery.Contains(TEXT("/")))
+        {
+            Params->SetStringField(TEXT("actorPath"), NormalizedActorQuery);
+        }
+        else
+        {
+            Params->SetStringField(TEXT("actorLabel"), NormalizedActorQuery);
+        }
+    }
+
     static bool RI_RemoteResolvePackagedTarget(
         UInspectorWorldSubsystem* Subsystem,
         const FString& SessionId,
@@ -1064,21 +1091,23 @@ namespace
             return false;
         }
 
-        const FRIRuntimeTargetInfo* Target = Targets.FindByPredicate([](const FRIRuntimeTargetInfo& Candidate)
+        auto IsPackagedFixture = [](const FRIRuntimeTargetInfo& Candidate)
         {
             return Candidate.ActorLabel.Contains(TEXT("BP_TestVarsActor"), ESearchCase::IgnoreCase)
                 || Candidate.ActorName.Contains(TEXT("BP_TestVarsActor"), ESearchCase::IgnoreCase)
                 || Candidate.ActorClass.Contains(TEXT("BP_TestVarsActor"), ESearchCase::IgnoreCase)
                 || Candidate.ActorClassPath.Contains(TEXT("BP_TestVarsActor"), ESearchCase::IgnoreCase);
-        });
-        if (!Target && Targets.Num() > 0)
-        {
-            Target = &Targets[0];
-        }
+        };
 
+        // Prefer the actor selected in the packaged runtime. Its selection
+        // baseline is the authority used when the bridge captures a patch.
+        const FRIRuntimeTargetInfo* Target = Targets.FindByPredicate([&IsPackagedFixture](const FRIRuntimeTargetInfo& Candidate)
+        {
+            return Candidate.bSelected && IsPackagedFixture(Candidate);
+        });
         if (!Target)
         {
-            OutError = TEXT("Packaged runtime target BP_TestVarsActor not found");
+            OutError = TEXT("Select a BP_TestVarsActor in the packaged runtime before running the packaged matrix");
             return false;
         }
 
@@ -1101,14 +1130,7 @@ namespace
         Params->SetStringField(TEXT("sessionId"), Session.SessionId);
         Params->SetStringField(TEXT("propertyName"), PropertyName);
         Params->SetStringField(TEXT("value"), ValueText);
-        if (ActorQuery.Contains(TEXT("/")))
-        {
-            Params->SetStringField(TEXT("actorPath"), ActorQuery);
-        }
-        else
-        {
-            Params->SetStringField(TEXT("actorLabel"), ActorQuery);
-        }
+        RI_RemoteSetActorQueryFields(Params, ActorQuery);
 
         TSharedPtr<FJsonObject> ResultObject;
         if (!RI_RemoteCallExternalRuntimeObjectMethod(Session, TEXT("apply_runtime_property_text"), Params, ResultObject, OutError))
@@ -1976,7 +1998,7 @@ bool UInspectorWorldSubsystem::PullPatchBundleFromRuntimeSession(const FString& 
 
         TSharedPtr<FJsonObject> Params = MakeShared<FJsonObject>();
         Params->SetStringField(TEXT("sessionId"), NormalizedSessionId);
-        Params->SetStringField(TEXT("actorQuery"), NormalizedActorQuery);
+        RI_RemoteSetActorQueryFields(Params, NormalizedActorQuery);
 
         TSharedPtr<FJsonValue> ResultValue;
         if (!RI_RemoteCallExternalRuntimeJsonRpc(
@@ -2111,7 +2133,7 @@ bool UInspectorWorldSubsystem::RunWorkflowOnRuntimeSession(const FString& Sessio
         const FString NormalizedActorQuery = ActorQuery.TrimStartAndEnd();
         if (!NormalizedActorQuery.IsEmpty())
         {
-            Params->SetStringField(TEXT("actorQuery"), NormalizedActorQuery);
+            RI_RemoteSetActorQueryFields(Params, NormalizedActorQuery);
         }
 
         TSharedPtr<FJsonValue> ResultValue;
