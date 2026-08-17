@@ -18,8 +18,8 @@ This document defines the technical release-candidate gate. It is not the develo
 - A runtime Transform edit was staged and rendered as an old/new Changes row.
 - Tools displayed non-empty Tests/Workflows, ran `dock_layout`, and preserved the full `mainline_safe_patch_core=PASS | Passed=6 Failed=0` workflow identity.
 - `mainline_full_closure` passed 24/24 after the final implementation commits.
-- The exact committed source ZIP chain passed at `a34a1e4`: source contract, compiled contract, Development/Shipping BuildPlugin, and UE 5.7 blank-host install/load smoke.
-- The exact ZIP-derived `RIFabBlank` passed real-`O` and real-mouse Actor/Changes/Settings/Tools click-through in normal and narrow/tall windows, including a Tools self-test and workflow.
+- The exact committed source ZIP chain passes from the closing commit recorded by the generated manifest: source contract, compiled contract, Development/Shipping BuildPlugin, and UE 5.7 blank-host install/load smoke.
+- The exact ZIP-derived `RIFabBlank` passed real-`O` and real-mouse Actor/Changes/Settings/Tools click-through, including a Tools self-test and workflow. The current exact artifact report is preserved at `Saved/RuntimeInspector/Task5/FinalExactBlankHostRC/final-exact-blank-host-real-input.json`; the implementation-identical `904x720` narrow/tall run remains preserved separately.
 - Packaged loopback validation used a process-owned listener on `127.0.0.1:12098`; editor and packaged listeners were not conflated.
 - The packaged-runtime cleanup scripts removed both wrapper and child processes and verified no dedicated-package process remained.
 - Five UE 5.7 screenshots and one live 41.933-second demo were visually inspected and normalized.
@@ -58,12 +58,12 @@ All five images are `1920x1080` PNG files below 3 MiB. The demo is a live intera
 
 ## Current Stop Condition
 
-An unauthenticated HTTP check on 2026-08-16 returned `404` for both:
+The Git remote reports that the repository moved to the canonical `MoonFlowFlower/plugin` location. The publisher profile returns HTTP `200`, but an unauthenticated HTTP check on 2026-08-16 returned `404` for both release destinations:
 
-- `https://github.com/pen364692088/plugin`
-- `https://github.com/pen364692088/plugin/issues`
+- `https://github.com/MoonFlowFlower/plugin`
+- `https://github.com/MoonFlowFlower/plugin/issues`
 
-Therefore the descriptor/listing links cannot yet be signed as public. Do not make the repository public, create a replacement site, or point support to an unrelated page without publisher authorization. This blocks the `Fab-ready` claim and the final fast-forward of `main`, but it does not invalidate local technical evidence. The RC branch may be pushed only after `Scripts/RunFab57Validation.cmd` passes from the exact closing commit.
+Therefore the descriptor/listing links cannot yet be signed as public. Do not change repository visibility, create a replacement site, or point support to an unrelated page without publisher authorization. This blocks the `Fab-ready` claim and the final fast-forward of `main`, but it does not invalidate local technical evidence. The RC branch is published only after `Scripts/RunFab57Validation.cmd` passes from the exact closing commit; any subsequent shipping-path change invalidates that artifact until the chain is regenerated.
 
 ## Claim Boundary
 

@@ -66,6 +66,6 @@ For advanced setups, the plugin can discover supported loopback packaged-runtime
 
 ## Links
 
-- Docs: <https://github.com/pen364692088/plugin#readme>
-- Support: <https://github.com/pen364692088/plugin/issues>
-- Publisher: <https://github.com/pen364692088>
+- Docs: <https://github.com/MoonFlowFlower/plugin#readme>
+- Support: <https://github.com/MoonFlowFlower/plugin/issues>
+- Publisher: <https://github.com/MoonFlowFlower>

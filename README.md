@@ -55,5 +55,5 @@ Runtime Inspector is an Unreal Engine 5.7 plugin for inspecting live actors and 
 ## Documentation And Support
 
 - Chinese product guide: `USER_GUIDE_zh-CN.md` (included with the plugin)
-- Online documentation: <https://github.com/pen364692088/plugin#readme>
-- Support and bug reports: <https://github.com/pen364692088/plugin/issues>
+- Online documentation: <https://github.com/MoonFlowFlower/plugin#readme>
+- Support and bug reports: <https://github.com/MoonFlowFlower/plugin/issues>

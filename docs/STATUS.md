@@ -2,11 +2,12 @@
 
 ## Current Conclusion
 
-RuntimeInspector is at a UE 5.7 Fab technical-RC candidate on `codex/runtimeinspector-fab-rc`.
+RuntimeInspector is at a UE 5.7 Fab technical RC on `codex/runtimeinspector-fab-rc`.
 
 - Implementation baseline: `a34a1e4ac3e190db14329cba9e216d591b0eb21d`
-- Tasks 0-4 are implemented and independently committed; Task 5 implementation, real-input, packaged-loopback, and media evidence is locally closed.
-- The exact source/compiled/blank-host chain passed at `a34a1e4`; it remains a mandatory release gate to regenerate after the closing docs/media commit.
+- Tasks 0-4 are independently committed; Task 5 implementation, exact-artifact, real-input, packaged-loopback, documentation, and media evidence is technically closed.
+- The exact source/compiled/blank-host chain passes from the closing commit and ZIP recorded in `Saved/FabRelease/Submission/RuntimeInspector-Fab-Submission.manifest.json`.
+- The RC branch is published after that exact chain passes; remote `main` remains intentionally unchanged until the public URL gate passes.
 - Fab-ready must not be claimed while the public documentation/support URLs return HTTP 404.
 
 ## Confirmed Facts
@@ -23,16 +24,16 @@ RuntimeInspector is at a UE 5.7 Fab technical-RC candidate on `codex/runtimeinsp
 
 ## Active Blockers
 
-1. Regenerate and pass the final exact-HEAD source, compiled, and blank-host contracts with Unreal Editor closed before pushing the RC branch.
-2. Provide a public documentation/support location. On 2026-08-16 the current GitHub repository and Issues URLs returned HTTP 404 without authentication.
+1. Make the canonical `MoonFlowFlower/plugin` documentation and support destinations publicly reachable, or provide publisher-approved replacements. On 2026-08-16 the repository and Issues URLs returned HTTP 404 without authentication; the publisher profile itself returned HTTP 200.
+2. Keep remote `main` unchanged until both public URLs return HTTP 200.
 
 ## Next Smallest Closure Loop
 
-1. Freeze and commit only the intended docs/media changes.
-2. Run `Scripts/RunFab57Validation.cmd` from that commit.
-3. Push the RC branch only if the generated contracts pass.
-4. Resolve the public URL blocker.
-5. Only then fast-forward remote `main`; stop on any non-fast-forward or protection rejection and never force push.
+1. Resolve the public URL blocker without substituting an unrelated destination.
+2. Recheck DocsURL, SupportURL, the source manifest commit, ZIP SHA-256, and remote RC SHA.
+3. Confirm remote `main` is still an ancestor of the verified RC commit.
+4. Only then fast-forward remote `main`; stop on any non-fast-forward or protection rejection and never force push.
+5. If any shipping-path file changes before that push, regenerate the complete exact-artifact chain first.
 
 ## Authority And Evidence
 
@@ -40,7 +41,7 @@ RuntimeInspector is at a UE 5.7 Fab technical-RC candidate on `codex/runtimeinsp
 - Technical signoff: `docs/FAB_RC_SIGNOFF.md`
 - Submission checklist: `FAB_SUBMISSION_CHECKLIST.md`
 - Submission manifest: `Saved/FabRelease/Submission/RuntimeInspector-Fab-Submission.manifest.json`
-- Exact blank-host real input: `Saved/RuntimeInspector/Task5/FinalExactBlankHostA34/final-exact-blank-host-real-input.json`
+- Exact blank-host real input: `Saved/RuntimeInspector/Task5/FinalExactBlankHostRC/final-exact-blank-host-real-input.json`
 - Main closure: `Saved/RuntimeInspector/Task5/mainline-full-closure-final-a34.json`
 - Packaged matrix: `Saved/RuntimeInspector/Task5/PackagedGreenA34/packaged-loopback-matrix-final-a34-green.normalized.json`
 - Media manifest: `FabMedia/fab_media_manifest.json`

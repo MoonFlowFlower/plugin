@@ -35,7 +35,7 @@ This checklist separates the repo-local technical RC from Fab backend and legal/
 - [x] Packaged-runtime stop scripts kill and verify the complete wrapper/child process tree.
 - [x] Listing media regenerated from the current UE 5.7 UI.
 - [x] Demo video is a live 41.933-second H.264 real-input capture, not a screenshot sequence.
-- [x] The exact-artifact chain passed from implementation commit `a34a1e4`: SourceSubmission, CompiledSmoke, Development/Shipping BuildPlugin, and blank-host install/load. The closing docs/media commit must run the same chain again; its generated manifest is the final commit/SHA authority.
+- [x] The exact-artifact chain passes from the committed closing state recorded by the generated source manifest: SourceSubmission, CompiledSmoke, Development/Shipping BuildPlugin, and blank-host install/load all descend from the same ZIP bytes.
 - [x] Exact ZIP-derived `RIFabBlank` has preserved real-`O` and real-mouse Actor/Changes/Settings/Tools evidence in normal and narrow/tall windows, plus one self-test and one workflow result.
 - [ ] Public DocsURL and SupportURL return HTTP 200.
 
@@ -48,7 +48,7 @@ Authoritative generated evidence paths:
 - Contracts: `../../Saved/FabRelease/Contracts/RuntimeInspector_UE57/`
 - Blank host: `../../Saved/FabRelease/BlankHostLoadSmoke/RIFabBlank_UE57/RIFabBlank/RIFabBlank.uproject`
 - Blank-host log: `../../Saved/FabRelease/fab_blank_host_install_load_smoke_UE57.log`
-- Exact blank-host real input: `Saved/RuntimeInspector/Task5/FinalExactBlankHostA34/final-exact-blank-host-real-input.json`
+- Exact blank-host real input: `Saved/RuntimeInspector/Task5/FinalExactBlankHostRC/final-exact-blank-host-real-input.json`
 - Main-project closure: `Saved/RuntimeInspector/Task5/mainline-full-closure-final-a34.json`
 - Packaged matrix: `Saved/RuntimeInspector/Task5/PackagedGreenA34/packaged-loopback-matrix-final-a34-green.normalized.json`
 - Packaged lifecycle: `Saved/RuntimeInspector/Task5/packaged-run-stop-final-a34-green.json`
@@ -60,7 +60,8 @@ Authoritative generated evidence paths:
 - [x] Five final stills are `1920x1080`, PNG, and below 3 MiB.
 - [x] `FabMedia/demo.mp4` is H.264, `1920x1080`, `30 fps`, `41.933008s`, and `5066747` bytes.
 - [x] Image/video hashes and capture provenance are recorded in `FabMedia/fab_media_manifest.json`.
-- [ ] `RuntimeInspector.uplugin` SupportURL is publicly reachable. Current repository and Issues URLs returned HTTP 404 in an unauthenticated check on 2026-08-16; do not silently substitute an unrelated page.
+- [x] Publisher metadata uses the canonical repository owner, `MoonFlowFlower`; the publisher profile returns HTTP 200.
+- [ ] `RuntimeInspector.uplugin` DocsURL and SupportURL are publicly reachable. The canonical repository and Issues URLs returned HTTP 404 in an unauthenticated check on 2026-08-16; do not silently substitute an unrelated page.
 - [ ] Replace `MarketplaceURL` only after the Fab listing exists.
 
 ## Final Release Gate

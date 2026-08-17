@@ -152,6 +152,6 @@
 ## 9. 支持与反馈
 
 - 文档入口：`README.md`
-- Issue / 支持：<https://github.com/pen364692088/plugin/issues>
+- Issue / 支持：<https://github.com/MoonFlowFlower/plugin/issues>
 
 如果你要把本插件交给团队里的其他同事使用，建议把本文档和 README 一起发给他们。

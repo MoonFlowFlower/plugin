@@ -32,9 +32,8 @@ current_focus:
     compiled smoke package, blank-host behavior, documentation, and media are
     consistent and descend from one committed source state.
   current_stage_goal: >
-    Commit the visually reviewed docs/media freeze, regenerate exact-HEAD UE 5.7
-    artifacts from that closing commit, publish the RC branch, then resolve the
-    public URL gate before any fast-forward of remote main.
+    Hold the verified exact-HEAD UE 5.7 RC stable, resolve the canonical public
+    documentation/support URL gate, then fast-forward remote main without force.
   stage_success_criteria:
     - Source ZIP is generated from committed HEAD with clean shipping paths.
     - SourceSubmission and CompiledSmoke contracts pass.
@@ -49,14 +48,14 @@ current_focus:
 
 active_risks:
   - id: final_exact_artifact
-    status: release_gate
-    summary: The full chain passed at implementation commit a34a1e4 and must be regenerated after the docs/media closing commit; the generated manifest records the final committed HEAD.
+    status: closed
+    summary: The committed closing state passes the source contract, Development/Shipping BuildPlugin, compiled contract, and RIFabBlank install/load chain; the generated manifest is the final commit and ZIP SHA authority.
   - id: blank_host_real_input
     status: closed
-    summary: Exact ZIP-derived RIFabBlank passed real O, four real-mouse tabs, normal and narrow/tall layouts, dock_layout, and mainline_safe_patch_core at a34a1e4.
+    summary: Exact ZIP-derived RIFabBlank passed real O, four real-mouse tabs, dock_layout, and mainline_safe_patch_core; implementation-identical normal and narrow/tall evidence is preserved.
   - id: public_release_urls
     status: blocked_external_authority
-    summary: The configured GitHub repository and Issues URLs returned HTTP 404 unauthenticated on 2026-08-16; publisher authorization is required for a public destination.
+    summary: The canonical MoonFlowFlower/plugin repository and Issues URLs returned HTTP 404 unauthenticated on 2026-08-16; the publisher profile returns HTTP 200, but publisher authorization or an external visibility change is still required for the release destinations.
   - id: marketplace_url
     status: external_pending
     summary: MarketplaceURL can only be finalized after the Fab listing exists.
@@ -82,7 +81,7 @@ release_evidence:
   contracts_root: ../../Saved/FabRelease/Contracts/RuntimeInspector_UE57
   blank_validation_host: ../../Saved/FabRelease/BlankHostLoadSmoke/RIFabBlank_UE57/RIFabBlank/RIFabBlank.uproject
   blank_install_load_log: ../../Saved/FabRelease/fab_blank_host_install_load_smoke_UE57.log
-  blank_real_input: Saved/RuntimeInspector/Task5/FinalExactBlankHostA34/final-exact-blank-host-real-input.json
+  blank_real_input: Saved/RuntimeInspector/Task5/FinalExactBlankHostRC/final-exact-blank-host-real-input.json
   mainline_closure: Saved/RuntimeInspector/Task5/mainline-full-closure-final-a34.json
   packaged_matrix: Saved/RuntimeInspector/Task5/PackagedGreenA34/packaged-loopback-matrix-final-a34-green.normalized.json
   packaged_lifecycle: Saved/RuntimeInspector/Task5/packaged-run-stop-final-a34-green.json
