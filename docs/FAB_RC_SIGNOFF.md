@@ -5,7 +5,7 @@ This document defines the technical release-candidate gate. It is not the develo
 ## Baseline
 
 - Branch: `codex/runtimeinspector-fab-rc`
-- Implementation baseline: `ad6ddd9e8eebf1552f3aa18c76e795f37a10b47a`
+- Implementation baseline: `a34a1e4ac3e190db14329cba9e216d591b0eb21d`
 - Target: Unreal Engine 5.7, Win64
 - Source of upload bytes: committed-HEAD `RuntimeInspector-Fab-Submission.zip`
 - Source of compiled smoke bytes: that exact ZIP, not the working tree
@@ -16,11 +16,13 @@ This document defines the technical release-candidate gate. It is not the develo
 - Native dock tab pointer handlers yield to Slate/UMG buttons while legacy fallback drag/resize behavior remains tested.
 - Real mouse input opened RuntimeInspector and switched Actor, Changes, Settings, and Tools in the main project.
 - A runtime Transform edit was staged and rendered as an old/new Changes row.
-- Tools displayed non-empty Tests/Workflows, ran a configured workflow, and returned to the Actor flow.
+- Tools displayed non-empty Tests/Workflows, ran `dock_layout`, and preserved the full `mainline_safe_patch_core=PASS | Passed=6 Failed=0` workflow identity.
 - `mainline_full_closure` passed 24/24 after the final implementation commits.
+- The exact committed source ZIP chain passed at `a34a1e4`: source contract, compiled contract, Development/Shipping BuildPlugin, and UE 5.7 blank-host install/load smoke.
+- The exact ZIP-derived `RIFabBlank` passed real-`O` and real-mouse Actor/Changes/Settings/Tools click-through in normal and narrow/tall windows, including a Tools self-test and workflow.
 - Packaged loopback validation used a process-owned listener on `127.0.0.1:12098`; editor and packaged listeners were not conflated.
 - The packaged-runtime cleanup scripts removed both wrapper and child processes and verified no dedicated-package process remained.
-- Five UE 5.7 screenshots and one live 43.833-second demo were visually inspected and normalized.
+- Five UE 5.7 screenshots and one live 41.933-second demo were visually inspected and normalized.
 
 ## Final Exact-Artifact Gate
 
@@ -52,7 +54,7 @@ Expected evidence roots:
 - `FabMedia/demo.mp4`
 - `FabMedia/fab_media_manifest.json`
 
-All five images are `1920x1080` PNG files below 3 MiB. The demo is a live interaction capture, H.264, `1920x1080`, `30 fps`, `43.833333s`, `3509988` bytes. It is not a screenshot-sequence substitute.
+All five images are `1920x1080` PNG files below 3 MiB. The demo is a live interaction capture, H.264, `1920x1080`, `30 fps`, `41.933008s`, `5066747` bytes. Idle-only gaps were removed and retained real-input segments use one uniform `1.5x` presentation rate; it is not a screenshot-sequence substitute.
 
 ## Current Stop Condition
 
@@ -61,7 +63,7 @@ An unauthenticated HTTP check on 2026-08-16 returned `404` for both:
 - `https://github.com/pen364692088/plugin`
 - `https://github.com/pen364692088/plugin/issues`
 
-Therefore the descriptor/listing links cannot yet be signed as public. Do not make the repository public, create a replacement site, or point support to an unrelated page without publisher authorization. This blocks the `Fab-ready` claim and the final fast-forward of `main`, but it does not invalidate local technical evidence.
+Therefore the descriptor/listing links cannot yet be signed as public. Do not make the repository public, create a replacement site, or point support to an unrelated page without publisher authorization. This blocks the `Fab-ready` claim and the final fast-forward of `main`, but it does not invalidate local technical evidence. The RC branch may be pushed only after `Scripts/RunFab57Validation.cmd` passes from the exact closing commit.
 
 ## Claim Boundary
 

@@ -61,7 +61,8 @@ For advanced setups, the plugin can discover supported loopback packaged-runtime
 1. Open the inspector in PIE and show the selected actor
 2. Visit Actor and Changes, including a staged old/new value
 3. Visit Settings and Tools
-4. Run a configured workflow and return to the Actor flow
+4. Run the selected `Dock Layout` self-test
+5. Run `Mainline Safe Patch Core`, return to Actor, and show its `Passed=6 Failed=0` activity-log identity
 
 ## Links
 

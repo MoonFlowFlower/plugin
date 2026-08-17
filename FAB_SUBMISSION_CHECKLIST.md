@@ -5,7 +5,7 @@ This checklist separates the repo-local technical RC from Fab backend and legal/
 ## Technical RC Baseline
 
 - Branch: `codex/runtimeinspector-fab-rc`
-- Implementation baseline: `ad6ddd9e8eebf1552f3aa18c76e795f37a10b47a`
+- Implementation baseline: `a34a1e4ac3e190db14329cba9e216d591b0eb21d`
 - Engine: Unreal Engine 5.7 / Win64
 - The final shipping commit is recorded by `Saved/FabRelease/Submission/RuntimeInspector-Fab-Submission.manifest.json`; do not infer it from an older hard-coded SHA in this file.
 - The upload artifact is the committed-HEAD source ZIP. The compiled package and blank host must be derived from that exact ZIP.
@@ -30,13 +30,13 @@ This checklist separates the repo-local technical RC from Fab backend and legal/
 - [x] Directed dock tests: `panel_interaction`, `right_inspector_tabs`, `dock_layout`.
 - [x] UI contract: `ui_readability` and `runtime_ui_contract_v1`.
 - [x] Main project closure: `mainline_full_closure=PASS`, 24/24 checks.
-- [x] Tools action binding contract: all configured actions bound (`223/223` in the final main-project layout run).
+- [x] Tools action binding contract: every configured/rendered action is bound (`203/203` in the final closure run).
 - [x] Packaged loopback validation used a separately owned packaged-runtime listener on port `12098`.
 - [x] Packaged-runtime stop scripts kill and verify the complete wrapper/child process tree.
 - [x] Listing media regenerated from the current UE 5.7 UI.
-- [x] Demo video is a live 43.833-second H.264 interaction capture, not a screenshot sequence.
-- [ ] Final exact-HEAD source contract, BuildPlugin contract, and blank-host install/load report exist and pass after the final docs/media commit.
-- [ ] Exact ZIP-derived blank host has a recorded real-mouse Actor/Changes/Settings/Tools click-through in normal and narrow/tall windows.
+- [x] Demo video is a live 41.933-second H.264 real-input capture, not a screenshot sequence.
+- [x] The exact-artifact chain passed from implementation commit `a34a1e4`: SourceSubmission, CompiledSmoke, Development/Shipping BuildPlugin, and blank-host install/load. The closing docs/media commit must run the same chain again; its generated manifest is the final commit/SHA authority.
+- [x] Exact ZIP-derived `RIFabBlank` has preserved real-`O` and real-mouse Actor/Changes/Settings/Tools evidence in normal and narrow/tall windows, plus one self-test and one workflow result.
 - [ ] Public DocsURL and SupportURL return HTTP 200.
 
 Authoritative generated evidence paths:
@@ -48,16 +48,17 @@ Authoritative generated evidence paths:
 - Contracts: `../../Saved/FabRelease/Contracts/RuntimeInspector_UE57/`
 - Blank host: `../../Saved/FabRelease/BlankHostLoadSmoke/RIFabBlank_UE57/RIFabBlank/RIFabBlank.uproject`
 - Blank-host log: `../../Saved/FabRelease/fab_blank_host_install_load_smoke_UE57.log`
-- Main-project closure: `Saved/RuntimeInspector/Task5/mainline-full-closure-after-commits.json`
-- Packaged ownership: `Saved/RuntimeInspector/Task5/packaged-port-ownership-green.json`
-- Packaged lifecycle: `Saved/RuntimeInspector/Task5/packaged-run-stop-lifecycle-green.json`
+- Exact blank-host real input: `Saved/RuntimeInspector/Task5/FinalExactBlankHostA34/final-exact-blank-host-real-input.json`
+- Main-project closure: `Saved/RuntimeInspector/Task5/mainline-full-closure-final-a34.json`
+- Packaged matrix: `Saved/RuntimeInspector/Task5/PackagedGreenA34/packaged-loopback-matrix-final-a34-green.normalized.json`
+- Packaged lifecycle: `Saved/RuntimeInspector/Task5/packaged-run-stop-final-a34-green.json`
 
 ## Listing And Media
 
 - [x] Listing copy is prepared in `FAB_LISTING.md`.
 - [x] README and Chinese user guide consistently state UE 5.7.
 - [x] Five final stills are `1920x1080`, PNG, and below 3 MiB.
-- [x] `FabMedia/demo.mp4` is H.264, `1920x1080`, `30 fps`, `43.833333s`, and `3509988` bytes.
+- [x] `FabMedia/demo.mp4` is H.264, `1920x1080`, `30 fps`, `41.933008s`, and `5066747` bytes.
 - [x] Image/video hashes and capture provenance are recorded in `FabMedia/fab_media_manifest.json`.
 - [ ] `RuntimeInspector.uplugin` SupportURL is publicly reachable. Current repository and Issues URLs returned HTTP 404 in an unauthenticated check on 2026-08-16; do not silently substitute an unrelated page.
 - [ ] Replace `MarketplaceURL` only after the Fab listing exists.
