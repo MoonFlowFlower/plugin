@@ -283,24 +283,38 @@ function Invoke-RealToggleKey {
     }
     $FocusX = [int][Math]::Round(($Rect.Left + $Rect.Right) / 2.0)
     $FocusY = [int][Math]::Round(($Rect.Top + $Rect.Bottom) / 2.0)
-    [void][RuntimeInspector.ResponsiveDpiWindow]::SetCursorPos($FocusX, $FocusY)
-    Start-Sleep -Milliseconds 100
-    [RuntimeInspector.ResponsiveDpiWindow]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
-    Start-Sleep -Milliseconds 60
-    [RuntimeInspector.ResponsiveDpiWindow]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
-    Start-Sleep -Milliseconds 250
-    [RuntimeInspector.ResponsiveDpiWindow]::keybd_event(0x4F, 0, 0, [UIntPtr]::Zero)
-    Start-Sleep -Milliseconds 60
-    [RuntimeInspector.ResponsiveDpiWindow]::keybd_event(0x4F, 0, 0x0002, [UIntPtr]::Zero)
     $AttemptCount = 0
+    $PollCount = 0
     $Passed = $false
     $Summary = $null
     do {
         $AttemptCount++
-        Start-Sleep -Milliseconds 300
+        [void][RuntimeInspector.ResponsiveDpiWindow]::ShowWindow($Window, 9)
+        [void][RuntimeInspector.ResponsiveDpiWindow]::SetForegroundWindow($Window)
+        [void][RuntimeInspector.ResponsiveDpiWindow]::SetCursorPos($FocusX, $FocusY)
+        Start-Sleep -Milliseconds 100
+        [RuntimeInspector.ResponsiveDpiWindow]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
+        Start-Sleep -Milliseconds 60
+        [RuntimeInspector.ResponsiveDpiWindow]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+        Start-Sleep -Milliseconds 250
+
+        # Query before every retry so a delayed open is never toggled closed by the next O key.
         $Summary = Invoke-BridgeRequest -BridgeState $BridgeState -Method "get_runtime_inspector_automation_summary"
         $Passed = ([string]$Summary.panelHostWindowDebug).StartsWith("DockRoot=1")
-    } while (-not $Passed -and $AttemptCount -lt 8)
+        if ($Passed) {
+            break
+        }
+
+        [RuntimeInspector.ResponsiveDpiWindow]::keybd_event(0x4F, 0, 0, [UIntPtr]::Zero)
+        Start-Sleep -Milliseconds 60
+        [RuntimeInspector.ResponsiveDpiWindow]::keybd_event(0x4F, 0, 0x0002, [UIntPtr]::Zero)
+        for ($Poll = 0; $Poll -lt 4 -and -not $Passed; $Poll++) {
+            $PollCount++
+            Start-Sleep -Milliseconds 300
+            $Summary = Invoke-BridgeRequest -BridgeState $BridgeState -Method "get_runtime_inspector_automation_summary"
+            $Passed = ([string]$Summary.panelHostWindowDebug).StartsWith("DockRoot=1")
+        }
+    } while (-not $Passed -and $AttemptCount -lt 4)
     if (-not $Passed) {
         [void](Invoke-BridgeRequest -BridgeState $BridgeState -Method "control_runtime_inspector" -Params @{ action = "open" })
         Start-Sleep -Milliseconds 400
@@ -309,6 +323,7 @@ function Invoke-RealToggleKey {
         name = "PIE O-key open"
         passed = $Passed
         attempts = $AttemptCount
+        polls = $PollCount
         detail = [string]$Summary.panelHostWindowDebug
     }
 }
