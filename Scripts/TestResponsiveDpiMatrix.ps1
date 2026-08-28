@@ -292,9 +292,15 @@ function Invoke-RealToggleKey {
     [RuntimeInspector.ResponsiveDpiWindow]::keybd_event(0x4F, 0, 0, [UIntPtr]::Zero)
     Start-Sleep -Milliseconds 60
     [RuntimeInspector.ResponsiveDpiWindow]::keybd_event(0x4F, 0, 0x0002, [UIntPtr]::Zero)
-    Start-Sleep -Milliseconds 600
-    $Summary = Invoke-BridgeRequest -BridgeState $BridgeState -Method "get_runtime_inspector_automation_summary"
-    $Passed = ([string]$Summary.panelHostWindowDebug).StartsWith("DockRoot=1")
+    $AttemptCount = 0
+    $Passed = $false
+    $Summary = $null
+    do {
+        $AttemptCount++
+        Start-Sleep -Milliseconds 300
+        $Summary = Invoke-BridgeRequest -BridgeState $BridgeState -Method "get_runtime_inspector_automation_summary"
+        $Passed = ([string]$Summary.panelHostWindowDebug).StartsWith("DockRoot=1")
+    } while (-not $Passed -and $AttemptCount -lt 8)
     if (-not $Passed) {
         [void](Invoke-BridgeRequest -BridgeState $BridgeState -Method "control_runtime_inspector" -Params @{ action = "open" })
         Start-Sleep -Milliseconds 400
@@ -302,6 +308,7 @@ function Invoke-RealToggleKey {
     return [pscustomobject]@{
         name = "PIE O-key open"
         passed = $Passed
+        attempts = $AttemptCount
         detail = [string]$Summary.panelHostWindowDebug
     }
 }
