@@ -14164,11 +14164,23 @@ bool UInspectorWorldSubsystem::ExecuteLegacyToolNativeBridgeAction(FName BridgeI
         UInspectorDockRootWidget* DockRoot = DockRootWidget.Get();
         if (DockRoot)
         {
-            DockRoot->TakeWidget();
-            DockRoot->ForceLayoutPrepass();
-            if (TSharedPtr<SWidget> CachedWidget = DockRoot->GetCachedWidget())
+            // A workflow can invoke this immediately after another UI test invalidates
+            // layout. Pump the same bounded Slate/prepass sequence used by the other
+            // geometry contracts so cached arranged geometry is observable here too.
+            for (int32 Attempt = 0; Attempt < 3; ++Attempt)
             {
-                CachedWidget->SlatePrepass(FSlateApplication::Get().GetApplicationScale());
+                if (FSlateApplication::IsInitialized())
+                {
+                    FSlateApplication::Get().Tick(ESlateTickType::All);
+                }
+
+                DockRoot->TakeWidget();
+                DockRoot->ForceLayoutPrepass();
+                if (TSharedPtr<SWidget> CachedWidget = DockRoot->GetCachedWidget())
+                {
+                    CachedWidget->SlatePrepass(FSlateApplication::Get().GetApplicationScale());
+                }
+                DockRoot->ForceLayoutPrepass();
             }
         }
 
