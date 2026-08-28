@@ -14306,13 +14306,19 @@ bool UInspectorWorldSubsystem::ExecuteLegacyToolNativeBridgeAction(FName BridgeI
             bTabsNonOverlapping = TabRects[Index - 1].Right <= TabRects[Index].Left + 1.0f;
         }
 
+        const float TabHeightPhysical = TabRects.Num() > 0 ? TabRects[0].Bottom - TabRects[0].Top : 0.0f;
+        const float LeftActualPhysical = bPanelGeometryReady ? LeftPanelRect.Right - LeftPanelRect.Left : 0.0f;
+        const float RightActualPhysical = bPanelGeometryReady ? RightPanelRect.Right - RightPanelRect.Left : 0.0f;
+        const float CenterActualPhysical = bPanelGeometryReady ? CenterRect.Right - CenterRect.Left : 0.0f;
+        const RICompactUI::FRIThemeMetrics& ThemeMetrics = RICompactUI::GetThemeMetrics();
+
         bOutPassed = bScaleFormulaOk
             && bScaleBoundariesPresent
             && bContainerStructureOk
             && bPanelPhysicalGeometryOk
             && bTabsNonOverlapping;
         OutReport = FString::Printf(
-            TEXT("responsive_dpi_layout=%s | Formula=%d Boundaries=%d Containers=%d PanelGeometry=%d Tabs=%d ExpectedScale=%.3f | %s"),
+            TEXT("responsive_dpi_layout=%s | Formula=%d Boundaries=%d Containers=%d PanelGeometry=%d Tabs=%d ExpectedScale=%.3f TabHeightPhysical=%.1f LeftActualPhysical=%.1f RightActualPhysical=%.1f CenterActualPhysical=%.1f TitleTokenPhysical=%.1f LabelTokenPhysical=%.1f MutedTokenPhysical=%.1f ControlTokenPhysical=%.1f | %s"),
             bOutPassed ? TEXT("PASS") : TEXT("FAIL"),
             bScaleFormulaOk ? 1 : 0,
             bScaleBoundariesPresent ? 1 : 0,
@@ -14320,6 +14326,14 @@ bool UInspectorWorldSubsystem::ExecuteLegacyToolNativeBridgeAction(FName BridgeI
             bPanelPhysicalGeometryOk ? 1 : 0,
             bTabsNonOverlapping ? 1 : 0,
             ExpectedContentScale,
+            TabHeightPhysical,
+            LeftActualPhysical,
+            RightActualPhysical,
+            CenterActualPhysical,
+            static_cast<float>(ThemeMetrics.SectionTitleFontSize) * UserScale,
+            static_cast<float>(ThemeMetrics.LabelFontSize) * UserScale,
+            static_cast<float>(ThemeMetrics.MutedFontSize) * UserScale,
+            ThemeMetrics.ButtonHeight * UserScale,
             *Summary);
         return true;
     }

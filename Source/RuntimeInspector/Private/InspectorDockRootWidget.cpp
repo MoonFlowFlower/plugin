@@ -1934,8 +1934,16 @@ FString UInspectorDockRootWidget::GetDockLayoutDebugSummary() const
         && RI_DockWidgetExists(WidgetTree, TEXT("RI_DockRightPanelBackgroundGrid"));
     const bool bPanelChrome = bPanelBorder && bPanelBlur && bPanelBase && bPanelWash && bPanelGrid;
     const bool bScaleBoundaries = LeftPanelContentScaleBox && RightPanelContentScaleBox;
+    TArray<FString> TabCenterParts;
+    for (const ERIInspectorTab Tab : { ERIInspectorTab::Actor, ERIInspectorTab::Changes, ERIInspectorTab::Settings, ERIInspectorTab::Tools })
+    {
+        FVector2D ScreenCenter = FVector2D::ZeroVector;
+        TabCenterParts.Add(TryGetTabButtonScreenCenterForAutomation(Tab, ScreenCenter)
+            ? FString::Printf(TEXT("%s:%.1f,%.1f"), *RI_TabLabel(Tab), ScreenCenter.X, ScreenCenter.Y)
+            : FString::Printf(TEXT("%s:unavailable"), *RI_TabLabel(Tab)));
+    }
     return FString::Printf(
-        TEXT("DockRoot=1 LeftPanel=%s RightPanel=1 SideWidthLogical=%.0f SideWidthPhysical=%.0f RightWidthLogical=%.0f RightWidthPhysical=%.0f CompactLeftLogical=%.0f CompactLeftPhysical=%.0f PanelGapLogical=%.0f PanelGapPhysical=%.0f CenterWidth=%.0f CenterPhysical=%.0f LogicalWidth=%.0f PhysicalWidth=%.0f PhysicalHeight=%.0f ViewportScale=%.3f UserScale=%.3f ContentScale=%.3f ReadableScale=%.2f ScaleBoundaries=%d CompactAt1080=%d ExpandedAt1390=%d CompactAt1000=%d CompactTextHidden=%d CenterPassThrough=1 CenterSelectionPill=0 PanelChrome=%d PanelBorder=%d PanelBlur=%d PanelBase=%d PanelGrid=%d PanelWash=%d FavoritesFrame=%d FavoritesScroll=%d FunctionsFrame=%d ActionBar=%d PatchRows=%d FunctionRows=%d AttributeRows=%d AttributesTransform=%d AttributesPending=%d FunctionsPending=%d OpenHydrationPending=%d ViewModelMs=%.2f HostedCreateMs=%.2f LastComponentFocusIntentMs=%.2f ActiveTab=%d"),
+        TEXT("DockRoot=1 LeftPanel=%s RightPanel=1 SideWidthLogical=%.0f SideWidthPhysical=%.0f RightWidthLogical=%.0f RightWidthPhysical=%.0f CompactLeftLogical=%.0f CompactLeftPhysical=%.0f PanelGapLogical=%.0f PanelGapPhysical=%.0f CenterWidth=%.0f CenterPhysical=%.0f LogicalWidth=%.0f PhysicalWidth=%.0f PhysicalHeight=%.0f ViewportScale=%.3f UserScale=%.3f ContentScale=%.3f ReadableScale=%.2f ScaleBoundaries=%d CompactAt1080=%d ExpandedAt1390=%d CompactAt1000=%d CompactTextHidden=%d CenterPassThrough=1 CenterSelectionPill=0 PanelChrome=%d PanelBorder=%d PanelBlur=%d PanelBase=%d PanelGrid=%d PanelWash=%d FavoritesFrame=%d FavoritesScroll=%d FunctionsFrame=%d ActionBar=%d PatchRows=%d FunctionRows=%d AttributeRows=%d AttributesTransform=%d AttributesPending=%d FunctionsPending=%d OpenHydrationPending=%d ViewModelMs=%.2f HostedCreateMs=%.2f LastComponentFocusIntentMs=%.2f ActiveTab=%d TabCenters=%s"),
         bLeftPanelCompact ? TEXT("Compact") : TEXT("Expanded"),
         LastDockSidePanelLogicalWidth,
         LastDockSidePanelPhysicalWidth,
@@ -1979,7 +1987,8 @@ FString UInspectorDockRootWidget::GetDockLayoutDebugSummary() const
         LastViewModelRefreshMs,
         LastHostedCreateMs,
         LastComponentFocusIntentMs,
-        static_cast<int32>(CurrentViewModel.ActiveTab));
+        static_cast<int32>(CurrentViewModel.ActiveTab),
+        *FString::Join(TabCenterParts, TEXT(";")));
 }
 
 bool UInspectorDockRootWidget::AreHostedActorSectionsDeferredRefreshPendingForAutomation() const
