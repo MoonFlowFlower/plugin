@@ -277,13 +277,31 @@ function Invoke-RealToggleKey {
     $Window = [RuntimeInspector.ResponsiveDpiWindow]::FindLargestPreviewWindow()
     [void][RuntimeInspector.ResponsiveDpiWindow]::ShowWindow($Window, 9)
     [void][RuntimeInspector.ResponsiveDpiWindow]::SetForegroundWindow($Window)
+    $Rect = New-Object RuntimeInspector.ResponsiveDpiWindow+RECT
+    if (-not [RuntimeInspector.ResponsiveDpiWindow]::GetWindowRect($Window, [ref]$Rect)) {
+        throw "Could not query PIE preview window bounds before the O-key check."
+    }
+    $FocusX = [int][Math]::Round(($Rect.Left + $Rect.Right) / 2.0)
+    $FocusY = [int][Math]::Round(($Rect.Top + $Rect.Bottom) / 2.0)
+    [void][RuntimeInspector.ResponsiveDpiWindow]::SetCursorPos($FocusX, $FocusY)
+    Start-Sleep -Milliseconds 100
+    [RuntimeInspector.ResponsiveDpiWindow]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
+    Start-Sleep -Milliseconds 60
+    [RuntimeInspector.ResponsiveDpiWindow]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+    Start-Sleep -Milliseconds 250
     [RuntimeInspector.ResponsiveDpiWindow]::keybd_event(0x4F, 0, 0, [UIntPtr]::Zero)
+    Start-Sleep -Milliseconds 60
     [RuntimeInspector.ResponsiveDpiWindow]::keybd_event(0x4F, 0, 0x0002, [UIntPtr]::Zero)
     Start-Sleep -Milliseconds 600
     $Summary = Invoke-BridgeRequest -BridgeState $BridgeState -Method "get_runtime_inspector_automation_summary"
+    $Passed = ([string]$Summary.panelHostWindowDebug).StartsWith("DockRoot=1")
+    if (-not $Passed) {
+        [void](Invoke-BridgeRequest -BridgeState $BridgeState -Method "control_runtime_inspector" -Params @{ action = "open" })
+        Start-Sleep -Milliseconds 400
+    }
     return [pscustomobject]@{
         name = "PIE O-key open"
-        passed = ([string]$Summary.panelHostWindowDebug).StartsWith("DockRoot=1")
+        passed = $Passed
         detail = [string]$Summary.panelHostWindowDebug
     }
 }
@@ -305,19 +323,23 @@ function Invoke-RealTabClicks {
 
         $X = [int][Math]::Round([double]::Parse($CenterMatch.Groups[1].Value, [Globalization.CultureInfo]::InvariantCulture))
         $Y = [int][Math]::Round([double]::Parse($CenterMatch.Groups[2].Value, [Globalization.CultureInfo]::InvariantCulture))
-        [void][RuntimeInspector.ResponsiveDpiWindow]::ShowWindow($Window, 9)
-        [void][RuntimeInspector.ResponsiveDpiWindow]::SetForegroundWindow($Window)
-        [void][RuntimeInspector.ResponsiveDpiWindow]::SetCursorPos($X, $Y)
-        Start-Sleep -Milliseconds 150
-        [RuntimeInspector.ResponsiveDpiWindow]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
-        Start-Sleep -Milliseconds 60
-        [RuntimeInspector.ResponsiveDpiWindow]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
-        Start-Sleep -Milliseconds 350
+        $AttemptCount = 0
+        do {
+            $AttemptCount++
+            [void][RuntimeInspector.ResponsiveDpiWindow]::ShowWindow($Window, 9)
+            [void][RuntimeInspector.ResponsiveDpiWindow]::SetForegroundWindow($Window)
+            [void][RuntimeInspector.ResponsiveDpiWindow]::SetCursorPos($X, $Y)
+            Start-Sleep -Milliseconds 150
+            [RuntimeInspector.ResponsiveDpiWindow]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
+            Start-Sleep -Milliseconds 60
+            [RuntimeInspector.ResponsiveDpiWindow]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+            Start-Sleep -Milliseconds 350
 
-        $After = Invoke-BridgeRequest -BridgeState $BridgeState -Method "get_runtime_inspector_automation_summary"
-        $AfterDebug = [string]$After.panelHostWindowDebug
-        $ActiveTab = Get-ReportMetric -Report $AfterDebug -Key "ActiveTab"
-        $Passed = [int]$ActiveTab -eq [int]$Entry.Value
+            $After = Invoke-BridgeRequest -BridgeState $BridgeState -Method "get_runtime_inspector_automation_summary"
+            $AfterDebug = [string]$After.panelHostWindowDebug
+            $ActiveTab = Get-ReportMetric -Report $AfterDebug -Key "ActiveTab"
+            $Passed = [int]$ActiveTab -eq [int]$Entry.Value
+        } while (-not $Passed -and $AttemptCount -lt 2)
         $Results.Add([pscustomobject]@{
             name = "$Resolution $($Entry.Key) mouse click"
             passed = $Passed
@@ -325,6 +347,7 @@ function Invoke-RealTabClicks {
             y = $Y
             expectedTab = [int]$Entry.Value
             actualTab = [int]$ActiveTab
+            attempts = $AttemptCount
             detail = $AfterDebug
         })
     }
@@ -449,6 +472,8 @@ try {
     $RunError = $_.Exception.Message
 } finally {
     try {
+        [void](Invoke-BridgeRequest -BridgeState $BridgeState -Method "control_runtime_inspector" -Params @{ action = "open" })
+        Start-Sleep -Milliseconds 200
         Set-RuntimeUIScale -BridgeState $BridgeState -Scale $OriginalLayout.userScale
         Restore-ValidationWindowStyle -Window $OriginalWindow.window -Style $OriginalWindow.style
         $WindowStyleRestored = $true
