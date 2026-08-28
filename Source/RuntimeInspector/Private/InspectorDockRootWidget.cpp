@@ -6,6 +6,7 @@
 #include "InspectorPropertiesSectionWidget.h"
 #include "InspectorSettingsPageWidget.h"
 #include "InspectorTestPageWidget.h"
+#include "InspectorResponsiveUI.h"
 #include "RuntimeInspector.h"
 #include "RuntimeInspectorController.h"
 #include "RuntimeInspectorSettings.h"
@@ -25,6 +26,8 @@
 #include "Components/Overlay.h"
 #include "Components/OverlaySlot.h"
 #include "Components/ScrollBox.h"
+#include "Components/ScaleBox.h"
+#include "Components/ScaleBoxSlot.h"
 #include "Components/SizeBox.h"
 #include "Components/SizeBoxSlot.h"
 #include "Components/TextBlock.h"
@@ -58,17 +61,6 @@ namespace
     static constexpr float RI_DockPanelGridTileSize = 256.0f;
     static constexpr float RI_DockHeaderBarPhysicalHeight = 46.0f;
     static constexpr float RI_DockRightHeaderStackPhysicalGap = 8.0f;
-    // Keep the baseline physical dimensions at ordinary DPI, but never let the
-    // logical dimensions collapse as viewport DPI increases. Text and controls
-    // are expressed in logical units, so a physical-only width/height cap makes
-    // them grow inside a panel that does not, causing tab/footer overlap at QHD.
-    static constexpr float RI_DockExpandedSidePanelMinLogicalWidth = 216.0f;
-    static constexpr float RI_DockRightPanelMinLogicalWidth = 241.0f;
-    static constexpr float RI_DockLeftCompactMinLogicalWidth = 41.0f;
-    static constexpr float RI_DockHeaderBarMinLogicalHeight = 30.0f;
-    static constexpr float RI_DockFavoritesFrameMinLogicalHeight = 121.0f;
-    static constexpr float RI_DockFunctionsFrameMinLogicalHeight = 140.0f;
-
     static FString RI_TabLabel(ERIInspectorTab Tab)
     {
         switch (Tab)
@@ -339,25 +331,7 @@ namespace
         return UWidgetLayoutLibrary::GetViewportSize(Widget);
     }
 
-    static float RI_PhysicalToLogical(float PhysicalSize, float ViewportScale)
-    {
-        return PhysicalSize / FMath::Max(ViewportScale, 0.01f);
-    }
-
-    static float RI_PhysicalToLogicalWithMinimum(float PhysicalSize, float ViewportScale, float MinimumLogicalSize)
-    {
-        return FMath::Max(RI_PhysicalToLogical(PhysicalSize, ViewportScale), MinimumLogicalSize);
-    }
-
-    static float RI_GetDockReadableScale(float ViewportScale)
-    {
-        const float BaseScale = FMath::Clamp(1.0f / FMath::Max(ViewportScale, 0.01f), 1.0f, 1.25f);
-        const URuntimeInspectorSettings* Settings = GetDefault<URuntimeInspectorSettings>();
-        const float UserScale = Settings ? FMath::Clamp(Settings->UIScale, 0.8f, 1.5f) : 1.0f;
-        return FMath::Clamp(BaseScale * UserScale, 0.8f, 1.5f);
-    }
-
-    static float RI_GetDockExpandedSidePanelPhysicalWidth(float PhysicalViewportWidth)
+    static float RI_GetDockExpandedSidePanelBasePhysicalWidth(float PhysicalViewportWidth)
     {
         if (PhysicalViewportWidth <= 1.0f)
         {
@@ -370,26 +344,37 @@ namespace
             RI_DockExpandedSidePanelMaxPhysicalWidth);
     }
 
-    static float RI_GetDockRightSidePanelPhysicalWidth(float PhysicalViewportWidth)
+    static float RI_GetDockExpandedSidePanelPhysicalWidth(float PhysicalViewportWidth, float UserScale)
     {
-        return RI_GetDockExpandedSidePanelPhysicalWidth(PhysicalViewportWidth) + RI_DockRightPanelExtraPhysicalWidth;
+        return RI_GetDockExpandedSidePanelBasePhysicalWidth(PhysicalViewportWidth) * UserScale;
     }
 
-    static float RI_GetDockCenterPhysicalWidth(float PhysicalViewportWidth, bool bLeftCompact)
+    static float RI_GetDockRightSidePanelPhysicalWidth(float PhysicalViewportWidth, float UserScale)
     {
-        const float LeftWidth = bLeftCompact ? RI_DockLeftCompactPhysicalWidth : RI_GetDockExpandedSidePanelPhysicalWidth(PhysicalViewportWidth);
-        return PhysicalViewportWidth - LeftWidth - RI_GetDockRightSidePanelPhysicalWidth(PhysicalViewportWidth) - (RI_DockPanelGapPhysical * 2.0f);
+        return (RI_GetDockExpandedSidePanelBasePhysicalWidth(PhysicalViewportWidth) + RI_DockRightPanelExtraPhysicalWidth) * UserScale;
     }
 
-    static bool RI_ShouldUseCompactLeftPanel(float PhysicalViewportWidth)
+    static float RI_GetDockCenterPhysicalWidth(float PhysicalViewportWidth, bool bLeftCompact, float UserScale)
+    {
+        const float LeftWidth = bLeftCompact
+            ? RI_DockLeftCompactPhysicalWidth * UserScale
+            : RI_GetDockExpandedSidePanelPhysicalWidth(PhysicalViewportWidth, UserScale);
+        return PhysicalViewportWidth
+            - LeftWidth
+            - RI_GetDockRightSidePanelPhysicalWidth(PhysicalViewportWidth, UserScale)
+            - (RI_DockPanelGapPhysical * UserScale * 2.0f);
+    }
+
+    static bool RI_ShouldUseCompactLeftPanel(float PhysicalViewportWidth, float UserScale)
     {
         return PhysicalViewportWidth > 1.0f
-            && RI_GetDockCenterPhysicalWidth(PhysicalViewportWidth, false) < RI_DockMinimumExpandedCenterPhysicalWidth;
+            && RI_GetDockCenterPhysicalWidth(PhysicalViewportWidth, false, UserScale) < RI_DockMinimumExpandedCenterPhysicalWidth;
     }
 
     static void RI_UpdateDockReadableScale(UWidget* Widget)
     {
-        RICompactUI::SetReadableScaleOverride(RI_GetDockReadableScale(RI_GetDockViewportScale(Widget)));
+        (void)Widget;
+        RICompactUI::SetReadableScaleOverride(1.0f);
     }
 
     static void RI_SetNamedSizeBoxHeight(UWidgetTree* WidgetTree, const FName& Name, float HeightOverride)
@@ -518,6 +503,24 @@ void UInspectorDockRootWidget::NativeConstruct()
     BuildWidgetTreeIfNeeded();
 }
 
+void UInspectorDockRootWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
+{
+    Super::NativeTick(MyGeometry, InDeltaTime);
+
+    if (!bWidgetTreeBuilt)
+    {
+        return;
+    }
+
+    const RIResponsiveUI::FContext Context = RIResponsiveUI::GetContext(this);
+    if (!Context.PhysicalViewportSize.Equals(LastDockPhysicalViewportSize, 0.5f)
+        || !FMath::IsNearlyEqual(Context.HostViewportDpi, LastDockViewportScale, 0.001f)
+        || !FMath::IsNearlyEqual(Context.UserScale, LastDockUserScale, 0.001f))
+    {
+        RefreshLayoutForViewport();
+    }
+}
+
 void UInspectorDockRootWidget::SetController(URuntimeInspectorController* InController)
 {
     Controller = InController;
@@ -556,13 +559,10 @@ void UInspectorDockRootWidget::BuildWidgetTreeIfNeeded()
         DockSlot->SetPadding(FMargin(RI_DockOuterPadding));
     }
 
-    const float InitialViewportScale = RI_GetDockViewportScale(this);
-    const FVector2D InitialPhysicalViewportSize = RI_GetDockPhysicalViewportSize(this);
-    const float InitialExpandedSideLogicalWidth = RI_PhysicalToLogicalWithMinimum(
-        RI_GetDockExpandedSidePanelPhysicalWidth(InitialPhysicalViewportSize.X),
-        InitialViewportScale,
-        RI_DockExpandedSidePanelMinLogicalWidth);
-    const float InitialPanelGapLogical = RI_PhysicalToLogical(RI_DockPanelGapPhysical, InitialViewportScale);
+    const RIResponsiveUI::FContext InitialContext = RIResponsiveUI::GetContext(this);
+    const float InitialExpandedSideLogicalWidth = InitialContext.PhysicalToLogical(
+        RI_GetDockExpandedSidePanelPhysicalWidth(InitialContext.PhysicalViewportSize.X, InitialContext.UserScale));
+    const float InitialPanelGapLogical = InitialContext.ScaledPhysicalToLogical(RI_DockPanelGapPhysical);
 
     LeftPanelSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_DockLeftPanelSize"));
     LeftPanelSizeBox->SetWidthOverride(InitialExpandedSideLogicalWidth);
@@ -577,7 +577,17 @@ void UInspectorDockRootWidget::BuildWidgetTreeIfNeeded()
         TEXT("RI_DockLeftPanelBackgroundGrid"),
         HAlign_Right,
         LeftPanelBox);
-    LeftPanelSizeBox->SetContent(LeftSurface);
+    LeftPanelContentScaleBox = WidgetTree->ConstructWidget<UScaleBox>(UScaleBox::StaticClass(), TEXT("RI_DockLeftContentScale"));
+    LeftPanelContentScaleBox->SetStretch(EStretch::UserSpecified);
+    LeftPanelContentScaleBox->SetStretchDirection(EStretchDirection::Both);
+    LeftPanelContentScaleBox->SetUserSpecifiedScale(InitialContext.ContentScale);
+    LeftPanelContentScaleBox->SetContent(LeftSurface);
+    if (UScaleBoxSlot* ScaleSlot = Cast<UScaleBoxSlot>(LeftSurface->Slot))
+    {
+        ScaleSlot->SetHorizontalAlignment(HAlign_Fill);
+        ScaleSlot->SetVerticalAlignment(VAlign_Fill);
+    }
+    LeftPanelSizeBox->SetContent(LeftPanelContentScaleBox);
     RI_AddHorizontal(DockBox, LeftPanelSizeBox, FMargin(0.f, 0.f, InitialPanelGapLogical, 0.f));
     BuildLeftPanel(LeftPanelBox);
 
@@ -587,10 +597,8 @@ void UInspectorDockRootWidget::BuildWidgetTreeIfNeeded()
     BuildCenterOverlay(CenterOverlay);
 
     RightPanelSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RI_DockRightPanelSize"));
-    RightPanelSizeBox->SetWidthOverride(RI_PhysicalToLogicalWithMinimum(
-        RI_GetDockRightSidePanelPhysicalWidth(InitialPhysicalViewportSize.X),
-        InitialViewportScale,
-        RI_DockRightPanelMinLogicalWidth));
+    RightPanelSizeBox->SetWidthOverride(InitialContext.PhysicalToLogical(
+        RI_GetDockRightSidePanelPhysicalWidth(InitialContext.PhysicalViewportSize.X, InitialContext.UserScale)));
     RightPanelBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RI_DockRightInspector"));
     UBorder* RightSurface = RI_MakePanelSurface(
         WidgetTree,
@@ -602,7 +610,17 @@ void UInspectorDockRootWidget::BuildWidgetTreeIfNeeded()
         TEXT("RI_DockRightPanelBackgroundGrid"),
         HAlign_Left,
         RightPanelBox);
-    RightPanelSizeBox->SetContent(RightSurface);
+    RightPanelContentScaleBox = WidgetTree->ConstructWidget<UScaleBox>(UScaleBox::StaticClass(), TEXT("RI_DockRightContentScale"));
+    RightPanelContentScaleBox->SetStretch(EStretch::UserSpecified);
+    RightPanelContentScaleBox->SetStretchDirection(EStretchDirection::Both);
+    RightPanelContentScaleBox->SetUserSpecifiedScale(InitialContext.ContentScale);
+    RightPanelContentScaleBox->SetContent(RightSurface);
+    if (UScaleBoxSlot* ScaleSlot = Cast<UScaleBoxSlot>(RightSurface->Slot))
+    {
+        ScaleSlot->SetHorizontalAlignment(HAlign_Fill);
+        ScaleSlot->SetVerticalAlignment(VAlign_Fill);
+    }
+    RightPanelSizeBox->SetContent(RightPanelContentScaleBox);
     RI_AddHorizontal(DockBox, RightPanelSizeBox, FMargin(InitialPanelGapLogical, 0.f, 0.f, 0.f));
     BuildRightInspector(RightPanelBox);
 
@@ -1175,45 +1193,45 @@ void UInspectorDockRootWidget::ProcessOpenHydrationRefresh(int32 Serial)
 
 void UInspectorDockRootWidget::RefreshLayoutForViewport()
 {
-    const FVector2D PhysicalViewportSize = RI_GetDockPhysicalViewportSize(this);
-    const float ViewportScale = RI_GetDockViewportScale(this);
-    const float ReadableScale = RI_GetDockReadableScale(ViewportScale);
-    RICompactUI::SetReadableScaleOverride(ReadableScale);
+    const RIResponsiveUI::FContext Context = RIResponsiveUI::GetContext(this);
+    RICompactUI::SetReadableScaleOverride(1.0f);
 
-    const float ExpandedSidePhysicalWidth = RI_GetDockExpandedSidePanelPhysicalWidth(PhysicalViewportSize.X);
-    const float ExpandedSideLogicalWidth = RI_PhysicalToLogicalWithMinimum(
-        ExpandedSidePhysicalWidth,
-        ViewportScale,
-        RI_DockExpandedSidePanelMinLogicalWidth);
-    const float CompactLeftLogicalWidth = RI_PhysicalToLogicalWithMinimum(
-        RI_DockLeftCompactPhysicalWidth,
-        ViewportScale,
-        RI_DockLeftCompactMinLogicalWidth);
-    const float PanelGapLogical = RI_PhysicalToLogical(RI_DockPanelGapPhysical, ViewportScale);
-    const float HeaderLogicalHeight = RI_PhysicalToLogicalWithMinimum(
-        RI_DockHeaderBarPhysicalHeight,
-        ViewportScale,
-        RI_DockHeaderBarMinLogicalHeight);
-    const float FavoritesFrameLogicalHeight = RI_PhysicalToLogicalWithMinimum(
-        RI_DockFavoritesFramePhysicalHeight,
-        ViewportScale,
-        RI_DockFavoritesFrameMinLogicalHeight);
-    const float FunctionsFrameLogicalHeight = RI_PhysicalToLogicalWithMinimum(
-        RI_DockFunctionsFramePhysicalHeight,
-        ViewportScale,
-        RI_DockFunctionsFrameMinLogicalHeight);
-    const float BorderLogicalThickness = RI_PhysicalToLogical(RI_DockPanelBorderPhysicalThickness, ViewportScale);
+    const float ExpandedSidePhysicalWidth = RI_GetDockExpandedSidePanelPhysicalWidth(
+        Context.PhysicalViewportSize.X,
+        Context.UserScale);
+    const float ExpandedSideLogicalWidth = Context.PhysicalToLogical(ExpandedSidePhysicalWidth);
+    const float CompactLeftPhysicalWidth = RI_DockLeftCompactPhysicalWidth * Context.UserScale;
+    const float CompactLeftLogicalWidth = Context.PhysicalToLogical(CompactLeftPhysicalWidth);
+    const float RightSidePhysicalWidth = RI_GetDockRightSidePanelPhysicalWidth(
+        Context.PhysicalViewportSize.X,
+        Context.UserScale);
+    const float RightSideLogicalWidth = Context.PhysicalToLogical(RightSidePhysicalWidth);
+    const float PanelGapLogical = Context.ScaledPhysicalToLogical(RI_DockPanelGapPhysical);
 
-    LastDockViewportScale = ViewportScale;
-    LastDockReadableScale = ReadableScale;
+    LastDockPhysicalViewportSize = Context.PhysicalViewportSize;
+    LastDockViewportScale = Context.HostViewportDpi;
+    LastDockReadableScale = 1.0f;
+    LastDockUserScale = Context.UserScale;
+    LastDockContentScale = Context.ContentScale;
     LastDockSidePanelLogicalWidth = ExpandedSideLogicalWidth;
-    LastDockSidePanelPhysicalWidth = ExpandedSideLogicalWidth * ViewportScale;
+    LastDockSidePanelPhysicalWidth = ExpandedSidePhysicalWidth;
+    LastDockRightPanelLogicalWidth = RightSideLogicalWidth;
+    LastDockRightPanelPhysicalWidth = RightSidePhysicalWidth;
     LastDockCompactLeftLogicalWidth = CompactLeftLogicalWidth;
-    LastDockCompactLeftPhysicalWidth = CompactLeftLogicalWidth * ViewportScale;
+    LastDockCompactLeftPhysicalWidth = CompactLeftPhysicalWidth;
     LastDockPanelGapLogical = PanelGapLogical;
-    LastDockPanelGapPhysical = RI_DockPanelGapPhysical;
+    LastDockPanelGapPhysical = RI_DockPanelGapPhysical * Context.UserScale;
 
-    bLeftPanelCompact = RI_ShouldUseCompactLeftPanel(PhysicalViewportSize.X);
+    if (LeftPanelContentScaleBox)
+    {
+        LeftPanelContentScaleBox->SetUserSpecifiedScale(Context.ContentScale);
+    }
+    if (RightPanelContentScaleBox)
+    {
+        RightPanelContentScaleBox->SetUserSpecifiedScale(Context.ContentScale);
+    }
+
+    bLeftPanelCompact = RI_ShouldUseCompactLeftPanel(Context.PhysicalViewportSize.X, Context.UserScale);
     if (LeftPanelSizeBox)
     {
         LeftPanelSizeBox->SetWidthOverride(bLeftPanelCompact ? CompactLeftLogicalWidth : ExpandedSideLogicalWidth);
@@ -1224,10 +1242,6 @@ void UInspectorDockRootWidget::RefreshLayoutForViewport()
     }
     if (RightPanelSizeBox)
     {
-        const float RightSideLogicalWidth = RI_PhysicalToLogicalWithMinimum(
-            RI_GetDockRightSidePanelPhysicalWidth(PhysicalViewportSize.X),
-            ViewportScale,
-            RI_DockRightPanelMinLogicalWidth);
         RightPanelSizeBox->SetWidthOverride(RightSideLogicalWidth);
         if (UHorizontalBoxSlot* DockSlot = Cast<UHorizontalBoxSlot>(RightPanelSizeBox->Slot))
         {
@@ -1235,25 +1249,25 @@ void UInspectorDockRootWidget::RefreshLayoutForViewport()
         }
     }
 
-    RI_SetNamedSizeBoxHeight(WidgetTree, TEXT("RI_SelectedActorHeaderFrame"), HeaderLogicalHeight);
-    RI_SetNamedSizeBoxHeight(WidgetTree, TEXT("RI_RightInspectorHeaderFrame"), HeaderLogicalHeight);
+    RI_SetNamedSizeBoxHeight(WidgetTree, TEXT("RI_SelectedActorHeaderFrame"), RI_DockHeaderBarPhysicalHeight);
+    RI_SetNamedSizeBoxHeight(WidgetTree, TEXT("RI_RightInspectorHeaderFrame"), RI_DockHeaderBarPhysicalHeight);
     if (FavoritesFrameSizeBox)
     {
-        FavoritesFrameSizeBox->SetHeightOverride(FavoritesFrameLogicalHeight);
+        FavoritesFrameSizeBox->SetHeightOverride(RI_DockFavoritesFramePhysicalHeight);
     }
     if (ActorFunctionsFrameSizeBox)
     {
-        ActorFunctionsFrameSizeBox->SetHeightOverride(FunctionsFrameLogicalHeight);
+        ActorFunctionsFrameSizeBox->SetHeightOverride(RI_DockFunctionsFramePhysicalHeight);
     }
     if (WidgetTree)
     {
         if (USizeBox* LeftEdge = Cast<USizeBox>(WidgetTree->FindWidget(TEXT("RI_DockLeftPanelViewportBorderSize"))))
         {
-            LeftEdge->SetWidthOverride(BorderLogicalThickness);
+            LeftEdge->SetWidthOverride(RI_DockPanelBorderPhysicalThickness);
         }
         if (USizeBox* RightEdge = Cast<USizeBox>(WidgetTree->FindWidget(TEXT("RI_DockRightPanelViewportBorderSize"))))
         {
-            RightEdge->SetWidthOverride(BorderLogicalThickness);
+            RightEdge->SetWidthOverride(RI_DockPanelBorderPhysicalThickness);
         }
     }
 }
@@ -1896,9 +1910,9 @@ FString UInspectorDockRootWidget::GetDockLayoutDebugSummary() const
         0.0f,
         LogicalViewportSize.X - LeftLogicalWidth - RightLogicalWidth - (LastDockPanelGapLogical * 2.0f));
     const float CenterPhysicalWidth = CenterLogicalWidth * ViewportScale;
-    const bool bCompactAtPreviewWidth = RI_ShouldUseCompactLeftPanel(1080.0f);
-    const bool bExpandedAtReferenceWidth = !RI_ShouldUseCompactLeftPanel(1390.0f);
-    const bool bCompactAtNarrowWidth = RI_ShouldUseCompactLeftPanel(1000.0f);
+    const bool bCompactAtPreviewWidth = RI_ShouldUseCompactLeftPanel(1080.0f, 1.0f);
+    const bool bExpandedAtReferenceWidth = !RI_ShouldUseCompactLeftPanel(1390.0f, 1.0f);
+    const bool bCompactAtNarrowWidth = RI_ShouldUseCompactLeftPanel(1000.0f, 1.0f);
     const bool bCompactTextHidden = !bLeftPanelCompact
         || ((ActorNameText == nullptr || ActorNameText->GetVisibility() == ESlateVisibility::Collapsed)
             && (ActorClassText == nullptr || ActorClassText->GetVisibility() == ESlateVisibility::Collapsed)
@@ -1919,11 +1933,14 @@ FString UInspectorDockRootWidget::GetDockLayoutDebugSummary() const
     const bool bPanelGrid = RI_DockWidgetExists(WidgetTree, TEXT("RI_DockLeftPanelBackgroundGrid"))
         && RI_DockWidgetExists(WidgetTree, TEXT("RI_DockRightPanelBackgroundGrid"));
     const bool bPanelChrome = bPanelBorder && bPanelBlur && bPanelBase && bPanelWash && bPanelGrid;
+    const bool bScaleBoundaries = LeftPanelContentScaleBox && RightPanelContentScaleBox;
     return FString::Printf(
-        TEXT("DockRoot=1 LeftPanel=%s RightPanel=1 SideWidthLogical=%.0f SideWidthPhysical=%.0f CompactLeftLogical=%.0f CompactLeftPhysical=%.0f PanelGapLogical=%.0f PanelGapPhysical=%.0f CenterWidth=%.0f CenterPhysical=%.0f LogicalWidth=%.0f PhysicalWidth=%.0f ViewportScale=%.2f ReadableScale=%.2f CompactAt1080=%d ExpandedAt1390=%d CompactAt1000=%d CompactTextHidden=%d CenterPassThrough=1 CenterSelectionPill=0 PanelChrome=%d PanelBorder=%d PanelBlur=%d PanelBase=%d PanelGrid=%d PanelWash=%d FavoritesFrame=%d FavoritesScroll=%d FunctionsFrame=%d ActionBar=%d PatchRows=%d FunctionRows=%d AttributeRows=%d AttributesTransform=%d AttributesPending=%d FunctionsPending=%d OpenHydrationPending=%d ViewModelMs=%.2f HostedCreateMs=%.2f LastComponentFocusIntentMs=%.2f ActiveTab=%d"),
+        TEXT("DockRoot=1 LeftPanel=%s RightPanel=1 SideWidthLogical=%.0f SideWidthPhysical=%.0f RightWidthLogical=%.0f RightWidthPhysical=%.0f CompactLeftLogical=%.0f CompactLeftPhysical=%.0f PanelGapLogical=%.0f PanelGapPhysical=%.0f CenterWidth=%.0f CenterPhysical=%.0f LogicalWidth=%.0f PhysicalWidth=%.0f PhysicalHeight=%.0f ViewportScale=%.3f UserScale=%.3f ContentScale=%.3f ReadableScale=%.2f ScaleBoundaries=%d CompactAt1080=%d ExpandedAt1390=%d CompactAt1000=%d CompactTextHidden=%d CenterPassThrough=1 CenterSelectionPill=0 PanelChrome=%d PanelBorder=%d PanelBlur=%d PanelBase=%d PanelGrid=%d PanelWash=%d FavoritesFrame=%d FavoritesScroll=%d FunctionsFrame=%d ActionBar=%d PatchRows=%d FunctionRows=%d AttributeRows=%d AttributesTransform=%d AttributesPending=%d FunctionsPending=%d OpenHydrationPending=%d ViewModelMs=%.2f HostedCreateMs=%.2f LastComponentFocusIntentMs=%.2f ActiveTab=%d"),
         bLeftPanelCompact ? TEXT("Compact") : TEXT("Expanded"),
         LastDockSidePanelLogicalWidth,
         LastDockSidePanelPhysicalWidth,
+        LastDockRightPanelLogicalWidth,
+        LastDockRightPanelPhysicalWidth,
         LastDockCompactLeftLogicalWidth,
         LastDockCompactLeftPhysicalWidth,
         LastDockPanelGapLogical,
@@ -1932,8 +1949,12 @@ FString UInspectorDockRootWidget::GetDockLayoutDebugSummary() const
         CenterPhysicalWidth,
         LogicalViewportSize.X,
         PhysicalViewportSize.X,
+        PhysicalViewportSize.Y,
         ViewportScale,
+        LastDockUserScale,
+        LastDockContentScale,
         LastDockReadableScale,
+        bScaleBoundaries ? 1 : 0,
         bCompactAtPreviewWidth ? 1 : 0,
         bExpandedAtReferenceWidth ? 1 : 0,
         bCompactAtNarrowWidth ? 1 : 0,

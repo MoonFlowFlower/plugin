@@ -1,6 +1,7 @@
 #include "InspectorColorPickerWidget.h"
 
 #include "InspectorCompactWidgetUtils.h"
+#include "InspectorResponsiveUI.h"
 
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
@@ -15,6 +16,8 @@
 #include "Components/Image.h"
 #include "Components/Overlay.h"
 #include "Components/OverlaySlot.h"
+#include "Components/ScaleBox.h"
+#include "Components/ScaleBoxSlot.h"
 #include "Components/SizeBox.h"
 #include "Components/SizeBoxSlot.h"
 #include "Components/TextBlock.h"
@@ -218,6 +221,19 @@ TSharedRef<SWidget> UInspectorColorPickerWidget::RebuildWidget()
     return Super::RebuildWidget();
 }
 
+void UInspectorColorPickerWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
+{
+    Super::NativeTick(MyGeometry, InDeltaTime);
+
+    const RIResponsiveUI::FContext Context = RIResponsiveUI::GetContext(this);
+    if (!Context.PhysicalViewportSize.Equals(LastResponsiveViewportSize, 0.5f)
+        || !FMath::IsNearlyEqual(Context.HostViewportDpi, LastResponsiveHostDpi, KINDA_SMALL_NUMBER)
+        || !FMath::IsNearlyEqual(Context.UserScale, LastResponsiveUserScale, KINDA_SMALL_NUMBER))
+    {
+        ApplyResponsiveLayout();
+    }
+}
+
 void UInspectorColorPickerWidget::InitializePicker(const FLinearColor& InInitialColor, const TArray<FLinearColor>& InRecentColors)
 {
     InitialColor = InInitialColor;
@@ -245,7 +261,7 @@ void UInspectorColorPickerWidget::RefreshPickerForAutomation()
 
 bool UInspectorColorPickerWidget::IsNativeColorPickerReadyForAutomation() const
 {
-    return RootCanvas && ModalBorder && SaturationValueImage && HueImage && OpacityImage
+    return RootCanvas && ModalContentScaleBox && ModalBorder && SaturationValueImage && HueImage && OpacityImage
         && HeaderRow
         && CurrentPreviewBorder && PreviousPreviewBorder && InputR && InputG && InputB && InputA
         && InputH && InputS && InputV && InputHsvA && InputHex && RecentSwatchBox && ActionButtonRow && ApplyButton && CancelButton;
@@ -262,6 +278,19 @@ bool UInspectorColorPickerWidget::HasNativeColorPickerContractForAutomation() co
         && HasHitTestSafeDragLayersForAutomation()
         && HasFixedRadiusBrushesForAutomation()
         && HasCompactLayoutForAutomation();
+}
+
+bool UInspectorColorPickerWidget::HasResponsiveScaleBoundaryForAutomation() const
+{
+    const float ExpectedContentScale = LastResponsiveUserScale / FMath::Max(LastResponsiveHostDpi, 0.01f);
+    const UCanvasPanelSlot* ModalSlot = GetModalCanvasSlot();
+    return ModalContentScaleBox
+        && ModalSlot
+        && ModalContentScaleBox->GetFName() == TEXT("RI_ColorPickerContentScale")
+        && ModalContentScaleBox->GetStretch() == EStretch::UserSpecified
+        && FMath::IsNearlyEqual(ModalContentScaleBox->GetUserSpecifiedScale(), ExpectedContentScale, 0.01f)
+        && FMath::IsNearlyEqual(ModalSlot->GetSize().X * LastResponsiveHostDpi, RI_ColorPickerModalWidth * LastResponsiveUserScale, 1.0f)
+        && FMath::IsNearlyEqual(ModalSlot->GetSize().Y * LastResponsiveHostDpi, RI_ColorPickerModalHeight * LastResponsiveUserScale, 1.0f);
 }
 
 bool UInspectorColorPickerWidget::SetRgbChannelTextForAutomation(int32 ChannelIndex, const FString& InText)
@@ -364,9 +393,9 @@ bool UInspectorColorPickerWidget::HasBottomSheetPlacementForAutomation() const
         && FMath::IsNearlyEqual(Anchors.Maximum.X, 0.5f)
         && FMath::IsNearlyEqual(Anchors.Maximum.Y, 1.0f)
         && Alignment.Equals(FVector2D(0.5f, 1.0f), 0.01f)
-        && Size.Equals(FVector2D(RI_ColorPickerModalWidth, RI_ColorPickerModalHeight), 0.5f)
+        && Size.Equals(ResponsiveModalLogicalSize, 0.5f)
         && FMath::Abs(Position.X) <= 0.5f
-        && FMath::IsNearlyEqual(Position.Y, -RI_ColorPickerBottomOffset, 0.5f);
+        && FMath::IsNearlyEqual(Position.Y, -ResponsiveBottomOffsetLogical, 0.5f);
 }
 
 bool UInspectorColorPickerWidget::HasFooterClearanceForAutomation() const
@@ -422,7 +451,9 @@ bool UInspectorColorPickerWidget::DragModalByForAutomation(const FVector2D& Delt
     }
 
     const FVector2D Before = ModalSlot->GetPosition();
-    ModalSlot->SetPosition(ClampModalPosition(Before + Delta));
+    const FVector2D LogicalDelta = Delta / FMath::Max(LastResponsiveHostDpi, 0.01f);
+    bModalPositionWasDragged = true;
+    ModalSlot->SetPosition(ClampModalPosition(Before + LogicalDelta));
     const FVector2D After = ModalSlot->GetPosition();
     return !After.Equals(Before, 0.5f);
 }
@@ -435,6 +466,9 @@ void UInspectorColorPickerWidget::BuildWidgetTree()
     }
 
     RootCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("RI_ColorPickerRoot"));
+    ModalContentScaleBox = WidgetTree->ConstructWidget<UScaleBox>(UScaleBox::StaticClass(), TEXT("RI_ColorPickerContentScale"));
+    ModalContentScaleBox->SetStretch(EStretch::UserSpecified);
+    ModalContentScaleBox->SetStretchDirection(EStretchDirection::Both);
     ModalBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("RI_ColorPickerModal"));
     ModalBorder->SetPadding(FMargin(10.0f, 8.0f));
     RI_SetRoundedBorder(
@@ -448,7 +482,7 @@ void UInspectorColorPickerWidget::BuildWidgetTree()
     ModalBorder->SetContent(ModalBox);
 
     HeaderRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RI_ColorPickerHeader"));
-    RI_AddHorizontal(HeaderRow, MakeLabel(TEXT("Color Picker"), 14, true), FMargin(0.0f), ESlateSizeRule::Fill);
+    RI_AddHorizontal(HeaderRow, MakeLabel(TEXT("Color Picker"), RICompactUI::GetSectionTitleFontSize(), true), FMargin(0.0f), ESlateSizeRule::Fill);
     CloseButton = MakePickerButton(TEXT("RI_ColorPickerClose"), TEXT("X"), false);
     RI_AddHorizontal(HeaderRow, CloseButton, FMargin(8.0f, 0.0f, 0.0f, 0.0f));
     RI_AddVertical(ModalBox, HeaderRow, FMargin(0.0f, 0.0f, 0.0f, 6.0f));
@@ -604,7 +638,13 @@ void UInspectorColorPickerWidget::BuildWidgetTree()
     RI_AddHorizontal(BodyRow, RightBox, FMargin(0.0f), ESlateSizeRule::Fill);
     RI_AddVertical(ModalBox, BodyRow, FMargin(0.0f), ESlateSizeRule::Fill);
 
-    if (UCanvasPanelSlot* ModalSlot = RootCanvas->AddChildToCanvas(ModalBorder))
+    ModalContentScaleBox->SetContent(ModalBorder);
+    if (UScaleBoxSlot* ContentSlot = Cast<UScaleBoxSlot>(ModalBorder->Slot))
+    {
+        ContentSlot->SetHorizontalAlignment(HAlign_Fill);
+        ContentSlot->SetVerticalAlignment(VAlign_Fill);
+    }
+    if (UCanvasPanelSlot* ModalSlot = RootCanvas->AddChildToCanvas(ModalContentScaleBox))
     {
         ModalSlot->SetAnchors(FAnchors(0.5f, 1.0f));
         ModalSlot->SetAlignment(FVector2D(0.5f, 1.0f));
@@ -613,6 +653,7 @@ void UInspectorColorPickerWidget::BuildWidgetTree()
     }
 
     WidgetTree->RootWidget = RootCanvas;
+    ApplyResponsiveLayout();
 
     if (ApplyButton)
     {
@@ -654,6 +695,39 @@ void UInspectorColorPickerWidget::BuildWidgetTree()
     }
 
     RefreshAll(true);
+}
+
+void UInspectorColorPickerWidget::ApplyResponsiveLayout()
+{
+    const RIResponsiveUI::FContext Context = RIResponsiveUI::GetContext(this);
+    const float PreviousHostDpi = FMath::Max(LastResponsiveHostDpi, 0.01f);
+    FVector2D PreviousSlotPosition = FVector2D::ZeroVector;
+    if (const UCanvasPanelSlot* ModalSlot = GetModalCanvasSlot())
+    {
+        PreviousSlotPosition = ModalSlot->GetPosition();
+    }
+
+    LastResponsiveViewportSize = Context.PhysicalViewportSize;
+    LastResponsiveHostDpi = Context.HostViewportDpi;
+    LastResponsiveUserScale = Context.UserScale;
+    ResponsiveModalLogicalSize = Context.ScaledPhysicalToLogical(FVector2D(RI_ColorPickerModalWidth, RI_ColorPickerModalHeight));
+    ResponsiveBottomOffsetLogical = Context.ScaledPhysicalToLogical(RI_ColorPickerBottomOffset);
+    ResponsiveClampPaddingLogical = Context.ScaledPhysicalToLogical(RI_ColorPickerViewportClampPadding);
+
+    if (ModalContentScaleBox)
+    {
+        ModalContentScaleBox->SetStretch(EStretch::UserSpecified);
+        ModalContentScaleBox->SetUserSpecifiedScale(Context.ContentScale);
+    }
+
+    if (UCanvasPanelSlot* ModalSlot = GetModalCanvasSlot())
+    {
+        ModalSlot->SetSize(ResponsiveModalLogicalSize);
+        const FVector2D DesiredPosition = bModalPositionWasDragged
+            ? PreviousSlotPosition * (PreviousHostDpi / FMath::Max(Context.HostViewportDpi, 0.01f))
+            : FVector2D(0.0f, -ResponsiveBottomOffsetLogical);
+        ModalSlot->SetPosition(ClampModalPosition(DesiredPosition));
+    }
 }
 
 FReply UInspectorColorPickerWidget::NativeOnPreviewMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
@@ -991,7 +1065,9 @@ bool UInspectorColorPickerWidget::BeginPointerDragAtScreenPosition(const FVector
     else if (IsWidgetUnderScreenPosition(HeaderRow.Get(), ScreenPosition))
     {
         ActiveDragRegion = ERIColorPickerDragRegion::Move;
-        ModalDragStartScreenPosition = ScreenPosition;
+        ModalDragStartScreenPosition = RootCanvas
+            ? RootCanvas->GetCachedGeometry().AbsoluteToLocal(ScreenPosition)
+            : ScreenPosition;
         if (UCanvasPanelSlot* ModalSlot = GetModalCanvasSlot())
         {
             ModalDragStartSlotPosition = ModalSlot->GetPosition();
@@ -1020,7 +1096,11 @@ bool UInspectorColorPickerWidget::ApplyModalDragAtScreenPosition(const FVector2D
         return false;
     }
 
-    const FVector2D Delta = ScreenPosition - ModalDragStartScreenPosition;
+    const FVector2D CurrentRootPosition = RootCanvas
+        ? RootCanvas->GetCachedGeometry().AbsoluteToLocal(ScreenPosition)
+        : ScreenPosition;
+    const FVector2D Delta = CurrentRootPosition - ModalDragStartScreenPosition;
+    bModalPositionWasDragged = true;
     ModalSlot->SetPosition(ClampModalPosition(ModalDragStartSlotPosition + Delta));
     return true;
 }
@@ -1098,7 +1178,7 @@ bool UInspectorColorPickerWidget::IsWidgetUnderScreenPosition(const UWidget* Wid
 
 UCanvasPanelSlot* UInspectorColorPickerWidget::GetModalCanvasSlot() const
 {
-    return ModalBorder ? Cast<UCanvasPanelSlot>(ModalBorder->Slot) : nullptr;
+    return ModalContentScaleBox ? Cast<UCanvasPanelSlot>(ModalContentScaleBox->Slot) : nullptr;
 }
 
 FVector2D UInspectorColorPickerWidget::ClampModalPosition(const FVector2D& DesiredPosition) const
@@ -1117,10 +1197,10 @@ FVector2D UInspectorColorPickerWidget::ClampModalPosition(const FVector2D& Desir
         return DesiredPosition;
     }
 
-    const float MinX = -ViewportSize.X * 0.5f + ModalSize.X * 0.5f + RI_ColorPickerViewportClampPadding;
-    const float MaxX = ViewportSize.X * 0.5f - ModalSize.X * 0.5f - RI_ColorPickerViewportClampPadding;
-    const float MinY = -ViewportSize.Y + ModalSize.Y + RI_ColorPickerViewportClampPadding;
-    const float MaxY = -RI_ColorPickerViewportClampPadding;
+    const float MinX = -ViewportSize.X * 0.5f + ModalSize.X * 0.5f + ResponsiveClampPaddingLogical;
+    const float MaxX = ViewportSize.X * 0.5f - ModalSize.X * 0.5f - ResponsiveClampPaddingLogical;
+    const float MinY = -ViewportSize.Y + ModalSize.Y + ResponsiveClampPaddingLogical;
+    const float MaxY = -ResponsiveClampPaddingLogical;
     return FVector2D(
         FMath::Clamp(DesiredPosition.X, MinX, MaxX),
         FMath::Clamp(DesiredPosition.Y, MinY, MaxY));

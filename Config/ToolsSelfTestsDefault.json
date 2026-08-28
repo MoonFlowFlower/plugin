@@ -200,6 +200,16 @@
     "LegacyNativeBridgeId": "ui_readability"
   },
   {
+    "Id": "responsive_dpi_layout",
+    "DisplayName": "Responsive DPI Layout",
+    "Category": "UI",
+    "Description": "Validates plugin-local DPI normalization, responsive dock scale boundaries, and non-overlapping native tab geometry.",
+    "bRequiresPIE": true,
+    "bMutatesRuntime": false,
+    "bEnabled": true,
+    "LegacyNativeBridgeId": "responsive_dpi_layout"
+  },
+  {
     "Id": "right_inspector_tabs",
     "DisplayName": "Right Inspector Tabs",
     "Category": "UI",

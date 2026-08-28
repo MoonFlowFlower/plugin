@@ -424,6 +424,7 @@ static const FName RI_SelfTestId_FilePage(TEXT("file_page_injection"));
 static const FName RI_SelfTestId_ContextStrip(TEXT("context_strip"));
 static const FName RI_SelfTestId_DockLayout(TEXT("dock_layout"));
 static const FName RI_SelfTestId_UIReadability(TEXT("ui_readability"));
+static const FName RI_SelfTestId_ResponsiveDpiLayout(TEXT("responsive_dpi_layout"));
 static const FName RI_SelfTestId_RightInspectorTabs(TEXT("right_inspector_tabs"));
 static const FName RI_SelfTestId_ActorContextPanel(TEXT("actor_context_panel"));
 static const FName RI_SelfTestId_ActorAttributesSection(TEXT("actor_attributes_section"));
@@ -13880,30 +13881,41 @@ bool UInspectorWorldSubsystem::ExecuteLegacyToolNativeBridgeAction(FName BridgeI
 
         float SideWidthPhysical = 0.0f;
         float SideWidthLogical = 0.0f;
+        float RightWidthPhysical = 0.0f;
+        float RightWidthLogical = 0.0f;
         float CompactLeftPhysical = 0.0f;
         float CompactLeftLogical = 0.0f;
         float ViewportScale = 0.0f;
+        float UserScale = 0.0f;
+        float ContentScale = 0.0f;
         float ReadableScale = 0.0f;
         const bool bScaleMetricsPresent =
             ExtractSummaryFloat(TEXT("SideWidthPhysical="), SideWidthPhysical)
             && ExtractSummaryFloat(TEXT("SideWidthLogical="), SideWidthLogical)
+            && ExtractSummaryFloat(TEXT("RightWidthPhysical="), RightWidthPhysical)
+            && ExtractSummaryFloat(TEXT("RightWidthLogical="), RightWidthLogical)
             && ExtractSummaryFloat(TEXT("CompactLeftPhysical="), CompactLeftPhysical)
             && ExtractSummaryFloat(TEXT("CompactLeftLogical="), CompactLeftLogical)
             && ExtractSummaryFloat(TEXT("ViewportScale="), ViewportScale)
+            && ExtractSummaryFloat(TEXT("UserScale="), UserScale)
+            && ExtractSummaryFloat(TEXT("ContentScale="), ContentScale)
             && ExtractSummaryFloat(TEXT("ReadableScale="), ReadableScale);
-        const bool bReadableDockScaleOk = bScaleMetricsPresent
-            && SideWidthPhysical >= 319.0f
-            && SideWidthLogical >= 215.0f
-            && FMath::Abs(SideWidthPhysical - (SideWidthLogical * ViewportScale)) <= 4.0f
-            && CompactLeftPhysical >= 63.0f
-            && CompactLeftLogical >= 40.0f
-            && FMath::Abs(CompactLeftPhysical - (CompactLeftLogical * ViewportScale)) <= 4.0f
+        const bool bResponsiveDockScaleOk = bScaleMetricsPresent
             && ViewportScale > 0.0f
-            && ReadableScale >= 0.8f
-            && ReadableScale <= 1.5f;
+            && UserScale >= 0.8f
+            && UserScale <= 1.5f
+            && SideWidthPhysical >= (319.0f * UserScale)
+            && SideWidthPhysical <= (361.0f * UserScale)
+            && FMath::Abs(SideWidthPhysical - (SideWidthLogical * ViewportScale)) <= 4.0f
+            && FMath::Abs(RightWidthPhysical - ((SideWidthPhysical + (40.0f * UserScale)))) <= 4.0f
+            && FMath::Abs(RightWidthPhysical - (RightWidthLogical * ViewportScale)) <= 4.0f
+            && FMath::Abs(CompactLeftPhysical - (64.0f * UserScale)) <= 4.0f
+            && FMath::Abs(CompactLeftPhysical - (CompactLeftLogical * ViewportScale)) <= 4.0f
+            && FMath::Abs(ContentScale - (UserScale / ViewportScale)) <= 0.01f
+            && FMath::IsNearlyEqual(ReadableScale, 1.0f, 0.01f);
         bOutPassed = Summary.Contains(TEXT("DockRoot=1"))
             && Summary.Contains(TEXT("RightPanel=1"))
-            && bReadableDockScaleOk
+            && bResponsiveDockScaleOk
             && Summary.Contains(TEXT("CompactAt1080=1"))
             && Summary.Contains(TEXT("ExpandedAt1390=1"))
             && Summary.Contains(TEXT("CompactAt1000=1"))
@@ -14138,6 +14150,177 @@ bool UInspectorWorldSubsystem::ExecuteLegacyToolNativeBridgeAction(FName BridgeI
             RestoreError);
         RICompactUI::SetReadableScaleOverride(PreviousReadableScale);
         RefreshDockRootWidget();
+        return true;
+    }
+
+    if (BridgeId == RI_SelfTestId_ResponsiveDpiLayout)
+    {
+        if (!bOpen)
+        {
+            Open();
+        }
+        RefreshDockRootWidget();
+
+        UInspectorDockRootWidget* DockRoot = DockRootWidget.Get();
+        if (DockRoot)
+        {
+            DockRoot->TakeWidget();
+            DockRoot->ForceLayoutPrepass();
+            if (TSharedPtr<SWidget> CachedWidget = DockRoot->GetCachedWidget())
+            {
+                CachedWidget->SlatePrepass(FSlateApplication::Get().GetApplicationScale());
+            }
+        }
+
+        const FString Summary = GetDockLayoutDebugSummaryForAutomation();
+        auto ExtractSummaryFloat = [&Summary](const TCHAR* Key, float& OutValue) -> bool
+        {
+            const FString KeyText(Key);
+            const int32 StartIndex = Summary.Find(KeyText);
+            if (StartIndex == INDEX_NONE)
+            {
+                return false;
+            }
+
+            FString ValueText = Summary.Mid(StartIndex + KeyText.Len());
+            int32 SpaceIndex = INDEX_NONE;
+            if (ValueText.FindChar(TEXT(' '), SpaceIndex))
+            {
+                ValueText.LeftInline(SpaceIndex);
+            }
+            ValueText.TrimStartAndEndInline();
+            if (ValueText.IsEmpty())
+            {
+                return false;
+            }
+
+            OutValue = FCString::Atof(*ValueText);
+            return FMath::IsFinite(OutValue);
+        };
+
+        float ViewportScale = 0.0f;
+        float UserScale = 0.0f;
+        float ContentScale = 0.0f;
+        float SideWidthPhysical = 0.0f;
+        float RightWidthPhysical = 0.0f;
+        float CompactLeftPhysical = 0.0f;
+        float CenterPhysical = 0.0f;
+        const bool bScaleMetricsPresent = ExtractSummaryFloat(TEXT("ViewportScale="), ViewportScale)
+            && ExtractSummaryFloat(TEXT("UserScale="), UserScale)
+            && ExtractSummaryFloat(TEXT("ContentScale="), ContentScale)
+            && ExtractSummaryFloat(TEXT("SideWidthPhysical="), SideWidthPhysical)
+            && ExtractSummaryFloat(TEXT("RightWidthPhysical="), RightWidthPhysical)
+            && ExtractSummaryFloat(TEXT("CompactLeftPhysical="), CompactLeftPhysical)
+            && ExtractSummaryFloat(TEXT("CenterPhysical="), CenterPhysical);
+        const float ExpectedContentScale = UserScale / FMath::Max(ViewportScale, 0.01f);
+        const bool bScaleFormulaOk = bScaleMetricsPresent
+            && ViewportScale > 0.0f
+            && UserScale >= 0.8f
+            && UserScale <= 1.5f
+            && FMath::IsNearlyEqual(ContentScale, ExpectedContentScale, 0.01f);
+
+        const bool bScaleBoundariesPresent = DockRoot
+            && DockRoot->WidgetTree
+            && DockRoot->WidgetTree->FindWidget(TEXT("RI_DockLeftContentScale"))
+            && DockRoot->WidgetTree->FindWidget(TEXT("RI_DockRightContentScale"));
+        const bool bContainerStructureOk = DockRoot
+            && DockRoot->WidgetTree
+            && Cast<UOverlay>(DockRoot->WidgetTree->RootWidget)
+            && Cast<UHorizontalBox>(DockRoot->WidgetTree->FindWidget(TEXT("RI_DockMainLayout")))
+            && !Cast<UCanvasPanel>(DockRoot->WidgetTree->RootWidget);
+
+        auto TryGetScreenRect = [](UWidget* Widget, FSlateRect& OutRect) -> bool
+        {
+            if (!Widget || !Widget->IsVisible())
+            {
+                return false;
+            }
+
+            Widget->ForceLayoutPrepass();
+            const FGeometry Geometry = Widget->GetCachedGeometry();
+            const FVector2D LocalSize = Geometry.GetLocalSize();
+            if (LocalSize.X <= 1.0f || LocalSize.Y <= 1.0f)
+            {
+                return false;
+            }
+
+            const FVector2D TopLeft = Geometry.LocalToAbsolute(FVector2D::ZeroVector);
+            const FVector2D BottomRight = Geometry.LocalToAbsolute(LocalSize);
+            OutRect = FSlateRect(
+                FMath::Min(TopLeft.X, BottomRight.X),
+                FMath::Min(TopLeft.Y, BottomRight.Y),
+                FMath::Max(TopLeft.X, BottomRight.X),
+                FMath::Max(TopLeft.Y, BottomRight.Y));
+            return FMath::IsFinite(OutRect.Left)
+                && FMath::IsFinite(OutRect.Top)
+                && FMath::IsFinite(OutRect.Right)
+                && FMath::IsFinite(OutRect.Bottom);
+        };
+
+        FSlateRect LeftPanelRect;
+        FSlateRect RightPanelRect;
+        FSlateRect CenterRect;
+        const bool bPanelGeometryReady = DockRoot
+            && DockRoot->WidgetTree
+            && TryGetScreenRect(DockRoot->WidgetTree->FindWidget(TEXT("RI_DockLeftPanelSize")), LeftPanelRect)
+            && TryGetScreenRect(DockRoot->WidgetTree->FindWidget(TEXT("RI_DockRightPanelSize")), RightPanelRect)
+            && TryGetScreenRect(DockRoot->WidgetTree->FindWidget(TEXT("RI_DockViewportOverlay")), CenterRect);
+        const float ExpectedLeftPhysical = Summary.Contains(TEXT("LeftPanel=Compact"))
+            ? CompactLeftPhysical
+            : SideWidthPhysical;
+        auto IsWithinPhysicalTolerance = [](float Actual, float Expected) -> bool
+        {
+            const float Tolerance = FMath::Max(1.0f, FMath::Abs(Expected) * 0.05f);
+            return FMath::Abs(Actual - Expected) <= Tolerance;
+        };
+        const bool bPanelPhysicalGeometryOk = bPanelGeometryReady
+            && IsWithinPhysicalTolerance(LeftPanelRect.Right - LeftPanelRect.Left, ExpectedLeftPhysical)
+            && IsWithinPhysicalTolerance(RightPanelRect.Right - RightPanelRect.Left, RightWidthPhysical)
+            && IsWithinPhysicalTolerance(CenterRect.Right - CenterRect.Left, CenterPhysical);
+
+        static const FName TabNames[] = {
+            TEXT("RI_TabActor"),
+            TEXT("RI_TabChanges"),
+            TEXT("RI_TabSettings"),
+            TEXT("RI_TabTools")
+        };
+        TArray<FSlateRect> TabRects;
+        bool bTabGeometryReady = DockRoot && DockRoot->WidgetTree;
+        if (bTabGeometryReady)
+        {
+            for (const FName TabName : TabNames)
+            {
+                FSlateRect Rect;
+                if (!TryGetScreenRect(DockRoot->WidgetTree->FindWidget(TabName), Rect))
+                {
+                    bTabGeometryReady = false;
+                    break;
+                }
+                TabRects.Add(Rect);
+            }
+        }
+
+        bool bTabsNonOverlapping = bTabGeometryReady && TabRects.Num() == UE_ARRAY_COUNT(TabNames);
+        for (int32 Index = 1; bTabsNonOverlapping && Index < TabRects.Num(); ++Index)
+        {
+            bTabsNonOverlapping = TabRects[Index - 1].Right <= TabRects[Index].Left + 1.0f;
+        }
+
+        bOutPassed = bScaleFormulaOk
+            && bScaleBoundariesPresent
+            && bContainerStructureOk
+            && bPanelPhysicalGeometryOk
+            && bTabsNonOverlapping;
+        OutReport = FString::Printf(
+            TEXT("responsive_dpi_layout=%s | Formula=%d Boundaries=%d Containers=%d PanelGeometry=%d Tabs=%d ExpectedScale=%.3f | %s"),
+            bOutPassed ? TEXT("PASS") : TEXT("FAIL"),
+            bScaleFormulaOk ? 1 : 0,
+            bScaleBoundariesPresent ? 1 : 0,
+            bContainerStructureOk ? 1 : 0,
+            bPanelPhysicalGeometryOk ? 1 : 0,
+            bTabsNonOverlapping ? 1 : 0,
+            ExpectedContentScale,
+            *Summary);
         return true;
     }
 
@@ -17151,6 +17334,7 @@ bool UInspectorWorldSubsystem::RunColorPickerUIContractSelfTest(FString& OutRepo
     const bool bBound = TryBindActiveConfirmDialog(PickerWidget);
     const bool bPageActive = TryActivateConfirmDialogColorPage(PickerWidget) && IsConfirmDialogColorPageActive(PickerWidget);
     const bool bContract = PickerWidget->HasNativeColorPickerContractForAutomation();
+    const bool bResponsiveScaleBoundary = PickerWidget->HasResponsiveScaleBoundaryForAutomation();
     const bool bFixedRadius = PickerWidget->HasFixedRadiusBrushesForAutomation();
     const bool bCompactLayout = PickerWidget->HasCompactLayoutForAutomation();
     const bool bBottomPlacement = PickerWidget->HasBottomSheetPlacementForAutomation();
@@ -17239,6 +17423,7 @@ bool UInspectorWorldSubsystem::RunColorPickerUIContractSelfTest(FString& OutRepo
     const bool bPassed = bBound
         && bPageActive
         && bContract
+        && bResponsiveScaleBoundary
         && bFixedRadius
         && bCompactLayout
         && bBottomPlacement
@@ -17258,11 +17443,12 @@ bool UInspectorWorldSubsystem::RunColorPickerUIContractSelfTest(FString& OutRepo
         && bHexParsed
         && bModalCleared;
     OutReport = FString::Printf(
-        TEXT("ColorPickerUIContract=%s | Bound=%d Page=%d Contract=%d FixedRadius=%d Compact=%d Bottom=%d FooterClearance=%d ActionsBelowRecent=%d HexButtonOverlap=%d HeaderDrag=%d Modal=%d RgbTypingPreserved=%d RgbTypingDeferred=%d RgbInput=%d RgbParsed=%d DragPreview=%d HexTypingPreserved=%d HexTypingDeferred=%d HexInput=%d HexParsed=%d ModalCleared=%d"),
+        TEXT("ColorPickerUIContract=%s | Bound=%d Page=%d Contract=%d ResponsiveScaleBoundary=%d FixedRadius=%d Compact=%d Bottom=%d FooterClearance=%d ActionsBelowRecent=%d HexButtonOverlap=%d HeaderDrag=%d Modal=%d RgbTypingPreserved=%d RgbTypingDeferred=%d RgbInput=%d RgbParsed=%d DragPreview=%d HexTypingPreserved=%d HexTypingDeferred=%d HexInput=%d HexParsed=%d ModalCleared=%d"),
         bPassed ? TEXT("PASS") : TEXT("FAIL"),
         bBound ? 1 : 0,
         bPageActive ? 1 : 0,
         bContract ? 1 : 0,
+        bResponsiveScaleBoundary ? 1 : 0,
         bFixedRadius ? 1 : 0,
         bCompactLayout ? 1 : 0,
         bBottomPlacement ? 1 : 0,

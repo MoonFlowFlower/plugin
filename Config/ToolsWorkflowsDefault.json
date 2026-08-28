@@ -376,6 +376,7 @@
     "ActionSequence": [
       { "ActionType": "RunSelfTest", "RefId": "dock_layout" },
       { "ActionType": "RunSelfTest", "RefId": "ui_readability" },
+      { "ActionType": "RunSelfTest", "RefId": "responsive_dpi_layout" },
       { "ActionType": "RunSelfTest", "RefId": "right_inspector_tabs" },
       { "ActionType": "RunSelfTest", "RefId": "actor_context_panel" },
       { "ActionType": "RunSelfTest", "RefId": "actor_attributes_section" },

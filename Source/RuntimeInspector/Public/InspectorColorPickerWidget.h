@@ -12,6 +12,7 @@ class UCanvasPanelSlot;
 class UEditableTextBox;
 class UHorizontalBox;
 class UImage;
+class UScaleBox;
 class USizeBox;
 class UTextBlock;
 class UTexture2D;
@@ -54,6 +55,7 @@ public:
 
     bool IsNativeColorPickerReadyForAutomation() const;
     bool HasNativeColorPickerContractForAutomation() const;
+    bool HasResponsiveScaleBoundaryForAutomation() const;
     bool SetRgbChannelTextForAutomation(int32 ChannelIndex, const FString& InText);
     bool SetHexTextForAutomation(const FString& InText);
     bool ApplySaturationValueForAutomation(float InSaturation, float InValue);
@@ -70,6 +72,7 @@ public:
 
 protected:
     virtual TSharedRef<SWidget> RebuildWidget() override;
+    virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
     virtual FReply NativeOnPreviewMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
     virtual FReply NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
     virtual FReply NativeOnMouseMove(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
@@ -92,6 +95,7 @@ private:
     };
 
     void BuildWidgetTree();
+    void ApplyResponsiveLayout();
     void RefreshAll(bool bRegenerateTextures);
     void RefreshTextFields();
     void RefreshTextureBrushes(bool bRegenerateTextures);
@@ -177,6 +181,9 @@ private:
 
     UPROPERTY(Transient)
     TObjectPtr<UCanvasPanel> RootCanvas = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UScaleBox> ModalContentScaleBox = nullptr;
 
     UPROPERTY(Transient)
     TObjectPtr<UBorder> ModalBorder = nullptr;
@@ -297,4 +304,11 @@ private:
     ERIColorPickerInputMode InputMode = ERIColorPickerInputMode::RGB;
     FVector2D ModalDragStartScreenPosition = FVector2D::ZeroVector;
     FVector2D ModalDragStartSlotPosition = FVector2D::ZeroVector;
+    FVector2D LastResponsiveViewportSize = FVector2D::ZeroVector;
+    FVector2D ResponsiveModalLogicalSize = FVector2D::ZeroVector;
+    float LastResponsiveHostDpi = 1.0f;
+    float LastResponsiveUserScale = 1.0f;
+    float ResponsiveBottomOffsetLogical = 0.0f;
+    float ResponsiveClampPaddingLogical = 0.0f;
+    bool bModalPositionWasDragged = false;
 };

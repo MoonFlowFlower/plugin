@@ -18,6 +18,7 @@ class UInspectorTestPageWidget;
 class UInspectorWorldSubsystem;
 class UOverlay;
 class UScrollBox;
+class UScaleBox;
 class USizeBox;
 class UTextBlock;
 class URuntimeInspectorController;
@@ -129,6 +130,7 @@ public:
 
 protected:
     virtual void NativeConstruct() override;
+    virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 
 private:
     void BuildWidgetTreeIfNeeded();
@@ -195,6 +197,10 @@ private:
     TObjectPtr<USizeBox> LeftPanelSizeBox;
     UPROPERTY(Transient)
     TObjectPtr<USizeBox> RightPanelSizeBox;
+    UPROPERTY(Transient)
+    TObjectPtr<UScaleBox> LeftPanelContentScaleBox;
+    UPROPERTY(Transient)
+    TObjectPtr<UScaleBox> RightPanelContentScaleBox;
     UPROPERTY(Transient)
     TObjectPtr<UVerticalBox> LeftPanelBox;
     UPROPERTY(Transient)
@@ -293,12 +299,17 @@ private:
     double LastOpenHydrationViewModelMs = 0.0;
     float LastDockViewportScale = 1.0f;
     float LastDockReadableScale = 1.0f;
+    float LastDockUserScale = 1.0f;
+    float LastDockContentScale = 1.0f;
     float LastDockSidePanelLogicalWidth = 0.0f;
     float LastDockSidePanelPhysicalWidth = 0.0f;
+    float LastDockRightPanelLogicalWidth = 0.0f;
+    float LastDockRightPanelPhysicalWidth = 0.0f;
     float LastDockCompactLeftLogicalWidth = 0.0f;
     float LastDockCompactLeftPhysicalWidth = 0.0f;
     float LastDockPanelGapLogical = 0.0f;
     float LastDockPanelGapPhysical = 0.0f;
+    FVector2D LastDockPhysicalViewportSize = FVector2D::ZeroVector;
 
     bool bWidgetTreeBuilt = false;
     bool bLeftPanelCompact = false;
