@@ -1750,7 +1750,7 @@ bool UInspectorTestPageWidget::RunSingleTest(FName TestId)
     return bPassed;
 }
 
-bool UInspectorTestPageWidget::RunSingleWorkflow(FName WorkflowId)
+bool UInspectorTestPageWidget::RunSingleWorkflow(FName WorkflowId, bool bRunOnSelectedRemoteSession)
 {
     UInspectorWorldSubsystem* InspectorSubsystem = Subsystem.Get();
     if (!InspectorSubsystem)
@@ -1760,7 +1760,7 @@ bool UInspectorTestPageWidget::RunSingleWorkflow(FName WorkflowId)
         return false;
     }
 
-    if (!EnsureRemoteSessionConnected())
+    if (bRunOnSelectedRemoteSession && !EnsureRemoteSessionConnected())
     {
         return false;
     }
@@ -1771,7 +1771,9 @@ bool UInspectorTestPageWidget::RunSingleWorkflow(FName WorkflowId)
     UpdateUIFromState();
 
     const FString ActorQuery = RemoteSessionTargetQueryBox ? RemoteSessionTargetQueryBox->GetText().ToString().TrimStartAndEnd() : FString();
-    const bool bRunOnExplicitSession = !SelectedRemoteSessionId.IsEmpty() && !RI_IsLocalRuntimeSessionId(SelectedRemoteSessionId);
+    const bool bRunOnExplicitSession = bRunOnSelectedRemoteSession
+        && !SelectedRemoteSessionId.IsEmpty()
+        && !RI_IsLocalRuntimeSessionId(SelectedRemoteSessionId);
 
     bool bPassed = false;
     FRIWorkflowRunResult WorkflowRunResult;
@@ -1802,6 +1804,15 @@ bool UInspectorTestPageWidget::RunSingleWorkflow(FName WorkflowId)
     Results = InspectorSubsystem->GetLastSelfTestResults();
     SetStatusMessage(LastWorkflowRunResult.Summary.IsEmpty() ? LastWorkflowRunResult.FullReport : LastWorkflowRunResult.Summary, !(bPassed || LastWorkflowRunResult.bBlocked));
     UpdateUIFromState();
+    return bPassed;
+}
+
+bool UInspectorTestPageWidget::RunPrimaryWorkflowForAutomation(FName WorkflowId, const FString& ConflictingRemoteSessionId)
+{
+    const FString PreviousRemoteSessionId = SelectedRemoteSessionId;
+    SelectedRemoteSessionId = ConflictingRemoteSessionId;
+    const bool bPassed = RunSingleWorkflow(WorkflowId, false);
+    SelectedRemoteSessionId = PreviousRemoteSessionId;
     return bPassed;
 }
 
@@ -2264,7 +2275,7 @@ void UInspectorTestPageWidget::HandleRemoteSessionRunWorkflowClicked()
     SelectedWorkflowId = FName(*WorkflowIdText);
     bViewingWorkflowReport = true;
     PushRemoteSessionContextToSubsystem();
-    RunSingleWorkflow(SelectedWorkflowId);
+    RunSingleWorkflow(SelectedWorkflowId, true);
 }
 
 void UInspectorTestPageWidget::HandleRemoteSessionWorkflowCommitted(const FText& InText, ETextCommit::Type CommitMethod)

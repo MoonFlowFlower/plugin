@@ -21450,6 +21450,19 @@ bool UInspectorWorldSubsystem::RunWorkflowPageViewSelfTest(FString& OutReport)
     const bool bNestedWorkflowRowOk = Page && Page->HasRenderedWorkflowRow(RI_WorkflowId_MainlineActorEndToEndClosure);
     const bool bRenderedCountOk = ExpectedCount > 0 && RenderedCount == ExpectedCount;
     const bool bSelectedWorkflowOk = !SelectedWorkflowLabel.IsEmpty() && !SelectedWorkflowLabel.Equals(TEXT("None"), ESearchCase::CaseSensitive);
+    const FString PreviousPreferredSessionId = PreferredRemoteSessionId;
+    const FString PreviousSelectionSummary = LastRemoteSessionSelectionSummary;
+    const FString PreviousTargetQuery = LastRemoteSessionTargetQuery;
+    const FString PreviousWorkflowId = LastRemoteSessionWorkflowId;
+    const bool bPrimaryWorkflowLocalRouteOk = Page
+        && Page->RunPrimaryWorkflowForAutomation(RI_WorkflowId_FabScreenshotFoundation, TEXT("ri_validation_remote_session"));
+    const FRIWorkflowRunResult PrimaryWorkflowResult = GetLastWorkflowRunResult();
+    const bool bPrimaryWorkflowResultOk = bPrimaryWorkflowLocalRouteOk
+        && PrimaryWorkflowResult.bPassed
+        && PrimaryWorkflowResult.WorkflowId == RI_WorkflowId_FabScreenshotFoundation;
+    SetRemoteSessionUIContext(PreviousPreferredSessionId, PreviousSelectionSummary, PreviousTargetQuery, PreviousWorkflowId);
+    FString RestoreToolsPageError;
+    SetVisiblePageByName(TEXT("Tools"), RestoreToolsPageError);
     const int32 ActiveIndex = DockRoot
         ? static_cast<int32>(DockRoot->GetActiveTab())
         : (Switcher ? Switcher->GetActiveWidgetIndex() : INDEX_NONE);
@@ -21461,10 +21474,11 @@ bool UInspectorWorldSubsystem::RunWorkflowPageViewSelfTest(FString& OutReport)
         && bPageScrollOk && bTouchScrollOk && bSelectionRowOk && bRemoteSectionOk && bWorkflowSectionOk
         && bTestsSectionOk && bReportSectionOk && bDiagnosticsSectionOk && bActivityLogSectionOk
         && bTestsCollapsedOk && bRemoteCollapsedOk && bDiagnosticsCollapsedOk && bActivityLogCollapsedOk
-        && bNestedWorkflowRowOk && bRenderedCountOk && bSelectedWorkflowOk;
+        && bNestedWorkflowRowOk && bRenderedCountOk && bSelectedWorkflowOk
+        && bPrimaryWorkflowResultOk && RestoreToolsPageError.IsEmpty();
 
     OutReport = FString::Printf(
-        TEXT("WorkflowPageViewSelfTest=%s | ActiveIndex=%d Host=%s HostHasPage=%d VisibleLegacy=%d Scroll=%d Touch=%d SelectionRow=%d Remote=%d Diagnostics=%d Activity=%d Workflows=%d Tests=%d Report=%d Collapsed=%d/%d/%d/%d Rendered=%d Expected=%d EndToEndRow=%d Selected=%s LegacyNames=%s"),
+        TEXT("WorkflowPageViewSelfTest=%s | ActiveIndex=%d Host=%s HostHasPage=%d VisibleLegacy=%d Scroll=%d Touch=%d SelectionRow=%d Remote=%d Diagnostics=%d Activity=%d Workflows=%d Tests=%d Report=%d Collapsed=%d/%d/%d/%d Rendered=%d Expected=%d EndToEndRow=%d Selected=%s PrimaryLocalRoute=%d LegacyNames=%s"),
         bPassed ? TEXT("PASS") : TEXT("FAIL"),
         ActiveIndex,
         HostPanel ? *HostPanel->GetName() : TEXT("None"),
@@ -21487,6 +21501,7 @@ bool UInspectorWorldSubsystem::RunWorkflowPageViewSelfTest(FString& OutReport)
         ExpectedCount,
         bNestedWorkflowRowOk ? 1 : 0,
         bSelectedWorkflowOk ? *SelectedWorkflowLabel : TEXT("None"),
+        bPrimaryWorkflowResultOk ? 1 : 0,
         VisibleLegacySiblingNames.IsEmpty() ? TEXT("None") : *VisibleLegacySiblingNames);
     return bPassed;
 #endif

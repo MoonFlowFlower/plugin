@@ -101,6 +101,7 @@ public:
     void HandleSelfTestSelected(FName TestId);
     void HandleSelfTestRunRequested(FName TestId);
     void HandleSelfTestResultSelected(FName TestId);
+    bool RunPrimaryWorkflowForAutomation(FName WorkflowId, const FString& ConflictingRemoteSessionId);
 
     UFUNCTION()
     void HandleRemoteSessionSelectionChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
@@ -133,7 +134,7 @@ private:
     void ClearStatusMessage();
     void PullRemoteSessionContextFromSubsystem();
     void PushRemoteSessionContextToSubsystem();
-    bool RunSingleWorkflow(FName WorkflowId);
+    bool RunSingleWorkflow(FName WorkflowId, bool bRunOnSelectedRemoteSession = false);
     bool RunSingleTest(FName TestId);
     void BindSelectWorkflowButton(UButton* Button, FName WorkflowId);
     void BindRunWorkflowButton(UButton* Button, FName WorkflowId);
