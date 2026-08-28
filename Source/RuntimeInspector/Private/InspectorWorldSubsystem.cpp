@@ -23671,8 +23671,11 @@ bool UInspectorWorldSubsystem::RunFileWorkflowSelfTest(FString& OutReport)
     const bool bStageOk = ExecuteFileStagePatchAction(StageSummary, StageDetails);
     const FString StageReportText = GetLastImportReportAsText(true, true);
     const bool bStageReportOk = bStageOk && StageReportText.Contains(StageSummary);
+    const int32 ExpectedStagePatchRows = bStageOk ? GetStagedPatch().Operations.Num() : INDEX_NONE;
     const FString StageDockSummary = GetDockLayoutDebugSummaryForAutomation();
-    const bool bStageDockSyncOk = !IsDockRootActive() || StageDockSummary.Contains(TEXT("PatchRows=1"));
+    const FString ExpectedStagePatchRowsText = FString::Printf(TEXT("PatchRows=%d"), ExpectedStagePatchRows);
+    const bool bStageDockSyncOk = !IsDockRootActive()
+        || (ExpectedStagePatchRows > 0 && StageDockSummary.Contains(ExpectedStagePatchRowsText));
 
     FString ExportSummary;
     FString ExportDetails;
@@ -23738,10 +23741,11 @@ bool UInspectorWorldSubsystem::RunFileWorkflowSelfTest(FString& OutReport)
         && !HasStagedPatch();
 
     OutReport = FString::Printf(
-        TEXT("FileWorkflowSelfTest=%s | Property=%s Stage=%s DockSync=%d/%d Export=%s Preset=%s ApplyPreset=%s Audit=%s Clear=%s SharedExport=%s FinalStaged=%s"),
+        TEXT("FileWorkflowSelfTest=%s | Property=%s Stage=%s StageRows=%d DockSync=%d/%d Export=%s Preset=%s ApplyPreset=%s Audit=%s Clear=%s SharedExport=%s FinalStaged=%s"),
         bPassed ? TEXT("PASS") : TEXT("FAIL"),
         *TestProperty.ToString(),
         bStageReportOk ? TEXT("ok") : *StageSummary,
+        ExpectedStagePatchRows,
         bStageDockSyncOk ? 1 : 0,
         bClearDockSyncOk ? 1 : 0,
         bExportReportOk ? TEXT("ok") : *ExportSummary,
