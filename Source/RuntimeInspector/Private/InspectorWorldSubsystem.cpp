@@ -23486,6 +23486,11 @@ bool UInspectorWorldSubsystem::RunFileWorkflowSelfTest(FString& OutReport)
         return false;
     }
 
+    if (!bOpen)
+    {
+        Open();
+    }
+
     AActor* PreviousSelectedActor = SelectedActor.Get();
     const bool bHadStagedPatch = bHasStagedPatch;
     const FRIPatchBundle PreviousStagedPatch = StagedPatchBundle;
@@ -23666,6 +23671,8 @@ bool UInspectorWorldSubsystem::RunFileWorkflowSelfTest(FString& OutReport)
     const bool bStageOk = ExecuteFileStagePatchAction(StageSummary, StageDetails);
     const FString StageReportText = GetLastImportReportAsText(true, true);
     const bool bStageReportOk = bStageOk && StageReportText.Contains(StageSummary);
+    const FString StageDockSummary = GetDockLayoutDebugSummaryForAutomation();
+    const bool bStageDockSyncOk = !IsDockRootActive() || StageDockSummary.Contains(TEXT("PatchRows=1"));
 
     FString ExportSummary;
     FString ExportDetails;
@@ -23711,26 +23718,32 @@ bool UInspectorWorldSubsystem::RunFileWorkflowSelfTest(FString& OutReport)
     const bool bClearOk = ExecuteFileClearStagedAction(ClearSummary, ClearDetails);
     const FString ClearReportText = GetLastImportReportAsText(true, true);
     const bool bClearReportOk = bClearOk && ClearReportText.Contains(ClearSummary);
+    const FString ClearDockSummary = GetDockLayoutDebugSummaryForAutomation();
+    const bool bClearDockSyncOk = !IsDockRootActive() || ClearDockSummary.Contains(TEXT("PatchRows=0"));
 
     FString SharedReportExportError;
     const bool bSharedReportExportOk = ExportLastImportReportToFile(false, ExportedSharedReportPath, SharedReportExportError)
         && IFileManager::Get().FileExists(*ExportedSharedReportPath);
 
     const bool bPassed = bStageReportOk
+        && bStageDockSyncOk
         && bExportReportOk
         && bPresetReportOk
         && bApplyLatestPresetReportOk
         && bApplyLatestPresetValueOk
         && bAuditReportOk
         && bClearReportOk
+        && bClearDockSyncOk
         && bSharedReportExportOk
         && !HasStagedPatch();
 
     OutReport = FString::Printf(
-        TEXT("FileWorkflowSelfTest=%s | Property=%s Stage=%s Export=%s Preset=%s ApplyPreset=%s Audit=%s Clear=%s SharedExport=%s FinalStaged=%s"),
+        TEXT("FileWorkflowSelfTest=%s | Property=%s Stage=%s DockSync=%d/%d Export=%s Preset=%s ApplyPreset=%s Audit=%s Clear=%s SharedExport=%s FinalStaged=%s"),
         bPassed ? TEXT("PASS") : TEXT("FAIL"),
         *TestProperty.ToString(),
         bStageReportOk ? TEXT("ok") : *StageSummary,
+        bStageDockSyncOk ? 1 : 0,
+        bClearDockSyncOk ? 1 : 0,
         bExportReportOk ? TEXT("ok") : *ExportSummary,
         bPresetReportOk ? TEXT("ok") : *PresetSummary,
         (bApplyLatestPresetReportOk && bApplyLatestPresetValueOk) ? TEXT("ok") : *ApplyLatestPresetSummary,
@@ -28616,6 +28629,11 @@ bool UInspectorWorldSubsystem::ExecuteFileStagePatchAction(FString& OutSummary, 
             Bundle.DisplayName.IsEmpty() ? TEXT("StagedPatch") : *Bundle.DisplayName,
             Bundle.Operations.Num());
         CacheSharedFileReport(true, OutSummary, OutDetails, Bundle.Operations.Num(), 0, 0, 0);
+        // The file page owns this action, but the staged banner, patch rows and
+        // action bar are owned by the native dock. Refresh the shared view model
+        // immediately so a successful real button click is visible without a
+        // tab round-trip or a second manual refresh.
+        RefreshPanel(EInspectorRefreshReason::ValuesChanged);
         PushToast(ERIToastType::Success, OutSummary, 1.5f);
         return true;
     }
@@ -29348,6 +29366,7 @@ bool UInspectorWorldSubsystem::ExecuteFileClearStagedAction(FString& OutSummary,
     OutSummary = TEXT("Staged patch cleared");
     OutDetails = TEXT("The current staged patch bundle has been removed from the session.");
     CacheSharedFileReport(true, OutSummary, OutDetails, 0, 0, 0, 0);
+    RefreshPanel(EInspectorRefreshReason::ValuesChanged);
     PushToast(ERIToastType::Info, OutSummary, 1.2f);
     return true;
 #endif
