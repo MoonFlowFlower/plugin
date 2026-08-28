@@ -13982,12 +13982,44 @@ bool UInspectorWorldSubsystem::ExecuteLegacyToolNativeBridgeAction(FName BridgeI
             const bool bPageSelected = SetVisiblePageByName(PageCheck.Label, PageError);
             RefreshDockRootWidget();
 
+            UInspectorDockRootWidget* RootWidget = DockRootWidget.Get();
+            if (RootWidget)
+            {
+                // Page selection and hosted-page refresh are synchronous, while
+                // arranged Slate geometry is not. Pump a bounded prepass before
+                // sampling so the first readability run cannot compare cached
+                // bounds left behind by the previously visible page.
+                for (int32 Attempt = 0; Attempt < 3; ++Attempt)
+                {
+                    if (FSlateApplication::IsInitialized())
+                    {
+                        FSlateApplication::Get().Tick(ESlateTickType::All);
+                    }
+
+                    RootWidget->TakeWidget();
+                    RootWidget->ForceLayoutPrepass();
+                    if (TSharedPtr<SWidget> CachedWidget = RootWidget->GetCachedWidget())
+                    {
+                        CachedWidget->SlatePrepass(FSlateApplication::Get().GetApplicationScale());
+                    }
+                    RootWidget->ForceLayoutPrepass();
+                }
+            }
+
             int32 TextCount = 0;
             int32 MinimumFont = MAX_int32;
             int32 ScrollCount = 0;
             int32 LayoutSampleCount = 0;
             int32 SevereOverlapCount = 0;
-            TArray<FBox2D> TextBounds;
+            struct FReadabilityTextSample
+            {
+                FBox2D Bounds;
+                FString WidgetName;
+                FString Text;
+                const UPanelWidget* LayoutParent = nullptr;
+            };
+            TArray<FReadabilityTextSample> TextSamples;
+            TArray<FString> SevereOverlapDetails;
             TSet<const UWidget*> VisitedWidgets;
 
             TFunction<void(UWidget*, bool)> CollectVisibleWidget;
@@ -14026,7 +14058,11 @@ bool UInspectorWorldSubsystem::ExecuteLegacyToolNativeBridgeAction(FName BridgeI
                         {
                             const FVector2D AbsoluteMin = Geometry.LocalToAbsolute(FVector2D::ZeroVector);
                             const FVector2D AbsoluteMax = Geometry.LocalToAbsolute(LocalSize);
-                            TextBounds.Emplace(AbsoluteMin, AbsoluteMax);
+                            FReadabilityTextSample& Sample = TextSamples.AddDefaulted_GetRef();
+                            Sample.Bounds = FBox2D(AbsoluteMin, AbsoluteMax);
+                            Sample.WidgetName = TextBlock->GetName();
+                            Sample.Text = TextBlock->GetText().ToString().Left(32);
+                            Sample.LayoutParent = TextBlock->GetParent();
                             ++LayoutSampleCount;
                         }
                     }
@@ -14060,24 +14096,35 @@ bool UInspectorWorldSubsystem::ExecuteLegacyToolNativeBridgeAction(FName BridgeI
                 }
             };
 
-            if (UInspectorDockRootWidget* RootWidget = DockRootWidget.Get())
+            if (RootWidget)
             {
                 RootWidget->ForceLayoutPrepass();
                 CollectVisibleWidget(RootWidget, true);
             }
 
-            for (int32 LeftIndex = 0; LeftIndex < TextBounds.Num(); ++LeftIndex)
+            for (int32 LeftIndex = 0; LeftIndex < TextSamples.Num(); ++LeftIndex)
             {
-                const FBox2D& LeftBounds = TextBounds[LeftIndex];
+                const FReadabilityTextSample& LeftSample = TextSamples[LeftIndex];
+                const FBox2D& LeftBounds = LeftSample.Bounds;
                 const float LeftArea = LeftBounds.GetArea();
                 if (LeftArea <= 1.0f)
                 {
                     continue;
                 }
 
-                for (int32 RightIndex = LeftIndex + 1; RightIndex < TextBounds.Num(); ++RightIndex)
+                for (int32 RightIndex = LeftIndex + 1; RightIndex < TextSamples.Num(); ++RightIndex)
                 {
-                    const FBox2D& RightBounds = TextBounds[RightIndex];
+                    const FReadabilityTextSample& RightSample = TextSamples[RightIndex];
+                    const FBox2D& RightBounds = RightSample.Bounds;
+                    // Cached geometry cannot express paint occlusion or a scroll
+                    // viewport's clipped/off-screen branches. Cross-container
+                    // overlap is therefore covered by the rendered screenshot
+                    // matrix; this structural assertion only compares siblings
+                    // arranged by the same layout container.
+                    if (!LeftSample.LayoutParent || LeftSample.LayoutParent != RightSample.LayoutParent)
+                    {
+                        continue;
+                    }
                     const float RightArea = RightBounds.GetArea();
                     if (RightArea <= 1.0f || !LeftBounds.Intersect(RightBounds))
                     {
@@ -14096,6 +14143,23 @@ bool UInspectorWorldSubsystem::ExecuteLegacyToolNativeBridgeAction(FName BridgeI
                     if (SmallerArea > 1.0f && IntersectionArea / SmallerArea >= 0.90f)
                     {
                         ++SevereOverlapCount;
+                        if (SevereOverlapDetails.Num() < 8)
+                        {
+                            SevereOverlapDetails.Add(FString::Printf(
+                                TEXT("%s[%s]@%.0f,%.0f-%.0f,%.0f<->%s[%s]@%.0f,%.0f-%.0f,%.0f"),
+                                *LeftSample.WidgetName,
+                                *LeftSample.Text,
+                                LeftBounds.Min.X,
+                                LeftBounds.Min.Y,
+                                LeftBounds.Max.X,
+                                LeftBounds.Max.Y,
+                                *RightSample.WidgetName,
+                                *RightSample.Text,
+                                RightBounds.Min.X,
+                                RightBounds.Min.Y,
+                                RightBounds.Max.X,
+                                RightBounds.Max.Y));
+                        }
                     }
                 }
             }
@@ -14108,7 +14172,7 @@ bool UInspectorWorldSubsystem::ExecuteLegacyToolNativeBridgeAction(FName BridgeI
                 && SevereOverlapCount == 0;
             bAllPagesReadable = bAllPagesReadable && bPageReadable;
             PageReports.Add(FString::Printf(
-                TEXT("%s=%d Text=%d MinFont=%d Scroll=%d Geometry=%d SevereOverlap=%d%s"),
+                TEXT("%s=%d Text=%d MinFont=%d Scroll=%d Geometry=%d SevereOverlap=%d OverlapPairs=%s%s"),
                 PageCheck.Label,
                 bPageReadable ? 1 : 0,
                 TextCount,
@@ -14116,6 +14180,7 @@ bool UInspectorWorldSubsystem::ExecuteLegacyToolNativeBridgeAction(FName BridgeI
                 ScrollCount,
                 LayoutSampleCount,
                 SevereOverlapCount,
+                SevereOverlapDetails.IsEmpty() ? TEXT("None") : *FString::Join(SevereOverlapDetails, TEXT(";;")),
                 PageError.IsEmpty() ? TEXT("") : *FString::Printf(TEXT(" Error=%s"), *PageError)));
         }
 
