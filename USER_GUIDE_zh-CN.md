@@ -79,6 +79,14 @@
 - `Tools`
   - 运行 self-test、workflow、remote session 和诊断能力
 
+### 5.1 分辨率、DPI 与 UI Scale
+
+- 默认 `UIScale=1.0` 时，插件会在自身范围内抵消宿主 viewport DPI，使文字、按钮、间距和左右面板在所验收分辨率上维持相同的屏幕像素基线。
+- `UIScale` 是用户主动控制 Runtime Inspector 整体大小的设置，范围为 `0.8-1.5`。它只缩放插件，不修改项目的全局 DPI 曲线，也不缩放中央游戏视口。
+- 左右面板使用 Anchor、布局容器、ScaleBox 和 ScrollBox 适配；中央区域始终 Fill。窄窗口会优先收起左侧说明、启用滚动或省略过长文本，不会通过降低默认字号来塞入内容。
+- UI 由运行时 native UMG 结构生成，不是完整的 Designer UMG 蓝图；这不影响响应式布局，但用户不能在 UMG Designer 中任意拖拽重排整个插件界面。
+- 首发验收覆盖 `1280x720`、`1600x900`、`1920x1080`、`2560x1440`、`3840x2160` 和 `900x1200`，以及 `UIScale=0.8/1.0/1.25/1.5`。这不等于所有硬件或第三方 DPI 曲线都已证明。
+
 ## 6. 常见工作流
 
 ### 6.1 本地 PIE 中做一次运行时修改并审阅
@@ -114,6 +122,10 @@
 - source authority 仍然在 Editor
 
 ## 7. 常见问题
+
+### Q0. 为什么换分辨率后 Runtime Inspector 看起来仍保持同样大小？
+
+这是默认行为。`UIScale=1.0` 使用固定屏幕像素语义；如果希望插件整体更大或更小，请在 Runtime Inspector 设置中显式调整 `UIScale`，而不是修改项目全局 DPI。
 
 ### Q1. 为什么我在 packaged runtime 里不能直接改 source asset？
 

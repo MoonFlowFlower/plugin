@@ -11,6 +11,7 @@ Capture only shipped Unreal Engine 5.7 functionality. Do not show internal-only 
 - `FabMedia/screenshot_02_changes_workflow.png`: the Changes workspace and staged/review path.
 - `FabMedia/screenshot_03_settings.png`: hotkey and interaction settings without clipped labels.
 - `FabMedia/screenshot_04_tools.png`: non-empty Tests/Workflows configuration and run controls.
+- `FabMedia/screenshot_05_responsive_layouts.png`: representative `UIScale=1.0` comparison at normal, 4K, and narrow/tall viewport sizes.
 - `FabMedia/demo.mp4`: a real live capture, not a slideshow; open the panel, visit Actor/Changes/Settings/Tools, and run a configured workflow. Use H.264, `1920x1080`, `30 fps`, and 30-45 seconds.
 
 ## Compliance Rules

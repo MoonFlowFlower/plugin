@@ -2,50 +2,49 @@
 
 ## Current Conclusion
 
-RuntimeInspector is at a UE 5.7 Fab technical RC on `codex/runtimeinspector-fab-rc`.
+RuntimeInspector's responsive UE 5.7 implementation and main-project gates are verified on `codex/runtimeinspector-fab-rc`.
 
-- Implementation baseline: `a34a1e4ac3e190db14329cba9e216d591b0eb21d`
-- Tasks 0-4 are independently committed; Task 5 implementation, exact-artifact, real-input, packaged-loopback, documentation, and media evidence is technically closed.
-- The exact source/compiled/blank-host chain passes from the closing commit and ZIP recorded in `Saved/FabRelease/Submission/RuntimeInspector-Fab-Submission.manifest.json`.
-- The RC branch is published after that exact chain passes; remote `main` remains intentionally unchanged until the public URL gate passes.
-- Fab-ready must not be claimed while the public documentation/support URLs return HTTP 404.
+- User-facing responsive implementation: `6020b240bd635333102d77beb9829e62c1e7d8e6`.
+- Validation harness before the closing media/docs commit: `8a8872d44cc5d1cafe5dc35898b159bd2a5dbfa0`.
+- Final release commit and source-ZIP SHA-256 are intentionally not hard-coded into files inside that ZIP. The post-commit authority is `Saved/FabRelease/Submission/RuntimeInspector-Fab-Submission.manifest.json` together with its contract/build/blank-host reports.
+- If that generated evidence is missing, failing, or names a different commit/ZIP, the current checkout is not a technical RC regardless of this document.
+- The canonical repository, README DocsURL, and Issues SupportURL were anonymously reachable on 2026-08-28. This removed the historical 404 blocker, but the URLs remain a fail-closed pre-push check.
 
 ## Confirmed Facts
 
+- At `UIScale=1.0`, Runtime Inspector uses `UserUIScale / HostViewportDPI` to keep plugin fonts, controls, spacing, and target side-panel sizes on the same screen-pixel baseline; it does not change global project DPI or scale the central viewport.
+- Side panels use responsive `SizeBox`/`ScaleBox` boundaries and container layout. Narrow space uses compact mode, scrolling, or ellipsis rather than Canvas fixed-position adaptation or smaller default fonts.
+- Base typography remains title `12`, label/value `11`, muted `10`, and control height `28`.
 - Native dock tabs accept real pointer clicks; legacy fallback drag/resize remains isolated.
 - Tools definitions are plugin-relative, packaged, parseable, non-empty, and action-bound.
-- Default typography/readability and UI scale are covered by `ui_readability` and `runtime_ui_contract_v1`.
-- `mainline_full_closure` passed 24/24 after the implementation commits.
-- Packaged loopback validation distinguished editor port `12097` from packaged-runtime port `12098` and verified process ownership.
-- Packaged wrapper/child cleanup is enforced and verified.
-- The exact ZIP-derived blank host passed real `O`, four real-mouse tabs, one Tools self-test, one workflow, and normal plus narrow/tall layouts.
-- Fab media now contains five current UE 5.7 stills and a real 41.933-second operation video with final workflow identity visible.
-- Upload/source bytes, compiled smoke bytes, and blank-host bytes are designed to descend from one committed source ZIP.
+- Six resolutions by four `UIScale` values passed the responsive layout/self-test rows. A clean OS-input retry passed real `O` plus four mouse tabs at normal and narrow/tall sizes.
+- The current main-project targeted set passed 11/11, `runtime_ui_contract_v1` passed 19/19, and `mainline_full_closure` passed 24/24.
+- A long contaminated session with two leftover packaged-runtime processes eventually exhausted Unreal's UObject limit. After the owned packaged process tree was stopped and Editor restarted, the clean responsive real-input run passed. This is environment/lifecycle evidence, not proof that unbounded mixed validation sessions are safe.
+- Fab media contains six UE 5.7 stills and a real 44.033333-second operation video; exact hashes are in `FabMedia/fab_media_manifest.json`.
 
-## Active Blockers
+## Generated Release Gate
 
-1. Make the canonical `MoonFlowFlower/plugin` documentation and support destinations publicly reachable, or provide publisher-approved replacements. On 2026-08-16 the repository and Issues URLs returned HTTP 404 without authentication; the publisher profile itself returned HTTP 200.
-2. Keep remote `main` unchanged until both public URLs return HTTP 200.
+A release is technically closed only when all of these are fresh for the same final commit:
 
-## Next Smallest Closure Loop
-
-1. Resolve the public URL blocker without substituting an unrelated destination.
-2. Recheck DocsURL, SupportURL, the source manifest commit, ZIP SHA-256, and remote RC SHA.
-3. Confirm remote `main` is still an ancestor of the verified RC commit.
-4. Only then fast-forward remote `main`; stop on any non-fast-forward or protection rejection and never force push.
-5. If any shipping-path file changes before that push, regenerate the complete exact-artifact chain first.
+1. committed source ZIP with clean shipping paths;
+2. SourceSubmission and CompiledSmoke artifact contracts;
+3. UE 5.7 Development and Shipping BuildPlugin;
+4. exact ZIP-derived `RIFabBlank` install/load and consequential-warning scan;
+5. blank-host real `O`, four real mouse tabs, Tools self-test/workflow, and responsive normal/narrow evidence;
+6. packaged loopback run plus verified process-tree cleanup;
+7. final anonymous HTTP 200 checks and ordinary fast-forward-only publication.
 
 ## Authority And Evidence
 
-- State authority: `docs/PROGRAM_STATE_UNIFIED.yaml`
-- Technical signoff: `docs/FAB_RC_SIGNOFF.md`
+- State contract: `docs/PROGRAM_STATE_UNIFIED.yaml`
+- Technical gate: `docs/FAB_RC_SIGNOFF.md`
 - Submission checklist: `FAB_SUBMISSION_CHECKLIST.md`
 - Submission manifest: `Saved/FabRelease/Submission/RuntimeInspector-Fab-Submission.manifest.json`
-- Exact blank-host real input: `Saved/RuntimeInspector/Task5/FinalExactBlankHostRC/final-exact-blank-host-real-input.json`
-- Main closure: `Saved/RuntimeInspector/Task5/mainline-full-closure-final-a34.json`
-- Packaged matrix: `Saved/RuntimeInspector/Task5/PackagedGreenA34/packaged-loopback-matrix-final-a34-green.normalized.json`
+- Main-project closure: `Saved/RuntimeInspector/ResponsiveDPI/PluginMakerClosure/Final38b58ef/final-closure-summary.json`
+- Responsive matrices: `Saved/RuntimeInspector/ResponsiveDPI/`
+- Final exact blank-host and packaged evidence: generated under `Saved/RuntimeInspector/` and `../../Saved/FabRelease/`
 - Media manifest: `FabMedia/fab_media_manifest.json`
 
 ## Claim Boundary
 
-Local technical evidence cannot guarantee Fab approval, all hardware/DPI combinations, asset-rights ownership, or future engine compatibility. MarketplaceURL and Fab account/tax/payout/review work remain external.
+The enumerated matrix cannot prove every hardware, OS scale, third-party DPI curve, or future UE version. Local technical evidence cannot guarantee Fab approval or asset-rights ownership. MarketplaceURL and Fab account/tax/payout/licensing/review work remain external.

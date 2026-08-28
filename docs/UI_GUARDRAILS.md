@@ -43,6 +43,18 @@ Structural changes are not done by compilation alone. They must add or update la
 - Top-level content must not rely on overlap to stay visible.
 - New dock widgets must route mutation through `URuntimeInspectorController`; no Widget code may directly call actor/component mutation APIs.
 
+## Responsive DPI Contract
+
+- Runtime Inspector owns a plugin-local responsive context whose inputs are physical viewport size, host viewport DPI, and user `UIScale` only.
+- The content scale contract is `EffectiveContentScale = UserUIScale / HostViewportDPI`.
+- At `UIScale=1.0`, host resolution/DPI changes must not change the plugin's font, control, spacing, or target panel dimensions in screen pixels beyond `±1 px` or `±5%` rounding tolerance.
+- `RICompactUI` is the single base-token authority: section title `12`, label/value `11`, muted text `10`, and button/input height `28`.
+- A side panel's outer `SizeBox` owns responsive physical width; its inner `ScaleBox` owns uniform plugin content scale. The center overlay remains Fill, unscaled, and hit-test invisible.
+- Runtime resize updates the cached responsive context and geometry only. It must not reconstruct runtime data or refresh a page every frame.
+- Do not use Canvas fixed coordinates for viewport adaptation. Canvas remains allowed only for intrinsically two-dimensional interaction surfaces such as saturation/hue/alpha selectors.
+- When space is insufficient, use compact mode, scroll, ellipsis, or a wider panel before reducing default text below the base tokens.
+- Runtime Inspector must not write or override the user's global project DPI curve.
+
 ## Current Hard Assertions
 
 The current self-test suite must keep enforcing these layout facts:
@@ -79,6 +91,14 @@ The current self-test suite must keep enforcing these layout facts:
   - `Tools` page keeps page-level scroll and advanced sections reachable
 - `settings_page_layout`
   - `Settings` keeps page scroll, footer, status, and interaction surface intact
+- `responsive_dpi_layout`
+  - effective content scale follows the plugin-local formula
+  - both side ScaleBox boundaries and container ownership are present
+  - physical token/panel metrics remain within the cross-resolution tolerance
+  - all four tab rectangles remain disjoint, visible, and clickable
+- `ui_readability`
+  - default visible body text remains at least `10`, tab text at least `10`, and section titles at least `12`
+  - all four pages preserve scroll reachability and report no severe same-layout-parent overlap
 
 ## Required Self-Test Coverage
 
@@ -92,6 +112,8 @@ Any structural UI change must keep these green:
 - `workflow_page_view`
 - `test_page_layout`
 - `settings_page_layout`
+- `responsive_dpi_layout`
+- `ui_readability`
 
 Structural changes must also extend self-tests to validate:
 
@@ -112,6 +134,8 @@ RuntimeInspector UI work is not complete until all of the following are true:
 - manual checks were done in both:
   - a normal window
   - a narrow/tall window
+- a real `O` key event and real mouse clicks reach all four tabs after resize; control/console page switching is not a substitute
+- the supported resolution/UIScale matrix is captured for both the PluginMaker Horizontal DPI rule and an exact ZIP-derived blank host using the engine-default DPI rule
 
 ## Manual Validation Sequence
 

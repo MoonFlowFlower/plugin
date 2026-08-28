@@ -23,6 +23,7 @@ Runtime-state inspection and controlled review workflows for Unreal Engine teams
 - Compare runtime state against source defaults before previewing or applying approved updates
 - Run built-in self-tests, verification profiles, and curated workflows inside the same tool
 - Pull patch data back from supported loopback packaged-runtime sessions into the editor review flow
+- Keep a consistent screen-pixel UI baseline across supported viewport resolutions and host DPI curves, with plugin-only `UIScale=0.8-1.5`
 
 ## Long Description
 
@@ -33,6 +34,8 @@ Inside PIE, you can select a live actor, inspect supported properties, apply edi
 Runtime Inspector also includes built-in self-tests, verification profiles, and guided workflows so teams can validate the tool and the surrounding inspection pipeline instead of relying on one-off editor debugging habits.
 
 For advanced setups, the plugin can discover supported loopback packaged-runtime sessions, query patch targets, pull runtime patch data back into the editor, and continue the same staged audit process there. Source authority remains in the editor workflow.
+
+The dock is responsive without taking over project-wide DPI settings: at `UIScale=1.0`, Runtime Inspector locally normalizes host viewport DPI, keeps the center gameplay viewport unscaled, compacts the left panel when space is limited, and keeps longer content reachable through layout containers and scrolling rather than Canvas fixed-position adaptation.
 
 ## Supported Release Scope
 
@@ -55,6 +58,7 @@ For advanced setups, the plugin can discover supported loopback packaged-runtime
 2. Changes page showing a staged patch summary and review path
 3. Settings page showing hotkey/outline/apply controls
 4. Tools page showing configured workflows and self-tests
+5. Responsive layout comparison at 1280x720, 1920x1080, 3840x2160, and 900x1200
 
 ## Demo Video Outline
 

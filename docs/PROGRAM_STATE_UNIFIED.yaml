@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 project:
   name: RuntimeInspector
   repo_root: D:/Project/Game/UE/PluginMaker/Plugins/RuntimeInspector
@@ -19,59 +19,99 @@ doc_authority:
 
 current_baseline:
   branch: codex/runtimeinspector-fab-rc
-  implementation_commit: a34a1e4ac3e190db14329cba9e216d591b0eb21d
-  implementation_summary: RuntimeInspector Fab technical RC fixes complete
+  responsive_runtime_commit: 6020b240bd635333102d77beb9829e62c1e7d8e6
+  validation_harness_commit_before_closing_docs: 8a8872d44cc5d1cafe5dc35898b159bd2a5dbfa0
   engine: 5.7
   platform: Win64
-  stability_status: technical_rc_release_gate_required_public_url_blocked
-  final_commit_authority: Saved/FabRelease/Submission/RuntimeInspector-Fab-Submission.manifest.json
+  stability_status: responsive_implementation_verified_final_exact_artifact_fail_closed
+  final_commit_and_zip_authority: Saved/FabRelease/Submission/RuntimeInspector-Fab-Submission.manifest.json
+  authority_rule: >
+    Files inside the source ZIP cannot embed the final hash of themselves or of
+    the ZIP without self-reference. Technical-RC status is true only when the
+    generated sidecar and all linked reports pass for the same committed HEAD.
+
+responsive_contract:
+  effective_content_scale: UserUIScale / HostViewportDPI
+  user_ui_scale_range: [0.8, 1.5]
+  fab_default_ui_scale: 1.0
+  fixed_screen_pixel_default: true
+  modifies_project_global_dpi: false
+  scales_center_viewport: false
+  base_tokens:
+    section_title: 12
+    label_value: 11
+    muted: 10
+    control_height: 28
+  layout:
+    side_boundary: outer_SizeBox_inner_ScaleBox
+    center: fill_unscaled_hit_test_invisible
+    adaptation: containers_compact_scroll_ellipsis
+    fixed_canvas_adaptation: forbidden
+  acceptance_tolerance: plus_or_minus_1px_or_5_percent
+  resolutions:
+    - 1280x720
+    - 1600x900
+    - 1920x1080
+    - 2560x1440
+    - 3840x2160
+    - 900x1200
 
 current_focus:
   program_goal: >
     Deliver an auditable RuntimeInspector Fab technical RC whose upload ZIP,
     compiled smoke package, blank-host behavior, documentation, and media are
     consistent and descend from one committed source state.
-  current_stage_goal: >
-    Hold the verified exact-HEAD UE 5.7 RC stable, resolve the canonical public
-    documentation/support URL gate, then fast-forward remote main without force.
   stage_success_criteria:
+    - Responsive 6x4 matrix passes under PluginMaker Horizontal and exact-ZIP blank-host default DPI rules.
+    - Real OS O input and real mouse reach all four tabs after resize.
+    - mainline_full_closure remains 24 of 24 passing.
     - Source ZIP is generated from committed HEAD with clean shipping paths.
     - SourceSubmission and CompiledSmoke contracts pass.
     - UE 5.7 Development and Shipping BuildPlugin pass.
-    - RIFabBlank install/load smoke passes without plugin-consequential warnings.
-    - Real mouse input reaches Actor, Changes, Settings, and Tools in the exact ZIP-derived blank host.
-    - Blank-host Tools can run one self-test and one workflow.
-    - Normal and narrow/tall blank-host screenshots are preserved.
-    - mainline_full_closure remains 24 of 24 passing.
-    - Public documentation and support URLs return HTTP 200.
-    - Remote main is updated only by an ordinary fast-forward and never by force.
+    - RIFabBlank install/load and plugin-consequential warning scan pass.
+    - Exact blank-host Tools run one self-test and one workflow.
+    - Packaged loopback passes and its owned process tree is cleaned.
+    - Public repository, documentation, and support URLs return HTTP 200.
+    - Remote main is updated only by ordinary fast-forward and never by force.
 
 active_risks:
   - id: final_exact_artifact
-    status: closed
-    summary: The committed closing state passes the source contract, Development/Shipping BuildPlugin, compiled contract, and RIFabBlank install/load chain; the generated manifest is the final commit and ZIP SHA authority.
-  - id: blank_host_real_input
-    status: closed
-    summary: Exact ZIP-derived RIFabBlank passed real O, four real-mouse tabs, dock_layout, and mainline_safe_patch_core; implementation-identical normal and narrow/tall evidence is preserved.
+    status: generated_gate
+    summary: >
+      Passing status is read from the final source manifest and linked
+      SourceSubmission, CompiledSmoke, BuildPlugin, blank-host, and packaged reports.
+  - id: validation_process_lifecycle
+    status: mitigated_monitor
+    summary: >
+      A contaminated long session with two leftover packaged processes exhausted
+      Unreal's UObject limit. StopPackagedRuntimeValidation removed the owned tree;
+      a fresh Editor then passed the real-input responsive run. Final validation
+      must start clean and verify teardown.
   - id: public_release_urls
-    status: blocked_external_authority
-    summary: The canonical MoonFlowFlower/plugin repository and Issues URLs returned HTTP 404 unauthenticated on 2026-08-16; the publisher profile returns HTTP 200, but publisher authorization or an external visibility change is still required for the release destinations.
+    status: closed_recheck_before_push
+    summary: >
+      Anonymous checks reached MoonFlowFlower/plugin, its README, and Issues on
+      2026-08-28. Availability is mutable and remains a fail-closed pre-push check.
   - id: marketplace_url
     status: external_pending
     summary: MarketplaceURL can only be finalized after the Fab listing exists.
 
 validation_authority:
   build: PluginMakerEditor Win64 Development
-  primary_runtime_entry: toggle_input_via_O_path
+  primary_runtime_entry: real_O_key_then_real_mouse_tabs
+  automation_control_role: observation_and_recovery_only
   required_evidence:
+    - responsive_matrix_pass
     - successful_editor_build
     - affected_self_tests_pass
+    - runtime_ui_contract_v1_pass
     - mainline_full_closure_pass
     - exact_artifact_contracts_pass
-    - real_mouse_blank_host_pass
+    - exact_blank_host_real_input_pass
+    - packaged_loopback_and_cleanup_pass
   closure_rule: >
     Do not claim Fab-ready without exact committed artifact evidence, real input
-    evidence, and public release URLs.
+    evidence, current public URLs, and a verified ordinary fast-forward publish.
 
 release_evidence:
   source_zip: Saved/FabRelease/Submission/RuntimeInspector-Fab-Submission.zip
@@ -81,17 +121,17 @@ release_evidence:
   contracts_root: ../../Saved/FabRelease/Contracts/RuntimeInspector_UE57
   blank_validation_host: ../../Saved/FabRelease/BlankHostLoadSmoke/RIFabBlank_UE57/RIFabBlank/RIFabBlank.uproject
   blank_install_load_log: ../../Saved/FabRelease/fab_blank_host_install_load_smoke_UE57.log
-  blank_real_input: Saved/RuntimeInspector/Task5/FinalExactBlankHostRC/final-exact-blank-host-real-input.json
-  mainline_closure: Saved/RuntimeInspector/Task5/mainline-full-closure-final-a34.json
-  packaged_matrix: Saved/RuntimeInspector/Task5/PackagedGreenA34/packaged-loopback-matrix-final-a34-green.normalized.json
-  packaged_lifecycle: Saved/RuntimeInspector/Task5/packaged-run-stop-final-a34-green.json
+  mainline_closure: Saved/RuntimeInspector/ResponsiveDPI/PluginMakerClosure/Final38b58ef/final-closure-summary.json
+  responsive_matrix_root: Saved/RuntimeInspector/ResponsiveDPI
+  exact_blank_real_input: Saved/RuntimeInspector/FinalExactBlankHostResponsive
+  packaged_validation: Saved/RuntimeInspector/FinalPackagedLoopback
   media_manifest: FabMedia/fab_media_manifest.json
   demo_path: FabMedia/demo.mp4
 
 claim_boundary:
   not_proven:
     - Fab approval
-    - all hardware and DPI combinations
+    - every hardware OS and DPI curve
     - asset rights ownership
     - future Unreal Engine compatibility
     - MarketplaceURL before listing creation

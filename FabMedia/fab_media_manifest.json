@@ -1,106 +1,100 @@
 {
-  "schemaVersion": 2,
-  "generatedAtUtc": "2026-08-17T00:36:20Z",
-  "implementationCommit": "a34a1e4ac3e190db14329cba9e216d591b0eb21d",
+  "schema": "runtimeinspector.fab-media.v2",
+  "generatedUtc": "2026-08-28T23:12:14.213790Z",
+  "runtimeImplementationCommit": "6020b240bd635333102d77beb9829e62c1e7d8e6",
+  "validationHarnessCommit": "8a8872d44cc5d1cafe5dc35898b159bd2a5dbfa0",
+  "releaseCommitAuthority": "The exact source ZIP sidecar manifest records the immutable release commit after this media/doc commit is created.",
   "capture": {
-    "engine": "Unreal Engine 5.7",
-    "host": "PluginMaker Preview",
-    "mode": "live real-input capture",
-    "stagingRoot": "../../Saved/RuntimeInspector/FabMediaCaptureA34",
-    "userPath": "real O; mouse Actor/Changes/Settings/Tools; Dock Layout; Mainline Safe Patch Core; activity-log PASS identity",
-    "rawMaster": "../../Saved/RuntimeInspector/FabMediaCaptureA34/demo_live_a34_master_raw.mp4",
-    "rawMasterSha256": "e77218f120b57902c07029abb85f6e9e5e8aca51bfda0ebb0794e3745c790709"
+    "engineVersion": "5.7.1",
+    "host": "PluginMaker standalone PIE",
+    "realKeyboardAndMouseInput": true,
+    "screenshotSequenceVideo": false,
+    "rawVideoEvidence": {
+      "path": "ProjectSaved/RuntimeInspector/FabMediaResponsive6020b24/demo_live_6020b24_raw.mp4",
+      "sha256": "08B1F02165A1F06257350965020934C28FCDCC0D7B079E1E4F41CB939014EDE4",
+      "bytes": 1719480
+    },
+    "actionLog": "ProjectSaved/RuntimeInspector/FabMediaResponsive6020b24/demo_live_6020b24_actions.log",
+    "finalRuntimeSummary": "ProjectSaved/RuntimeInspector/FabMediaResponsive6020b24/final_runtime_summary.json"
   },
-  "targetWidth": 1920,
-  "targetHeight": 1080,
-  "maxBytes": 3145728,
+  "imageContract": {
+    "width": 1920,
+    "height": 1080,
+    "maxBytes": 3145728
+  },
   "images": [
     {
-      "source": "../../Saved/RuntimeInspector/FabMediaCaptureA34/cover.png",
       "filename": "cover.png",
       "width": 1920,
       "height": 1080,
-      "bytes": 954145,
+      "bytes": 1197676,
       "format": "PNG",
-      "jpegQuality": null,
-      "originalWidth": 1920,
-      "originalHeight": 1032,
-      "sha256": "940a5d9f64cac4ae67cc55b39c07883ac7c5f28aaed6e40c7c5892d7a662a27c",
+      "sha256": "22AA0B5ECF4420DB34023077E7945416FEA35F4C2D6BE1AB000C9B6D4F243563",
       "pass": true
     },
     {
-      "source": "../../Saved/RuntimeInspector/FabMediaCaptureA34/screenshot_01_actor_panel.png",
       "filename": "screenshot_01_actor_panel.png",
       "width": 1920,
       "height": 1080,
-      "bytes": 867470,
+      "bytes": 1143708,
       "format": "PNG",
-      "jpegQuality": null,
-      "originalWidth": 1920,
-      "originalHeight": 1032,
-      "sha256": "bcf480fe1367f4bb91e69eb22948363f2e836fe8ae75504e5c89a86d8dc05bb3",
+      "sha256": "A614BA4E85B01C8DEB7276CCD2A8D3307D0D44BDB50E7EB7571704A8C5260DCB",
       "pass": true
     },
     {
-      "source": "../../Saved/RuntimeInspector/FabMediaCaptureA34/screenshot_02_changes_workflow.png",
       "filename": "screenshot_02_changes_workflow.png",
       "width": 1920,
       "height": 1080,
-      "bytes": 913458,
+      "bytes": 1190782,
       "format": "PNG",
-      "jpegQuality": null,
-      "originalWidth": 1920,
-      "originalHeight": 1032,
-      "sha256": "b927d590580a6fcdd444e180b3193cc9ce484eb0e87ff8fd78dc8771ca34a936",
+      "sha256": "00942AED2739764533012B55F5574A7A3CF97F8A0A8D61E30BF229BFE4F42CB4",
       "pass": true
     },
     {
-      "source": "../../Saved/RuntimeInspector/FabMediaCaptureA34/screenshot_03_settings.png",
       "filename": "screenshot_03_settings.png",
       "width": 1920,
       "height": 1080,
-      "bytes": 870347,
+      "bytes": 1117279,
       "format": "PNG",
-      "jpegQuality": null,
-      "originalWidth": 1920,
-      "originalHeight": 1032,
-      "sha256": "1963cc9937802ce5ef853a62de8dab7e554d9c324d4e5abe0700c3204d024523",
+      "sha256": "EC38E2390CD53AB6FB8FE8ACD8BF84ACE91E98C8CA71F274184F14D7CCD1FD43",
       "pass": true
     },
     {
-      "source": "../../Saved/RuntimeInspector/FabMediaCaptureA34/screenshot_04_tools.png",
       "filename": "screenshot_04_tools.png",
       "width": 1920,
       "height": 1080,
-      "bytes": 869959,
+      "bytes": 1133500,
       "format": "PNG",
-      "jpegQuality": null,
-      "originalWidth": 1920,
-      "originalHeight": 1032,
-      "sha256": "f44f139939890742c1e3746ec2d26bfe6a83bd2d3788ab983c2938dfd74df1b8",
+      "sha256": "E4EDAFBD7AC8CF354CC6007013B24780F75FCFCFEED407CFF61C53C75AFCEFE7",
+      "pass": true
+    },
+    {
+      "filename": "screenshot_05_responsive_layouts.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 725619,
+      "format": "PNG",
+      "sha256": "83C4A19E88BE02815C91B57ECBF1BF263F58B90C23C3684F997D425B6E3EAF73",
       "pass": true
     }
   ],
   "video": {
     "filename": "demo.mp4",
-    "source": "../../Saved/RuntimeInspector/FabMediaCaptureA34/demo_live_a34_final_candidate.mp4",
+    "sha256": "37A05B9ECAB609360FD59B06ADC3AB45F2A94E31B721A030EA2B23A827D66827",
+    "bytes": 4199422,
     "codec": "h264",
-    "pixelFormat": "yuv420p",
     "width": 1920,
     "height": 1080,
-    "fps": "30/1",
-    "durationSeconds": 41.933008,
-    "bytes": 5066747,
-    "sha256": "8640d44e19deef5973f1de66badfc0d7cc74117406a34f9d5ee047200dae1cf7",
-    "liveCapture": true,
-    "presentationSpeed": 1.5,
-    "edits": [
-      "removed idle-only gaps",
-      "uniform 1.5x presentation rate",
-      "cropped Windows taskbar",
-      "letterboxed to 1920x1080"
-    ],
+    "pixelFormat": "yuv420p",
+    "frameRate": "30/1",
+    "durationSeconds": 44.033333,
+    "realKeyboardAndMouseInput": true,
+    "screenshotSequenceVideo": false,
     "pass": true
   },
+  "responsiveEvidence": [
+    "PluginSaved/RuntimeInspector/ResponsiveDPI/PluginMakerHorizontalFinal6020b24Retry/responsive-dpi-matrix.json",
+    "PluginSaved/RuntimeInspector/ResponsiveDPI/PluginMakerRealInputRetry38b58efClean/responsive-dpi-matrix.json"
+  ],
   "allPassed": true
 }

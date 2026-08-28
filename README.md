@@ -24,6 +24,13 @@ Runtime Inspector is an Unreal Engine 5.7 plugin for inspecting live actors and 
 6. Use the `Settings` page to rebind hotkeys, switch the theme preset, and adjust outline/apply behavior.
 7. Use the `Tools` page to run built-in self-tests, curated workflows, and diagnostics.
 
+## Responsive UI And DPI
+
+- At the default `UIScale=1.0`, Runtime Inspector normalizes the host viewport DPI locally so its fonts, controls, panel widths, and spacing keep the same screen-pixel baseline across supported resolutions and project DPI curves.
+- `UIScale` is the plugin's explicit user scale and supports `0.8-1.5`. Values other than `1.0` scale only Runtime Inspector; the plugin never changes the project's global DPI settings or the central gameplay viewport.
+- The dock uses anchored/container layout (`Overlay`, `HorizontalBox`, `VerticalBox`, `ScrollBox`, and `ScaleBox`) rather than Canvas fixed coordinates. The center remains fill/pass-through, narrow windows compact the left panel, and overflow stays reachable through scrolling or ellipsis instead of shrinking the default fonts.
+- The native runtime UI is intentionally not converted into a fully Designer-authored UMG asset. This keeps the existing runtime state and controller authority while still providing a maintainable responsive layout boundary.
+
 ## What The Plugin Does
 
 - Inspect the currently selected or picked runtime actor
@@ -46,6 +53,7 @@ Runtime Inspector is an Unreal Engine 5.7 plugin for inspecting live actors and 
 - Unreal Engine 5.7, Win64 for this release
 - Inspector UI is intended for Editor/PIE and development builds; it is disabled in Shipping builds by design (`RUNTIME_INSPECTOR_ENABLED=0`)
 - Packaged runtime sessions do not support direct source promote
+- The release matrix covers `1280x720`, `1600x900`, `1920x1080`, `2560x1440`, `3840x2160`, and `900x1200` at `UIScale=0.8/1.0/1.25/1.5`; it does not prove every OS, display, or third-party DPI curve.
 
 ## Notes
 

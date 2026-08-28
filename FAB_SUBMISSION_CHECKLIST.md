@@ -5,9 +5,10 @@ This checklist separates the repo-local technical RC from Fab backend and legal/
 ## Technical RC Baseline
 
 - Branch: `codex/runtimeinspector-fab-rc`
-- Implementation baseline: `a34a1e4ac3e190db14329cba9e216d591b0eb21d`
+- Responsive runtime implementation: `6020b240bd635333102d77beb9829e62c1e7d8e6`
+- Current validation harness baseline before the closing media/docs commit: `8a8872d44cc5d1cafe5dc35898b159bd2a5dbfa0`
 - Engine: Unreal Engine 5.7 / Win64
-- The final shipping commit is recorded by `Saved/FabRelease/Submission/RuntimeInspector-Fab-Submission.manifest.json`; do not infer it from an older hard-coded SHA in this file.
+- The final shipping commit and ZIP SHA-256 are recorded after the closing commit by `Saved/FabRelease/Submission/RuntimeInspector-Fab-Submission.manifest.json`. They cannot be embedded in the ZIP without changing the bytes they identify.
 - The upload artifact is the committed-HEAD source ZIP. The compiled package and blank host must be derived from that exact ZIP.
 
 ## Product And Packaging
@@ -19,6 +20,10 @@ This checklist separates the repo-local technical RC from Fab backend and legal/
 - [x] `ui_readability` is included in `runtime_ui_contract_v1`.
 - [x] Default typography uses title `12`, label/value `11`, muted `10`, and control height `28`.
 - [x] Declared UI scale range is `0.8-1.5`; Fab default validation uses `UIScale=1.0`.
+- [x] Plugin-local responsive scale is `UserUIScale / HostViewportDPI`; Runtime Inspector does not modify the host project's global DPI curve.
+- [x] Side panels use `SizeBox` + `ScaleBox`; the central Overlay remains Fill, unscaled, and hit-test invisible.
+- [x] Native dock adaptation uses layout containers, compact mode, scrolling, and ellipsis rather than Canvas fixed coordinates or reduced default fonts.
+- [x] `responsive_dpi_layout` validates the formula, ScaleBox boundaries, physical panel/token metrics, tab rectangles, and resize updates.
 - [x] `Scripts/TestFabArtifactContract.ps1` validates SourceSubmission and CompiledSmoke boundaries.
 - [x] `Scripts/MakeFabSubmissionZip.ps1` builds the source ZIP from committed `HEAD` and rejects dirty shipping paths.
 - [x] `Scripts/PackageFabRelease.ps1` compiles from the exact source ZIP.
@@ -29,15 +34,17 @@ This checklist separates the repo-local technical RC from Fab backend and legal/
 
 - [x] Directed dock tests: `panel_interaction`, `right_inspector_tabs`, `dock_layout`.
 - [x] UI contract: `ui_readability` and `runtime_ui_contract_v1`.
+- [x] Responsive matrix covers six viewport sizes and four user scales; default-scale physical tokens stay within `±1 px` or `±5%` rounding tolerance.
+- [x] Real OS `O` input and real mouse tab clicks are required; automation/control opening is recovery only and cannot count as PASS.
 - [x] Main project closure: `mainline_full_closure=PASS`, 24/24 checks.
 - [x] Tools action binding contract: every configured/rendered action is bound (`203/203` in the final closure run).
 - [x] Packaged loopback validation used a separately owned packaged-runtime listener on port `12098`.
 - [x] Packaged-runtime stop scripts kill and verify the complete wrapper/child process tree.
 - [x] Listing media regenerated from the current UE 5.7 UI.
-- [x] Demo video is a live 41.933-second H.264 real-input capture, not a screenshot sequence.
-- [x] The exact-artifact chain passes from the committed closing state recorded by the generated source manifest: SourceSubmission, CompiledSmoke, Development/Shipping BuildPlugin, and blank-host install/load all descend from the same ZIP bytes.
-- [x] Exact ZIP-derived `RIFabBlank` has preserved real-`O` and real-mouse Actor/Changes/Settings/Tools evidence in normal and narrow/tall windows, plus one self-test and one workflow result.
-- [ ] Public DocsURL and SupportURL return HTTP 200.
+- [x] Demo video is a live 44.033333-second H.264 real-input capture, not a screenshot sequence.
+- [generated gate] The exact-artifact chain is passing only when the final source manifest, SourceSubmission/CompiledSmoke reports, Development/Shipping BuildPlugin logs, and blank-host smoke all name the same committed source ZIP.
+- [generated gate] Exact ZIP-derived `RIFabBlank` must preserve real-`O`, four real-mouse tabs, normal/narrow layout, one Tools self-test, and one workflow evidence for the final manifest commit.
+- [x] Repository, DocsURL, and Issues SupportURL were anonymously reachable on 2026-08-28; they must be checked again immediately before push.
 
 Authoritative generated evidence paths:
 
@@ -48,20 +55,20 @@ Authoritative generated evidence paths:
 - Contracts: `../../Saved/FabRelease/Contracts/RuntimeInspector_UE57/`
 - Blank host: `../../Saved/FabRelease/BlankHostLoadSmoke/RIFabBlank_UE57/RIFabBlank/RIFabBlank.uproject`
 - Blank-host log: `../../Saved/FabRelease/fab_blank_host_install_load_smoke_UE57.log`
-- Exact blank-host real input: `Saved/RuntimeInspector/Task5/FinalExactBlankHostRC/final-exact-blank-host-real-input.json`
-- Main-project closure: `Saved/RuntimeInspector/Task5/mainline-full-closure-final-a34.json`
-- Packaged matrix: `Saved/RuntimeInspector/Task5/PackagedGreenA34/packaged-loopback-matrix-final-a34-green.normalized.json`
-- Packaged lifecycle: `Saved/RuntimeInspector/Task5/packaged-run-stop-final-a34-green.json`
+- Exact blank-host responsive/real input: `Saved/RuntimeInspector/FinalExactBlankHostResponsive/`
+- Main-project responsive closure: `Saved/RuntimeInspector/ResponsiveDPI/PluginMakerClosure/Final38b58ef/final-closure-summary.json`
+- Main-project matrix: `Saved/RuntimeInspector/ResponsiveDPI/PluginMakerHorizontalFinal38b58ef/responsive-dpi-matrix.json` plus the clean real-input retry report
+- Packaged matrix/lifecycle: generated under `Saved/RuntimeInspector/` by the final packaged-loopback run
 
 ## Listing And Media
 
 - [x] Listing copy is prepared in `FAB_LISTING.md`.
 - [x] README and Chinese user guide consistently state UE 5.7.
-- [x] Five final stills are `1920x1080`, PNG, and below 3 MiB.
-- [x] `FabMedia/demo.mp4` is H.264, `1920x1080`, `30 fps`, `41.933008s`, and `5066747` bytes.
+- [x] Six final stills are `1920x1080`, PNG, and below 3 MiB, including a responsive-layout comparison.
+- [x] `FabMedia/demo.mp4` is H.264/yuv420p, `1920x1080`, `30 fps`, `44.033333s`, and `4199422` bytes.
 - [x] Image/video hashes and capture provenance are recorded in `FabMedia/fab_media_manifest.json`.
 - [x] Publisher metadata uses the canonical repository owner, `MoonFlowFlower`; the publisher profile returns HTTP 200.
-- [ ] `RuntimeInspector.uplugin` DocsURL and SupportURL are publicly reachable. The canonical repository and Issues URLs returned HTTP 404 in an unauthenticated check on 2026-08-16; do not silently substitute an unrelated page.
+- [x] `RuntimeInspector.uplugin` DocsURL and SupportURL point to the public canonical repository and Issues page; anonymous checks returned HTTP 200 on 2026-08-28.
 - [ ] Replace `MarketplaceURL` only after the Fab listing exists.
 
 ## Final Release Gate
